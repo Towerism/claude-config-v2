@@ -9,7 +9,7 @@ The workflow here is OMC's: `/oh-my-claudecode:deep-interview` or `:ralplan` for
 
 ## Rules
 
-- Skills are markdown only (DP2). A script belongs in `tools/` or `config/hooks/`, never in a skill. `tests/test_repo.py` enforces it.
+- Skills have no third-party dependencies and nothing to install (DP2, ADR-0003): markdown, plus stdlib-only Python under `scripts/`, run as `python3 -I <skill dir>/scripts/<name>.py`. A skill never reads from a sibling skill. `tests/test_repo.py` enforces it; the scripts' tests are in `tests/skills/`.
 - Hooks stay standard library, exit 0 on any input, and print only checked values.
 - The repo is public: no machine paths, accounts, tokens or client names. `~/.config/claude-config/deny-terms` stays outside the repo; never read it into output.
 - Both host profiles stay identical apart from `name` and `defaultTracker`.

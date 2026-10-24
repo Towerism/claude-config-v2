@@ -84,7 +84,9 @@ def test_host_default_states_the_deployed_tracker(machine):
     home, env, _ = machine
     out = start(home, env)
     assert out["hookEventName"] == "SessionStart"
-    assert "Default issue tracker: jira" in out["additionalContext"] and "work" in out["additionalContext"]
+    text = out["additionalContext"]
+    assert "Default issue tracker: jira. Use the jira-ticket-lifecycle skill" in text
+    assert "Host profile: work." in text
     assert start(home, env, "SubagentStart")["hookEventName"] == "SubagentStart"
 
 
@@ -92,10 +94,20 @@ def test_local_file_wins_over_the_deploy(machine):
     home, env, tmp = machine
     (tmp / "xdg" / "claude-config").mkdir(parents=True)
     (tmp / "xdg" / "claude-config" / "local.json").write_text(json.dumps({"defaultTracker": "gitea"}))
-    assert "tracker: gitea" in start(home, env)["additionalContext"]
+    text = start(home, env)["additionalContext"]
+    assert "tracker: gitea. Use the gitea-issue-lifecycle skill" in text
 
 
-@pytest.mark.parametrize("bad", ["gitlab", "Jira; rm -rf", "", 7, None, "a" * 100])
+def test_github_maps_to_its_skill(machine):
+    home, env, _ = machine
+    (home / "claude-config" / "state.json").write_text(json.dumps({"defaultTracker": "github"}))
+    text = start(home, env)["additionalContext"]
+    assert text.startswith("Default issue tracker: github. Use the github-issue-lifecycle skill")
+
+
+@pytest.mark.parametrize(
+    "bad", ["gitlab", "github-issue-lifecycle", "Jira; rm -rf", "", 7, None, "a" * 100]
+)
 def test_unchecked_names_are_never_printed(machine, bad):
     home, env, _ = machine
     (home / "claude-config" / "state.json").write_text(json.dumps({"defaultTracker": bad}))

@@ -90,7 +90,7 @@ def test_switching_host_removes_what_the_new_host_lacks(home, tmp_path, monkeypa
     real = cfg.load_host
     monkeypatch.setattr(cfg, "load_host", lambda name: small if name == "small" else real(name))
     assert run(home, "deploy", "--host", "small", "--yes") == 0
-    assert not (home / "skills" / "issue-lifecycle").exists()
+    assert not (home / "skills" / "github-issue-lifecycle").exists()
     assert not (home / "hooks" / "merge_confirm.py").exists()
     settings = json.loads((home / "settings.json").read_text())
     assert "PreToolUse" not in settings["hooks"]
@@ -98,7 +98,7 @@ def test_switching_host_removes_what_the_new_host_lacks(home, tmp_path, monkeypa
 
 def test_locally_edited_file_is_a_conflict(home, capsys):
     run(home, "deploy", "--host", "personal", "--yes")
-    skill = home / "skills" / "writing-docs" / "SKILL.md"
+    skill = home / "skills" / "fresh-session-handoff" / "SKILL.md"
     skill.write_text("my edit")
     assert run(home, "plan") == 1
     assert "CONFLICT" in capsys.readouterr().out
@@ -114,10 +114,10 @@ def test_status_reports_modified_missing_and_sync(home, capsys):
     run(home, "status")
     assert "in sync" in capsys.readouterr().out
     (home / "hooks" / "merge_confirm.py").write_text("x")
-    (home / "skills" / "writing-docs" / "SKILL.md").unlink()
+    (home / "skills" / "fresh-session-handoff" / "SKILL.md").unlink()
     run(home, "status")
     out = capsys.readouterr().out
-    assert "modified  hooks/merge_confirm.py" in out and "missing   skills/writing-docs/SKILL.md" in out
+    assert "modified  hooks/merge_confirm.py" in out and "missing   skills/fresh-session-handoff/SKILL.md" in out
 
 
 def test_status_without_a_deploy(home, capsys):
@@ -139,10 +139,10 @@ def test_rollback_restores_the_previous_state(home):
 def test_rollback_undoes_only_the_last_deploy(home):
     run(home, "deploy", "--host", "personal", "--yes")
     first = (home / "settings.json").read_bytes()
-    (home / "skills" / "writing-docs" / "SKILL.md").write_text("edit")
+    (home / "skills" / "fresh-session-handoff" / "SKILL.md").write_text("edit")
     run(home, "deploy", "--yes", "--force")
     run(home, "rollback")
-    assert (home / "skills" / "writing-docs" / "SKILL.md").read_text() == "edit"
+    assert (home / "skills" / "fresh-session-handoff" / "SKILL.md").read_text() == "edit"
     assert (home / "settings.json").read_bytes() == first
 
 
@@ -375,3 +375,9 @@ def test_rollback_with_settings_broken_after_deploy_changes_nothing(home, capsys
     md_before = (home / "CLAUDE.md").read_text()
     assert run(home, "rollback") == 2
     assert (home / "CLAUDE.md").read_text() == md_before
+
+
+@pytest.mark.parametrize("name", ["..", "../hosts/personal", "a/../personal", "/tmp/h"])
+def test_host_names_are_plain(home, name, capsys):
+    assert run(home, "plan", "--host", name) == 2
+    assert "invalid host name" in capsys.readouterr().err
