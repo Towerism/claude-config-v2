@@ -41,6 +41,6 @@ These guesses stand in for answers nobody was available to give. Veto any of the
 2. **Git hooks not ported.** V1's commit and push checks (private-word list, secrets, noreply identity) aren't in V2. If you want them, they belong in `tools/` with `gitleaks` as the dependency.
 3. **Jira commands unverified.** V1 drove Jira through a script; V2 documents the `jira` CLI directly and has not run it against a live Jira.
 4. **Copy, not symlink.** V1 recorded evidence on symlinked deploys; V2 copies files, which costs a re-deploy after each edit but avoids that question.
-7. **OMC is not version-pinned.** Both machines track the marketplace's default branch; V1's `plugins.lock.json` is dropped. Add a git `ref` to the marketplace source in the host profiles to pin.
 5. **Merge guard is best-effort.** `merge_confirm.py` catches `gh pr merge`, `gh api` and `tea api` merges; aliases, quoting tricks and `curl` get past it. Use branch protection for a hard stop.
 6. **Plugins are only added.** A deploy enables a host's plugins; it never disables one removed from a profile.
+7. **OMC is not version-pinned.** Both machines track the marketplace's default branch; V1's `plugins.lock.json` is dropped. Add a git `ref` to the marketplace source in the host profiles to pin.
