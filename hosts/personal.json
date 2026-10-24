@@ -1,0 +1,12 @@
+{
+  "name": "personal",
+  "defaultTracker": "github",
+  "hooks": ["merge_confirm.py", "host_default.py"],
+  "skills": ["issue-lifecycle", "fresh-session-handoff", "writing-docs", "linux-troubleshooting"],
+  "marketplaces": {
+    "omc": {
+      "source": { "source": "git", "url": "https://github.com/Yeachan-Heo/oh-my-claudecode.git" }
+    }
+  },
+  "plugins": ["oh-my-claudecode@omc"]
+}
