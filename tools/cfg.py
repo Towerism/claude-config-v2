@@ -109,6 +109,8 @@ def claude_home(arg: str | None) -> Path:
 
 
 def load_host(name: str) -> dict:
+    if not NAME.fullmatch(name):
+        raise CfgError(f"invalid host name {name!r}")
     path = ROOT / "hosts" / f"{name}.json"
     if not path.is_file():
         known = ", ".join(sorted(p.stem for p in (ROOT / "hosts").glob("*.json")))
