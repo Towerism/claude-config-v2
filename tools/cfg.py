@@ -21,9 +21,11 @@ import copy
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -31,6 +33,8 @@ ROOT = Path(__file__).resolve().parent.parent
 START = "<!-- CLAUDE-CONFIG:START -->"
 END = "<!-- CLAUDE-CONFIG:END -->"
 KEEP_BACKUPS = 5
+NAME = re.compile(r"[a-z0-9][a-z0-9_.-]{0,63}")
+MANAGED = ("settings.json", "CLAUDE.md", "claude-config/state.json")
 
 
 class CfgError(Exception):
@@ -53,15 +57,44 @@ def read_json(path: Path) -> dict:
     return data
 
 
-def write_atomic(path: Path, data: bytes) -> None:
-    """Replace `path` (or the file a symlink points at) in one step, keeping its mode."""
-    path = path.resolve() if path.is_symlink() else path
+def write_atomic(path: Path, data: bytes, follow: bool = False) -> None:
+    """Replace `path` in one step through an unpredictable temp file, keeping its mode.
+
+    A symlink at `path` is replaced by the new file, unless `follow` is set (settings.json and
+    CLAUDE.md, which a dotfiles manager may link): then the file it points at is replaced.
+    """
+    if follow and path.is_symlink():
+        path = path.resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".cfg-tmp")
-    tmp.write_bytes(data)
-    if path.exists():
-        tmp.chmod(path.stat().st_mode & 0o7777)
-    os.replace(tmp, path)
+    fd, name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".cfg-tmp")
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if path.exists() and not path.is_symlink():
+            os.chmod(name, path.stat().st_mode & 0o7777)
+        os.replace(name, path)
+    except BaseException:
+        Path(name).unlink(missing_ok=True)
+        raise
+
+
+def safe_rel(home: Path, rel: object) -> str:
+    """`rel` if it names a file cfg may touch inside `home`; CfgError otherwise.
+
+    state.json and the backups' created.json sit in a directory other tools can write, so their
+    paths are checked before cfg deletes or overwrites anything.
+    """
+    if not isinstance(rel, str) or not rel:
+        raise CfgError(f"refusing path {rel!r}")
+    path = Path(rel)
+    inside = rel in MANAGED or (path.parts[0] in ("skills", "hooks") and len(path.parts) > 1)
+    if path.is_absolute() or ".." in path.parts or not inside:
+        raise CfgError(f"refusing path outside cfg's files: {rel!r}")
+    if not (home / path).resolve().is_relative_to(home.resolve()):
+        raise CfgError(f"refusing path that escapes the Claude home through a link: {rel!r}")
+    return rel
 
 
 def dump(obj: dict) -> bytes:
@@ -83,6 +116,9 @@ def load_host(name: str) -> dict:
     host = read_json(path)
     if host.get("name") != name:
         raise CfgError(f"{path}: 'name' must be '{name}'")
+    for item in [*host.get("skills", []), *host.get("hooks", [])]:
+        if not isinstance(item, str) or not NAME.fullmatch(item) or item in (".", ".."):
+            raise CfgError(f"{path}: invalid skill or hook name {item!r}")
     for skill in host.get("skills", []):
         if not (ROOT / "config" / "skills" / skill / "SKILL.md").is_file():
             raise CfgError(f"{path}: skill '{skill}' has no config/skills/{skill}/SKILL.md")
@@ -188,8 +224,12 @@ class Plan:
         self.home, self.host = home, host
         self.state_dir = home / "claude-config"
         self.state = read_json(self.state_dir / "state.json")
-        self.recorded: dict[str, str] = self.state.get("files", {})
+        self.recorded: dict[str, str] = {
+            safe_rel(home, rel): digest for rel, digest in self.state.get("files", {}).items()
+        }
         self.want = desired_files(host)
+        for rel in self.want:
+            safe_rel(home, rel)
         self.add, self.update, self.remove, self.conflicts = [], [], [], []
         for rel, data in self.want.items():
             live = home / rel
@@ -208,7 +248,7 @@ class Plan:
             read_json(home / "settings.json"), host, home, self.state.get("hookCommands", [])
         )
         self.settings = dump(settings)
-        old_md = (home / "CLAUDE.md").read_text(encoding="utf-8") if (home / "CLAUDE.md").exists() else ""
+        old_md = read_text(home / "CLAUDE.md") if (home / "CLAUDE.md").exists() else ""
         self.claude_md = merge_claude_md(old_md).encode()
         self.settings_changed = self.settings != _read(home / "settings.json")
         self.claude_md_changed = self.claude_md != _read(home / "CLAUDE.md")
@@ -231,6 +271,13 @@ class Plan:
         if identity != (self.state.get("host"), self.state.get("defaultTracker")):
             return True  # same files, different machine role: state.json must still be rewritten
         return bool(self.add or self.update or self.remove or self.settings_changed or self.claude_md_changed)
+
+
+def read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as err:
+        raise CfgError(f"{path} is not UTF-8 text") from err
 
 
 def _read(path: Path) -> bytes:
@@ -269,8 +316,8 @@ def deploy(plan: Plan) -> None:
         write_atomic(home / rel, plan.want[rel])
         if rel.startswith("hooks/"):
             (home / rel).chmod(0o755)
-    write_atomic(home / "settings.json", plan.settings)
-    write_atomic(home / "CLAUDE.md", plan.claude_md)
+    write_atomic(home / "settings.json", plan.settings, follow=True)
+    write_atomic(home / "CLAUDE.md", plan.claude_md, follow=True)
     state = {
         "host": plan.host["name"],
         "defaultTracker": plan.host.get("defaultTracker"),
@@ -307,7 +354,10 @@ def rollback(home: Path) -> list[str]:
     if not (latest / "created.json").is_file():
         raise CfgError(f"backup {latest.name} is incomplete; delete it to roll back to the one before")
     state = read_json(home / "claude-config" / "state.json")
-    created = set(json.loads((latest / "created.json").read_text()))
+    try:
+        created = {safe_rel(home, rel) for rel in json.loads((latest / "created.json").read_text())}
+    except (ValueError, TypeError) as err:
+        raise CfgError(f"backup {latest.name} is damaged: {err}") from err
     notes: list[str] = []
     shared = {
         "settings.json": (state.get("settingsSha"), lambda text: unmerge_settings(text, state)),
@@ -316,7 +366,7 @@ def rollback(home: Path) -> list[str]:
     for rel, (digest, strip) in shared.items():
         live = home / rel
         if live.exists() and digest and sha(live.read_bytes()) != digest:
-            write_atomic(live, strip(live.read_text(encoding="utf-8")).encode())
+            write_atomic(live, strip(read_text(live)).encode(), follow=True)
             created.discard(rel)
             (latest / "files" / rel).unlink(missing_ok=True)
             notes.append(f"{rel} changed after the deploy: removed only claude-config's part")
@@ -334,7 +384,12 @@ def rollback(home: Path) -> list[str]:
 
 def unmerge_settings(text: str, state: dict) -> str:
     """The settings text without the hook entries the last deploy added."""
-    data = json.loads(text) if text.strip() else {}
+    try:
+        data = json.loads(text) if text.strip() else {}
+    except ValueError as err:
+        raise CfgError(f"settings.json is not valid JSON: {err}") from err
+    if not isinstance(data, dict) or not isinstance(data.get("hooks", {}), dict):
+        raise CfgError("settings.json must hold an object with an object under 'hooks'")
     ours = set(state.get("hookCommands", []))
     hooks = data.get("hooks", {})
     for event in list(hooks):

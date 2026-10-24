@@ -223,10 +223,10 @@ def test_damaged_markers_stop_the_deploy_and_lose_nothing(home, text, capsys):
 def test_retrying_after_a_failed_deploy_does_not_duplicate_hooks(home, monkeypatch):
     real = cfg.write_atomic
 
-    def flaky(path, data):
+    def flaky(path, data, follow=False):
         if path.name == "CLAUDE.md":
             raise PermissionError("denied")
-        real(path, data)
+        real(path, data, follow)
 
     monkeypatch.setattr(cfg, "write_atomic", flaky)
     assert run(home, "deploy", "--host", "personal", "--yes") == 3
@@ -297,3 +297,81 @@ def test_malformed_hooks_in_settings_are_reported(home, capsys):
     (home / "settings.json").write_text('{"hooks": []}')
     assert run(home, "deploy", "--host", "personal", "--yes") == 2
     assert "hooks" in capsys.readouterr().err
+
+
+# --- security regressions ------------------------------------------------------------------
+
+
+def test_state_paths_cannot_delete_outside_the_home(home, tmp_path):
+    run(home, "deploy", "--host", "personal", "--yes")
+    victim = tmp_path / "precious.txt"
+    victim.write_text("keep")
+    state_file = home / "claude-config" / "state.json"
+    state = json.loads(state_file.read_text())
+    state["files"]["skills/../../precious.txt"] = cfg.sha(b"keep")
+    state_file.write_text(json.dumps(state))
+    assert run(home, "deploy", "--yes") == 2
+    assert victim.read_text() == "keep"
+
+
+@pytest.mark.parametrize("rel", ["/etc/hostname", "../x", "settings.json/../../x", "notes/x.md", ""])
+def test_safe_rel_refuses(home, rel):
+    with pytest.raises(cfg.CfgError):
+        cfg.safe_rel(home, rel)
+
+
+def test_rollback_will_not_delete_outside_the_home(home, tmp_path):
+    run(home, "deploy", "--host", "personal", "--yes")
+    victim = tmp_path / "p2.txt"
+    victim.write_text("keep")
+    created = home / "claude-config" / "backups" / backups(home)[-1] / "created.json"
+    created.write_text(json.dumps(["../p2.txt"]))
+    assert run(home, "rollback") == 2
+    assert victim.read_text() == "keep"
+
+
+def test_a_linked_skills_directory_is_refused(home, tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    home.mkdir()
+    (home / "skills").symlink_to(outside)
+    run(home, "deploy", "--host", "personal", "--yes")
+    assert list(outside.iterdir()) == []
+
+
+@pytest.mark.parametrize("field,value", [("skills", ["../../tools"]), ("hooks", ["../../tools/cfg.py"]), ("skills", ["/etc"])])
+def test_host_names_cannot_climb(tmp_path, monkeypatch, field, value):
+    root = tmp_path / "repo"
+    (root / "hosts").mkdir(parents=True)
+    host = json.loads((ROOT / "hosts" / "personal.json").read_text())
+    host.update(name="evil", **{field: value})
+    (root / "hosts" / "evil.json").write_text(json.dumps(host))
+    monkeypatch.setattr(cfg, "ROOT", root)
+    with pytest.raises(cfg.CfgError, match="invalid skill or hook name"):
+        cfg.load_host("evil")
+
+
+def test_a_planted_temp_file_symlink_is_not_followed(home, tmp_path):
+    home.mkdir()
+    victim = tmp_path / "victim"
+    victim.write_text("keep")
+    victim.chmod(0o600)
+    (home / "settings.json.cfg-tmp").symlink_to(victim)
+    run(home, "deploy", "--host", "personal", "--yes")
+    assert victim.read_text() == "keep" and victim.stat().st_mode & 0o777 == 0o600
+
+
+def test_settings_mode_is_kept(home):
+    home.mkdir()
+    (home / "settings.json").write_text("{}")
+    (home / "settings.json").chmod(0o600)
+    run(home, "deploy", "--host", "personal", "--yes")
+    assert (home / "settings.json").stat().st_mode & 0o777 == 0o600
+
+
+def test_rollback_with_settings_broken_after_deploy_changes_nothing(home, capsys):
+    run(home, "deploy", "--host", "personal", "--yes")
+    (home / "settings.json").write_text("{broken")
+    md_before = (home / "CLAUDE.md").read_text()
+    assert run(home, "rollback") == 2
+    assert (home / "CLAUDE.md").read_text() == md_before

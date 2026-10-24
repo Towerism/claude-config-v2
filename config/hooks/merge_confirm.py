@@ -2,7 +2,9 @@
 
 Prints a permissionDecision of "ask" for `gh … pr … merge`, `gh api …/merge`, `tea api …/merge`
 and a GraphQL `mergePullRequest` sent with `gh api`; prints nothing otherwise.
-Always exits 0 and never denies.
+Always exits 0 and never denies. It is a reminder that catches the usual spellings,
+not a security boundary: quoting tricks, aliases and `curl` get past it. The control that
+holds is branch protection on the remote.
 
 The check runs on every Bash command, so it reads the command once, left to
 right, in time proportional to its length. A regular expression with nested

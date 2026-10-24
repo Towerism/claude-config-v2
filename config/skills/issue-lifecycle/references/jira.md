@@ -22,14 +22,14 @@ Project settings live on the machine, in the `jira` object of `~/.config/claude-
 
 ## Commands
 
-`<KEY>` is a key like `PAY-142`, or a bare number joined to `project`. Put text in files and pass `--template <file>` or `--body-file` style options the CLI supports; check `jira issue <cmd> --help` for the exact flag on the installed version.
+`<KEY>` is a key like `PAY-142`, or a bare number joined to `project`. Put every piece of text in a file (JQL words: letters, digits, spaces and hyphens only) and pass `--template <file>` or `--body-file` style options the CLI supports; check `jira issue <cmd> --help` for the exact flag on the installed version.
 
 | Step | Command |
 |---|---|
 | Auth check | `jira me` (failure: the token is missing; tell the user to export `JIRA_API_TOKEN` for non-interactive shells, for example in `~/.zshenv`, and stop) |
 | Read | `jira issue view <KEY> --raw` |
-| Search | `jira issue list -q "project = <project> AND text ~ \"<words>\"" --plain` |
-| Create or file | `jira issue create -p <project> -t <type> -s "<summary>" --template <file> --no-input` |
+| Search | `jira issue list -q "project = <project> AND text ~ \"$(cat "$tmp/words.txt")\"" --plain` |
+| Create or file | `jira issue create -p <project> -t <type> -s "$(cat "$tmp/summary.txt")" --template <file> --no-input` |
 | Claim | `jira issue assign <KEY> $(jira me)`, then `jira issue move <KEY> "<states.inProgress>"` |
 | Add to sprint | `jira sprint add <sprint-id> <KEY>` when the user asks for it |
 | Draft / approved markers | labels `spec-draft` and `spec-approved`; `jira issue edit <KEY> --label <name> --no-input` adds one, and `--label -<name>` removes it |

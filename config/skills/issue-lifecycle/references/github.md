@@ -13,7 +13,7 @@ base=${CLAUDE_JOB_DIR:+$CLAUDE_JOB_DIR/tmp}; tmp=$(mktemp -d "${base:-${TMPDIR:-
 | Auth check | `gh auth status` (failure: ask for `! gh auth login`) |
 | Read | `gh issue view <N> --json number,title,body,state,labels,assignees,url` |
 | Search | `gh issue list --state open --search "<words>" --limit 10 --json number,title,state,labels`, then `--state all` |
-| Create or file | `gh issue create --title "<title>" --body-file "$tmp/issue.md"` |
+| Create or file | `gh issue create --title "$(cat "$tmp/title.txt")" --body-file "$tmp/issue.md"` (the title is a file too; its text is never typed into the command) |
 | Claim | `gh issue edit <N> --add-assignee @me --add-label "in progress"` |
 | Create labels | `gh label create "<name>" --color <hex> 2>/dev/null \|\| true` (fails harmlessly when it exists) |
 | Replace body | `gh issue edit <N> --body-file "$tmp/new-body.md"` |
@@ -21,7 +21,7 @@ base=${CLAUDE_JOB_DIR:+$CLAUDE_JOB_DIR/tmp}; tmp=$(mktemp -d "${base:-${TMPDIR:-
 | Approve | `gh issue comment <N> --body-file "$tmp/approval.md"`, then `gh issue edit <N> --add-label approved --remove-label draft` |
 | Who added a label | `gh api "repos/{owner}/{repo}/issues/<N>/events" --paginate --jq '[.[] \| select(.event=="labeled") \| {label: .label.name, actor: .actor.login}]'`; take the most recent event for the label and compare its actor with `gh api user -q .login` |
 | Default branch | `gh repo view --json defaultBranchRef -q .defaultBranchRef.name` |
-| Open PR | `gh pr create --base <default> --title "<type(scope): subject (#N)>" --body-file "$tmp/pr.md"` (add `--label hotfix` for hotfixes) |
+| Open PR | `gh pr create --base <default> --title "$(cat "$tmp/pr-title.txt")" --body-file "$tmp/pr.md"` (add `--label hotfix` for hotfixes) |
 | Check the link | `gh pr view --json closingIssuesReferences --jq '[.closingIssuesReferences[].number]'` must hold `<N>`; if not, `gh pr edit <pr> --body-file "$tmp/pr.md"` re-parses the keywords |
 | Allowed merge methods | `gh repo view --json mergeCommitAllowed,rebaseMergeAllowed,squashMergeAllowed` |
 | Merge | `gh pr merge <pr> --merge` (`--rebase` if merge commits are disabled; never `--squash`). No `--delete-branch`: the branch is still checked out in its worktree |

@@ -59,7 +59,7 @@ f="$dir/$(date -u +%Y%m%dT%H%M%SZ)-<directory>-<short-slug>.md"
 (umask 077; set -C; : > "$f")        # set -C refuses to overwrite an existing note
 ```
 
-If the check prints "inside a work tree", don't write there; use the chat fallback below. If creating `$f` fails because it exists, add `-2`, `-3` and so on to the slug. Fill the empty file with `cat >> "$f" <<'EOF'`, not with the Write tool, which refuses to overwrite a file it hasn't read and would skip the guard.
+If the check prints "inside a work tree", don't write there; use the chat fallback below. If creating `$f` fails because it exists, add `-2`, `-3` and so on to the slug. Fill the empty file with the Read tool, then the Write tool (Read the empty file first so Write accepts it). Never put note text inside a shell command: quoted text from an issue or log could end a heredoc early and run what follows.
 
 If the directory can't be created or written, or it lies inside a git work tree, print the note in the chat instead and say what happened. A sandbox may prompt for the write; that is expected. Print the full path of the note.
 
