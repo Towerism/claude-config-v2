@@ -1,0 +1,4 @@
+feat(export): add CSV export to the roster page (PAY-142)
+
+The roster page gets an Export button that downloads the visible rows as
+CSV with a header row, so coordinators no longer copy them by hand.

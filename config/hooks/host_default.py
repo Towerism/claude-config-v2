@@ -13,8 +13,8 @@ The default comes from, in order:
    from the host profile.
 
 The Claude home is two levels above this file (<home>/hooks/host_default.py).
-Reads only those two files, prints only a checked name, always exits 0 and
-writes nothing to stderr.
+Reads only those two files, prints only checked names (the host, the tracker and its
+skill), always exits 0 and writes nothing to stderr.
 """
 
 import json
@@ -24,7 +24,12 @@ import sys
 from pathlib import Path
 
 NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
-TRACKERS = {"github", "gitea", "jira"}  # the references issue-lifecycle ships
+# Each tracker has its own lifecycle skill.
+TRACKERS = {
+    "github": "github-issue-lifecycle",
+    "gitea": "gitea-issue-lifecycle",
+    "jira": "jira-ticket-lifecycle",
+}
 CAP = 64 * 1024
 
 
@@ -59,8 +64,8 @@ def message(home: Path, config_home: Path) -> str | None:
     host = checked(state.get("host"))
     where = f"Host profile: {host}. " if host else ""
     return (
-        f"{where}Default issue tracker: {tracker}. Use the issue-lifecycle skill with that "
-        "tracker's reference unless the repo's CLAUDE.md names another; the repo's choice wins."
+        f"{where}Default issue tracker: {tracker}. Use the {TRACKERS[tracker]} skill "
+        "unless the repo's CLAUDE.md names another tracker; the repo's choice wins."
     )
 
 

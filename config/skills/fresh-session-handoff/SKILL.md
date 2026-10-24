@@ -1,6 +1,6 @@
 ---
 name: fresh-session-handoff
-description: Writes a handoff note so the remaining work of a long session continues in a fresh one, with the context cleared and the critical progress kept. Use when the user asks to hand work off to a new session, says the context is getting long or bloated, wants to start fresh but keep their progress, asks for a handoff note, or says "save where we are so I can clear". It records the goal, state, the user's decisions and approvals, repo state, open questions, dead ends and running work, then prints a prompt that starts the new session. Not for summarising the session to the user, for /compact, for a pull request description, or for closing out an issue with issue-lifecycle.
+description: Writes a handoff note so the remaining work of a long session continues in a fresh one, with the context cleared and the critical progress kept. Use when the user asks to hand work off to a new session, says the context is getting long or bloated, wants to start fresh but keep their progress, asks for a handoff note, or says "save where we are so I can clear". It records the goal, state, the user's decisions and approvals, repo state, open questions, dead ends and running work, then prints a prompt that starts the new session. Not for summarising the session to the user, for /compact, for a pull request description, or for closing out an issue with the lifecycle skill (github-issue-lifecycle, gitea-issue-lifecycle or jira-ticket-lifecycle).
 ---
 
 # Fresh-session handoff
@@ -17,7 +17,7 @@ A session that has run long carries context that no longer helps. The goal is a 
 
 - The user wants a summary for themselves: answer in chat.
 - The user wants `/compact`: that shrinks this session in place; say so and stop.
-- The user is closing out an issue or opening a PR: issue-lifecycle does that.
+- The user is closing out an issue or opening a PR: the lifecycle skill for the tracker does that.
 - Nothing is left to do: say so and suggest ending the session. No note is needed.
 
 ## 1. Stop and look
