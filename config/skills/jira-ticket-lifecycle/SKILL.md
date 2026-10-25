@@ -38,7 +38,7 @@ Step statuses are `done`, `skipped` (nothing to do), `none` or `ambiguous` (spri
 - **Settings.** The project key, site, workflow states and the rest come from the `jira` section of `~/.config/claude-config/local.json`. Exit 6 names what's missing: ask the user for the value, show the JSON to add from [references/settings.md](references/settings.md), and stop. Never guess a value and never edit that file.
 - **Temp files** go in a fresh directory per run: `base=${CLAUDE_JOB_DIR:+$CLAUDE_JOB_DIR/tmp}; tmp=$(mktemp -d "${base:-${TMPDIR:-/tmp}}/ticket-XXXXXX")`. Never the working tree.
 - **Merging is not yours to decide.** See step 8.
-- **Prose for people.** Load `oh-my-claudecode:minimal-prose-discipline` with the Skill tool before the first commit, ticket, comment or PR text in a session, unless it is already loaded. Someone reading that text months from now, with none of today's context, should understand it: state the point first, and name the ticket, file or command instead of "as discussed".
+- **Prose for people.** Load `oh-my-claudecode:minimal-prose-discipline` with the Skill tool before the first commit, ticket, comment or PR text in a session, unless it is already loaded. Owners: see "Prose, by owner" in the global guardrails. Someone reading that text months from now, with none of today's context, should understand it: state the point first, and name the ticket, file or command instead of "as discussed".
 
 ## Usage
 
