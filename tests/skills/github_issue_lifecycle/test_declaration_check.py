@@ -231,6 +231,33 @@ class TestStamp:
         assert r.returncode == 1
         assert not stamp.exists()
 
+    def stamped(self, tmp_path):
+        repo = self.repo(tmp_path)
+        r = check(tmp_path, dc.VALID[0], None, "--stamp", "--issue", 42, cwd=repo)
+        assert r.returncode == 0, r.stdout + r.stderr
+        stamp = repo / ".git" / "path-declaration-ok"
+        assert stamp.exists()
+        return repo, stamp
+
+    def test_two_blocks_on_a_rerun_clear_the_stamp(self, tmp_path):
+        repo, stamp = self.stamped(tmp_path)
+        r = check(tmp_path, dc.MALFORMED[0], None, "--stamp", "--issue", 42, cwd=repo)
+        assert r.returncode == 4
+        assert not stamp.exists()
+
+    def test_unreadable_comments_on_a_rerun_clear_the_stamp(self, tmp_path):
+        repo, stamp = self.stamped(tmp_path)
+        missing = str(tmp_path / "missing.json")
+        extra = ("--comments", missing, "--stamp", "--issue", 42)
+        r = check(tmp_path, dc.VALID[0], None, *extra, cwd=repo)
+        assert r.returncode == 2
+        assert not stamp.exists()
+
+    def test_stamp_without_an_issue_on_a_rerun_clears_the_stamp(self, tmp_path):
+        repo, stamp = self.stamped(tmp_path)
+        assert check(tmp_path, dc.VALID[0], None, "--stamp", cwd=repo).returncode == 2
+        assert not stamp.exists()
+
     def test_no_stamp_without_the_flag(self, tmp_path):
         repo = self.repo(tmp_path)
         assert check(tmp_path, dc.VALID[0], cwd=repo).returncode == 0

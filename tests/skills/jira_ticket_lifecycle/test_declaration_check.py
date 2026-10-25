@@ -270,6 +270,33 @@ class TestStamp:
         assert r.returncode == 1
         assert not stamp.exists()
 
+    def stamped(self, env):
+        repo = self.repo(env)
+        r = check(env, dc.VALID[0], None, "--stamp", "--key", "PAY-142", cwd=repo)
+        assert r.returncode == 0, r.stdout + r.stderr
+        stamp = repo / ".git" / "path-declaration-ok"
+        assert stamp.exists()
+        return repo, stamp
+
+    def test_two_blocks_on_a_rerun_clear_the_stamp(self, env):
+        repo, stamp = self.stamped(env)
+        r = check(env, dc.MALFORMED[0], None, "--stamp", "--key", "PAY-142", cwd=repo)
+        assert r.returncode == 4
+        assert not stamp.exists()
+
+    def test_unreadable_comments_on_a_rerun_clear_the_stamp(self, env):
+        repo, stamp = self.stamped(env)
+        missing = str(env.tmp / "missing.json")
+        extra = ("--comments", missing, "--stamp", "--key", "PAY-142")
+        r = check(env, dc.VALID[0], None, *extra, cwd=repo)
+        assert r.returncode == 2
+        assert not stamp.exists()
+
+    def test_stamp_without_a_key_on_a_rerun_clears_the_stamp(self, env):
+        repo, stamp = self.stamped(env)
+        assert check(env, dc.VALID[0], None, "--stamp", cwd=repo).returncode == 2
+        assert not stamp.exists()
+
     def test_no_stamp_without_the_flag(self, env):
         repo = self.repo(env)
         assert check(env, dc.VALID[0], cwd=repo).returncode == 0

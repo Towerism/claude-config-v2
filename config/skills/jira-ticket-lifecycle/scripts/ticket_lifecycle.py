@@ -615,6 +615,20 @@ def write_stamp(key, passed):
 
 
 def cmd_declaration_check(args):
+    """Run the check; any outcome but a pass revokes an earlier stamp."""
+    code = EXIT_USAGE
+    try:
+        code = declaration_check(args)
+        return code
+    finally:
+        if args.stamp and code != EXIT_OK:
+            try:
+                write_stamp(None, False)
+            except UsageError:
+                pass  # no git dir to find, so no stamp to remove
+
+
+def declaration_check(args):
     if args.stamp and args.key is None:
         raise UsageError("--stamp needs --key")
     key = check_key(args.key) if args.key is not None else None
