@@ -1265,24 +1265,29 @@ def session_bypassed(payload: dict) -> bool:
 
 
 def main() -> None:
-    try:
+    parsed = False
+    with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
         payload = json.loads(sys.stdin.buffer.read().decode("utf-8"))
-    except Exception:
+        parsed = True
+    if not parsed:
         return
     if session_bypassed(payload):
         return
-    try:
-        signal.signal(signal.SIGALRM, on_deadline)
-        signal.alarm(DEADLINE_SECONDS)
-        reason = evaluate(payload)
-        signal.alarm(0)  # disarm before printing, so the alarm cannot fire mid-output
-        if reason:
-            print(json.dumps({"hookSpecificOutput": {
-                "hookEventName": "PreToolUse", "permissionDecision": "ask", "permissionDecisionReason": reason,
-            }}))
-    except Timeout:  # past the deadline: pass silently
-        return
-    except Exception:
+    failed = True
+    with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
+        try:
+            signal.signal(signal.SIGALRM, on_deadline)
+            signal.alarm(DEADLINE_SECONDS)
+            reason = evaluate(payload)
+            signal.alarm(0)  # disarm before printing, so the alarm cannot fire mid-output
+            if reason:
+                print(json.dumps({"hookSpecificOutput": {
+                    "hookEventName": "PreToolUse", "permissionDecision": "ask", "permissionDecisionReason": reason,
+                }}))
+            failed = False
+        except Timeout:  # past the deadline: pass silently
+            return
+    if failed:
         sys.stderr.write("bash_guard: error\n")  # the only output on an error: one fixed code
 
 
