@@ -1458,3 +1458,101 @@ def test_worktree_add_and_branch_copy_check_the_new_name(repo, command):
 ])
 def test_worktree_add_and_branch_copy_with_good_or_no_new_names_pass(repo, command):
     assert guarded(command, repo) is None
+
+
+# ralph / autopilot bypass (#12)
+
+BYPASS_HOOKS = ["merge_confirm.py", "bash_guard.py", "skill_gate.py", "secrets_guard.py", "host_default.py"]
+INVOKES = [
+    "/ralph fix the flaky test",
+    "  /oh-my-claudecode:autopilot build a thing",
+    "ralph: fix it",
+    "autopilot build me a thing",
+    "<command-message>oh-my-claudecode:ralph</command-message>\n<command-name>/oh-my-claudecode:ralph</command-name>\n<command-args>x</command-args>",
+]
+MENTIONS = [
+    "update the config so that if ralph or autopilot are invoked it skips hooks",
+    "please run /ralph",
+    "ralphson is a name",
+    "autopilot-style prompts",
+]
+
+
+def session(tmp_path, first, *later):
+    """A transcript whose first real user message is `first` (a string or a list of blocks)."""
+    rows = [{"type": "user", "isMeta": True, "message": {"role": "user", "content": "caveat"}}]
+    rows += [{"type": "user", "message": {"role": "user", "content": m}} for m in (first, *later)]
+    path = tmp_path / "session.jsonl"
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    return str(path)
+
+
+@pytest.fixture
+def bypass_cases(on_main, fake_home, machine):
+    """For each hook, a payload it answers on, and the env to run it in."""
+    _, env, _ = machine
+    return {
+        "merge_confirm.py": (bash("gh pr merge 42"), {}),
+        "bash_guard.py": (bash(f"git commit -m '{GOOD}'") | {"cwd": str(on_main)}, {}),
+        "skill_gate.py": ({"hook_event_name": "PreToolUse", "tool_name": "Skill", "tool_input": {"skill": "autopilot"}}, {}),
+        "secrets_guard.py": (tool("Read", file_path=str(fake_home / ".env")), {"HOME": str(fake_home)}),
+        "host_default.py": ({"hook_event_name": "SubagentStart"}, env),
+    }
+
+
+def run_case(name, payload, env, home):
+    if name == "host_default.py":
+        return run_installed(home, payload, env)
+    return run(name, payload, env)
+
+
+@pytest.mark.parametrize("name", BYPASS_HOOKS)
+def test_hooks_stay_silent_when_the_first_prompt_invokes_ralph_or_autopilot(name, bypass_cases, machine, tmp_path):
+    home = machine[0]
+    payload, env = bypass_cases[name]
+    assert run_case(name, payload, env, home) != ""
+    for prompt in INVOKES:
+        out = run_case(name, payload | {"transcript_path": session(tmp_path, prompt)}, env, home)
+        assert out == "", (name, prompt)
+    blocks = [{"type": "text", "text": "/ralph go"}]
+    assert run_case(name, payload | {"transcript_path": session(tmp_path, blocks)}, env, home) == ""
+
+
+@pytest.mark.parametrize("name", BYPASS_HOOKS)
+def test_hooks_still_answer_when_ralph_or_autopilot_is_only_mentioned_or_comes_later(name, bypass_cases, machine, tmp_path):
+    home = machine[0]
+    payload, env = bypass_cases[name]
+    baseline = run_case(name, payload, env, home)
+    for prompt in MENTIONS:
+        assert run_case(name, payload | {"transcript_path": session(tmp_path, prompt)}, env, home) == baseline, prompt
+    later = session(tmp_path, "fix the bug", "/ralph now")
+    assert run_case(name, payload | {"transcript_path": later}, env, home) == baseline
+
+
+@pytest.mark.parametrize("name", BYPASS_HOOKS)
+def test_an_unusable_transcript_never_bypasses(name, bypass_cases, machine, tmp_path):
+    home = machine[0]
+    payload, env = bypass_cases[name]
+    baseline = run_case(name, payload, env, home)
+    garbage = tmp_path / "garbage.jsonl"
+    garbage.write_bytes(b"\xff\xfe not json\n[]\n{}\n")
+    huge = tmp_path / "huge.jsonl"
+    huge.write_text(json.dumps({"type": "user", "message": {"content": "x" * 300_000 + " /ralph"}}) + "\n")
+    for path in [str(tmp_path / "missing"), str(tmp_path), str(garbage), str(huge), 7, None, ["a"], "\0"]:
+        assert run_case(name, payload | {"transcript_path": path}, env, home) == baseline, path
+
+
+def test_the_bypass_check_is_the_same_in_every_hook():
+    def segments(path):
+        source = path.read_text()
+        found = {}
+        for node in ast.parse(source).body:
+            if isinstance(node, ast.FunctionDef) and node.name == "session_bypassed":
+                found["function"] = ast.get_source_segment(source, node)
+            if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", None) == "BYPASS_PROMPT":
+                found["pattern"] = ast.get_source_segment(source, node)
+        return found
+
+    copies = {name: segments(HOOKS / name) for name in BYPASS_HOOKS}
+    assert all(set(c) == {"function", "pattern"} for c in copies.values()), copies.keys()
+    assert len({tuple(sorted(c.items())) for c in copies.values()}) == 1

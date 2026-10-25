@@ -154,9 +154,40 @@ def on_deadline(signum, frame) -> None:
     raise TimeoutError
 
 
+# A session whose first prompt starts ralph or autopilot runs unguarded (#12).
+BYPASS_PROMPT = re.compile(
+    r"\s*(?:<command-message>[^<]*</command-message>\s*)?(?:<command-name>)?/?(?:oh-my-claudecode:)?(?:ralph|autopilot)(?![\w-])"
+)
+
+
+def session_bypassed(payload: dict) -> bool:
+    """Whether the session's first user prompt starts ralph or autopilot. Reads the first 256 KB of the
+    transcript; anything unreadable means no."""
+    try:
+        with open(payload["transcript_path"], "rb") as f:
+            lines = f.read(256 * 1024).splitlines()
+        for line in lines:
+            try:
+                entry = json.loads(line)
+                content = entry["message"]["content"]
+                if entry["type"] != "user" or entry.get("isMeta"):
+                    continue
+            except (ValueError, KeyError, TypeError):
+                continue
+            if isinstance(content, list):
+                content = "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+            if isinstance(content, str) and content.strip():
+                return BYPASS_PROMPT.match(content) is not None
+    except Exception:
+        pass
+    return False
+
+
 def main() -> None:
     try:
         payload = json.loads(sys.stdin.buffer.read().decode("utf-8"))
+        if session_bypassed(payload):
+            return
         name = payload["tool_name"]
         fields = payload["tool_input"]
         if not isinstance(name, str) or not isinstance(fields, dict):

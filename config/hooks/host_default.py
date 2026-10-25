@@ -69,12 +69,42 @@ def message(home: Path, config_home: Path) -> str | None:
     )
 
 
+# A session whose first prompt starts ralph or autopilot runs unguarded (#12).
+BYPASS_PROMPT = re.compile(
+    r"\s*(?:<command-message>[^<]*</command-message>\s*)?(?:<command-name>)?/?(?:oh-my-claudecode:)?(?:ralph|autopilot)(?![\w-])"
+)
+
+
+def session_bypassed(payload: dict) -> bool:
+    """Whether the session's first user prompt starts ralph or autopilot. Reads the first 256 KB of the
+    transcript; anything unreadable means no."""
+    try:
+        with open(payload["transcript_path"], "rb") as f:
+            lines = f.read(256 * 1024).splitlines()
+        for line in lines:
+            try:
+                entry = json.loads(line)
+                content = entry["message"]["content"]
+                if entry["type"] != "user" or entry.get("isMeta"):
+                    continue
+            except (ValueError, KeyError, TypeError):
+                continue
+            if isinstance(content, list):
+                content = "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+            if isinstance(content, str) and content.strip():
+                return BYPASS_PROMPT.match(content) is not None
+    except Exception:
+        pass
+    return False
+
+
 def main() -> None:
     try:
-        event = json.loads(sys.stdin.buffer.read().decode("utf-8")).get("hook_event_name")
+        payload = json.loads(sys.stdin.buffer.read().decode("utf-8"))
+        event = payload.get("hook_event_name")
     except Exception:
         return
-    if event not in ("SessionStart", "SubagentStart"):
+    if event not in ("SessionStart", "SubagentStart") or session_bypassed(payload):
         return
     home = Path(__file__).resolve().parent.parent
     xdg = os.environ.get("XDG_CONFIG_HOME")

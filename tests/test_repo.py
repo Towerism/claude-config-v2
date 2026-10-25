@@ -152,6 +152,13 @@ def test_global_rules_stay_short_and_name_only_real_skills():
     assert "writing-docs" not in text
 
 
+def test_global_rules_stand_aside_when_ralph_or_autopilot_opens_the_session():
+    text = (ROOT / "config" / "CLAUDE.global.md").read_text()
+    head = text.split("### Workflow, in order")[0]
+    assert "first prompt" in head and "`ralph`" in head and "`autopilot`" in head
+    assert "ignore" in head.lower()
+
+
 def test_workflow_plans_the_tests_before_the_spec():
     text = (ROOT / "config" / "CLAUDE.global.md").read_text()
     steps = re.findall(r"^\d+\. (.*)$", text, re.MULTILINE)
