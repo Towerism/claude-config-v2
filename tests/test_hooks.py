@@ -41,10 +41,29 @@ def bash(command):
     "gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {}) { clientMutationId } }'",
     "tea api --login x -X POST repos/o/r/pulls/3/merge -d @m.json",
     "gh api graphql -f query='mutation { mergePullRequest(input: {}) { clientMutationId } }'",
+    "gh pr merge 5",
+    "gh api -X PUT repos/o/r/pulls/3/merge",
+    "tea api repos/o/r/pulls/3/merge",
+    "gh api graphql <<'EOF'\nmutation { mergePullRequest(input: {}) { clientMutationId } }\nEOF",
+    'bash -c "gh pr merge 5"',
+    'eval "gh pr merge"',
+    "echo 5 | xargs gh pr merge",
+    "echo $(gh pr merge 5)",
 ])
 def test_merges_ask(command):
     out = json.loads(run("merge_confirm.py", bash(command)))
     assert out["hookSpecificOutput"]["permissionDecision"] == "ask"
+
+
+@pytest.mark.parametrize("command", [
+    'echo "run gh pr merge 5 when ready"',
+    'grep -n "gh pr merge" docs/notes.md',
+    'git commit -m "docs: say when gh pr merge is allowed (#7)"',
+    "cat > note.md <<'EOF'\nrun gh pr merge --merge\nEOF",
+    "python3 -c \"print('gh api /merge')\"",
+])
+def test_merge_confirm_ignores_commands_that_only_mention_a_merge(command):
+    assert run("merge_confirm.py", bash(command)) == ""
 
 
 @pytest.mark.parametrize("command", [
@@ -610,7 +629,8 @@ def test_a_grep_regex_is_not_scanned(fake_home, pattern):
 @pytest.mark.parametrize("command", [
     "cat .env", "cat ./.env", "cat app/.env.local", "head -n1 '.env'", 'cat ".env"', "grep x .env*",
     "source .env && run", "docker run --env-file=.env img", "cat ~/.config/claude-config/deny-terms",
-    "cat a;cat .env", "echo hi|cat .env", "cat deny-terms", "X=.env cmd",
+    "cat a;cat .env", "echo hi|cat .env", "cat deny-terms",
+    "grep foo .env", "cp .env x", "cat .en?", ". .env", "< .env", "docker run --env-file .env img",
 ])
 def test_bash_naming_a_secret_file_asks(fake_home, command):
     assert decision(guard(bash(command), fake_home)) == "ask"
@@ -619,6 +639,9 @@ def test_bash_naming_a_secret_file_asks(fake_home, command):
 @pytest.mark.parametrize("command", [
     "echo process.env.API_KEY", "cat .env.example", "cat .envrc", "cat src/environment.ts", "ls",
     "cat myfile.env", "cat dotenv", "grep -r foo src", "echo a.env.b",
+    'git commit -m "docs: ignore .env files (#7)"', 'echo ".env"', 'grep -n ".env" README.md',
+    "git log --grep=deny-terms", "cat docs/notes.md # .env",
+    "X=.env cmd",  # an assignment value is not an operand of a reader
 ])
 def test_bash_not_naming_a_secret_file_passes(fake_home, command):
     assert guard(bash(command), fake_home) == ""
@@ -704,12 +727,12 @@ def test_more_than_16_brace_alternatives_are_denied(fake_home):
     assert guard(tool("Glob", pattern="{" + ",".join(f"a{i}" for i in range(16)) + "}"), fake_home) == ""
 
 
-@pytest.mark.parametrize("command", ["cat .en?", "cat .en[v]", "cat src/.e*", "cat deny-t*", "cat '.en?'", "X=.e* cmd"])
+@pytest.mark.parametrize("command", ["cat .en?", "cat .en[v]", "cat src/.e*", "cat deny-t*", "cat '.en?'"])
 def test_bash_glob_words_matching_a_secret_ask(fake_home, command):
     assert decision(guard(bash(command), fake_home)) == "ask"
 
 
-@pytest.mark.parametrize("command", ["cat *.env", "ls *", "cat x.e*", "ls src/*.py", "cat ?env"])
+@pytest.mark.parametrize("command", ["cat *.env", "ls *", "cat x.e*", "ls src/*.py", "cat ?env", "X=.e* cmd"])
 def test_bash_wildcard_led_and_other_glob_words_pass(fake_home, command):
     assert guard(bash(command), fake_home) == ""
 
