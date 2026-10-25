@@ -477,7 +477,7 @@ def test_hooks_print_only_checked_values(repo):
         f"git commit -m '{word} subject'",
         f"git checkout -b {word}",
         f"git add {word}.py .env && git commit -m 'fix(x): {word} (#7)'",
-        f"git add -A && git commit -m 'fix(x): y (#7)'",
+        "git add -A && git commit -m 'fix(x): y (#7)'",
         f"cd {repo} && git switch main && git commit -m 'fix(x): {word} (#7)'",
         f"git push origin HEAD:main {word}",
         f"gh issue edit {word} --add-label approved,{word}",
@@ -868,7 +868,7 @@ def test_checkout_and_switch_apply_in_order(on_main, repo):
     assert asks(f"git switch main && git commit -m '{GOOD}'", repo, COMMIT_DEFAULT)
     assert asks(f"git checkout main && git commit -m '{GOOD}'", repo, COMMIT_DEFAULT)
     assert asks(f"git checkout -q main; git commit -m '{GOOD}'", repo, COMMIT_DEFAULT)
-    assert guarded(f"git checkout -- main.txt && git commit -m 'fix(x): y (#1)'", repo) is None
+    assert guarded("git checkout -- main.txt && git commit -m 'fix(x): y (#1)'", repo) is None
     assert guarded("git switch --detach main && git commit -m x", repo) is None
 
 
@@ -946,7 +946,7 @@ def subject_forms(subject, tmp):
         f"git commit -m \"$(cat <<'EOF'\n{subject}\n\nbody\nEOF\n)\"",
         f"git commit -F - <<'EOF'\n{subject}\n\nbody\nEOF",
         f"git commit -F {tmp / 'msg.txt'}",
-        f"git commit --file=msg.txt",
+        "git commit --file=msg.txt",
     ]
 
 

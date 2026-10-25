@@ -141,7 +141,7 @@ class Unparsed(Exception):
 
 
 class Word:
-    __slots__ = ("text", "subs", "glob")
+    __slots__ = ("glob", "subs", "text")
 
     def __init__(self) -> None:
         self.text = ""
@@ -152,7 +152,7 @@ class Word:
 class Segment:
     """One simple command: its words and the bodies of its heredocs."""
 
-    __slots__ = ("words", "heredocs")
+    __slots__ = ("heredocs", "words")
 
     def __init__(self) -> None:
         self.words: list[Word] = []

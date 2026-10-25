@@ -147,7 +147,7 @@ def test_global_rules_stay_short_and_name_only_real_skills():
     assert len(text.splitlines()) < 80
     assert not PERSONAL.search(text)
     named = re.findall(r"`([a-z:-]+)`", text)
-    for skill in [n for n in named if n.endswith("-lifecycle") or n.endswith("-handoff")]:
+    for skill in [n for n in named if n.endswith(("-lifecycle", "-handoff"))]:
         assert (ROOT / "config" / "skills" / skill).is_dir(), skill
     for skill in TRACKERS.values():
         assert f"`{skill}`" in text

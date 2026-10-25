@@ -115,8 +115,7 @@ def extract_spec(body):
 def _clean_spec(spec):
     """Normalise to LF, drop one trailing newline and any marker lines wrapping the spec."""
     text = spec.replace("\r\n", "\n")
-    if text.endswith("\n"):
-        text = text[:-1]
+    text = text.removesuffix("\n")
     lines = text.split("\n")
     if lines and lines[0] == START:
         lines = lines[1:]
