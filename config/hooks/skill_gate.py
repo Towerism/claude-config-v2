@@ -229,7 +229,8 @@ def session_bypassed(payload: dict) -> bool:
 
 
 def main() -> None:
-    try:
+    parsed = False
+    with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
         payload = json.loads(sys.stdin.buffer.read().decode("utf-8"))
         if session_bypassed(payload):
             return
@@ -245,9 +246,11 @@ def main() -> None:
         cwd = payload.get("cwd")
         if not isinstance(name, str) or not NAME.fullmatch(name):
             return
-    except Exception:
+        parsed = True
+    if not parsed:
         return
-    try:
+    failed = True
+    with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
         if name in AUTOPILOT and event == "PreToolUse":
             emit(event, permissionDecision="ask", permissionDecisionReason=AUTOPILOT_REASON)
         # A NUL byte would make subprocess raise; such a cwd is skipped, not reported.
@@ -255,7 +258,8 @@ def main() -> None:
             text = review_context(cwd)
             if text:
                 emit(event, additionalContext=text)
-    except Exception:
+        failed = False
+    if failed:
         sys.stderr.write("skill_gate: error\n")
 
 
