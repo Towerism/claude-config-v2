@@ -1,6 +1,6 @@
 # ADR-0004: Every OMC agent gets a pathway through the guardrails
 
-**Status:** Accepted by the owner on 2026-10-24, issue #7. Stage 1 set the decision. Stages 2-4 built the hooks; each stage has an addendum below, and the deviations from the approved spec are listed in one section.
+**Status:** Accepted by the owner on 2026-10-24, issue #7. Stage 1 set the decision. Stages 2-4 built the hooks; each stage has an addendum below. A review phase followed stage 4 and has its own section. The deviations from the approved spec are listed in one section.
 
 ## Context
 
@@ -35,7 +35,7 @@ This replaces the earlier single `Prose:` line.
 
 **Spikes rule** (instruction, not a hook). Answer a simple question by running a throwaway script, or a headless `claude -p --setting-sources project` run, in a scratch directory. Never run it in the repo or against real config, accounts or the tracker. Bound it by timeout and the cheapest model. Record the question, method and result in the spec. A question only a user or missing access can settle stays open.
 
-**Self-review rule** (instruction, not a hook). Before any review agent runs, list every workflow item that applies. For each, say whether it was done and, if not, why. Go back to skipped items that still add value. Post the list on the issue.
+**Self-review rule** (instruction, not a hook). Before the spec review and again before step 6, list every workflow item that applies. For each, say whether it was done and, if not, why. Go back to skipped items that still add value. Post the list on the issue.
 
 **Hooks.** A rule becomes a hook when its trigger is a fact in tool input or git state, and a hook can carry its whole intent. A rule that needs judgment stays an instruction, because a hook would enforce a lookalike. The full rule-by-rule table lives in issue #7. Three new stdlib hooks, plus a squash reason in `merge_confirm.py`:
 
@@ -134,7 +134,7 @@ A Grep regex `pattern` is never scanned. Searching for `process.env.API_KEY` pas
 
 #### Addendum at stage 4: `bash_guard.py`
 
-**Shipped.** `config/hooks/bash_guard.py`, registered for `PreToolUse` with matcher `Bash` and timeout 5, as a second `Bash` group beside `merge_confirm.py`. Both host profiles list it. One process runs per Bash call. The file is about 1,070 lines. Most of that is a single-pass shell lexer (quotes, escapes, `$(...)`, backticks, heredocs, here-strings, redirections), so that `git` and `gh` count only at command position. `echo git push origin main` and `grep "cd /tmp/x && git commit" notes` do nothing.
+**Shipped.** `config/hooks/bash_guard.py`, registered for `PreToolUse` with matcher `Bash` and timeout 5, as a second `Bash` group beside `merge_confirm.py`. Both host profiles list it. One process runs per Bash call. The file is 1,217 lines. Most of that is a single-pass shell lexer (quotes, escapes, `$(...)`, backticks, heredocs, here-strings, redirections), so that `git` and `gh` count only at command position. `echo git push origin main` and `grep "cd /tmp/x && git commit" notes` do nothing.
 
 **Target repo.** The hook takes the repo from `git -C`, a leading `cd`, or the payload cwd, and applies `cd`, `checkout` and `switch` in order. When it cannot tell the target, it passes silently.
 
@@ -153,7 +153,7 @@ A Grep regex `pattern` is never scanned. Searching for `process.env.API_KEY` pas
 - `test_secret_file_definitions_agree` keeps `bash_guard` and `secrets_guard` equal.
 - Mutation checks: removing `core.fsmonitor=false` fails the repo-config test; removing the `GIT_*` filter fails the env test.
 - In-process tests cover a missing git and a git that outlives the deadline, through the `run_git` seam. This closes the deadline gap that stage 2 left.
-- 855 tests pass.
+- 916 tests pass after the review fixes (see the review section).
 
 **Layering with OMC.** OMC's `git-guardrails` hook blocks every push, `branch -D`, `reset --hard`, `clean -f` and `checkout .` while ralph, autopilot, team or ultragoal is active, or when `OMC_GIT_GUARDRAILS=1`. `bash_guard` covers interactive sessions, default-branch commits, force-pushes and deletes of the default branch, subjects, branch names and tokens. The host profiles do not set `OMC_GIT_GUARDRAILS=1`, because it would block the lifecycle's own pushes. OMC's opt-in code-simplifier Stop hook stays off (item 6 below).
 
@@ -179,7 +179,7 @@ Bar: p95 under 500 ms. Met.
 
 - A `cd` inside a subshell still applies to the rest of the line. Subshell scoping is not modelled.
 - Unextractable input passes. The deviations list gives the cases.
-- The hook is large, about 1,070 lines. The diff review should read it closely.
+- The hook is large, 1,217 lines. The diff review should read it closely.
 
 ### Addenda (settled at stage 1, built at the stage named)
 
@@ -189,11 +189,11 @@ Bar: p95 under 500 ms. Met.
 4. `secrets_guard` is a hook, not a `permissions.deny` rule. `cfg.py` deploys hooks, plugins and marketplaces only. A `Grep` over a directory that holds a `.env` is not covered. Stage 3 built and measured: the real-harness `Grep` passed and listed the `.env` file name (see the `secrets_guard` addendum). Open.
 5. `bash_guard` layers on OMC's own `git-guardrails.mjs`. OMC blocks pushes while ralph, autopilot, team or ultragoal is active, or when `OMC_GIT_GUARDRAILS=1`. The host profiles do not set that variable. `bash_guard` adds interactive asks and the default-branch rules. Stage 4, built (see the `bash_guard` addendum).
 6. OMC's opt-in `code-simplifier` Stop hook is not enabled. It simplifies changed files at every Stop. The rule is a size gate at review. Stage 2, built: `skill_gate` prints the review size check.
-7. Issue #7 link: the commits that carried each stage. Stage 2: `764407d`, `0b03e95`, `f3032e7`. Stage 3: `c768eba`, `f3b9138`. Stage 4 is uncommitted at the time of this addendum; its PR number is recorded when the PR opens.
+7. Issue #7 link: the commits that carried each stage. Stage 2: `764407d`, `0b03e95`, `f3032e7`. Stage 3: `c768eba`, `f3b9138`. Stage 4: `de39985`, `9f82222`. Its PR number is recorded when the PR opens.
 
 ## Deviations from the approved spec, for the owner to accept
 
-The owner accepts or rejects each item at PR time. Items 4 to 11 are stage 4 deviations. Items 12 and 13 are not spec deviations; they are listed for the reviewer.
+The owner accepts or rejects each item at PR time. Items 4 to 11 are stage 4 deviations. Items 12 and 13 are not spec deviations; they are listed for the reviewer. Items 14 to 23 were recorded in the review phase. Each tag names the stage that built the code, or Review for a change the review made.
 
 1. **[Stage 2]** The fixup pattern has no trailing space, so it matches a superset of subjects. Harmless.
 2. **[Stage 3]** The `=` boundary for Bash tokens is an addition. It makes `--env-file=.env` ask.
@@ -207,7 +207,75 @@ The owner accepts or rejects each item at PR time. Items 4 to 11 are stage 4 dev
 10. **[Stage 4]** A `cd` inside a subshell still applies to the rest of the line. Known gap: subshell scoping is not modelled.
 11. **[Stage 4]** Rule 6 counts `gh api` only with `-f`, `-F`, `--field` or `--raw-field` key labels, or `labels[]`. `gh pr edit --add-label approved` is not covered.
 12. **[Not a spec deviation]** `tests/test_cfg.py` was edited outside the listed scope at stages 2-4, because it pinned the exact hook set.
-13. **[Not a spec deviation]** `bash_guard.py` is about 1,070 lines. It is a review surface that the diff review should read closely.
+13. **[Not a spec deviation]** `bash_guard.py` is 1,217 lines. It is a review surface that the diff review should read closely.
+14. **[Stage 2-4]** The fragment timeout is 10 s on every hook entry, including `merge_confirm`, `host_default`'s SessionStart and SubagentStart. It sits above the hooks' 5 s internal deadline, so the harness cannot kill a hook just before it passes silently. The spec said 5.
+15. **[Review]** The auth and session security patterns are word-bounded. The spec's literal pattern matched "author".
+16. **[Review]** Filter overrides add `required=false`. With `required=true`, an empty `clean` makes the diff fail and the scans skip silently (see the review section).
+17. **[Review]** Glob inputs that cannot be checked are denied: more than 16 brace alternatives or groups, and unresolvable paths.
+18. **[Review]** Bash words such as `ls d*` or `cat .*` now ask, because they match deny-terms and `.env`.
+19. **[Stage 3]** `secrets_guard` does not deny ancestors of the directory that holds `deny-terms`. A `Grep` over the home directory returns lines from it. The spec said "a directory that contains it".
+20. **[Stage 2]** `skill_gate` does not count untracked files in the 300-line size.
+21. **[Review]** The lifecycle skills' "Prose for people" line points to the owner list in `config/CLAUDE.global.md`. It does not name `writer`. Spec criterion 9 said each names `writer`.
+22. **[Review]** The checkout/switch duplication in `bash_guard` was not refactored.
+23. **[Stage 2-4]** Lint was not run. `ruff` is not installed on the owner's machine (issues #2 and #3).
+
+## Review phase and fixes
+
+The review ran once, after the four stages. It used four independent lanes. No lane ran again after the fixes.
+
+| Lane | Reviewer | Result |
+|------|----------|--------|
+| Standards | `code-reviewer` | 0 critical, 3 warning, 5 note |
+| Intent | `code-reviewer` | 0 critical, 2 warning, 4 note |
+| Security gate | `security-reviewer` (one run) | BLOCK: 1 critical, 2 warning, 3 note |
+| Agent-doc discipline | `critic` with `oh-my-claudecode:agent-doc-discipline` | 0 severe, 3 major, 2 minor |
+
+Every real finding was fixed in commits after the review. The security critical was fixed first. Raised with the owner in the PR.
+
+**Security critical.** A spike, run before the fix, confirmed it. Repo config still ran programs through git inside `skill_gate` and `bash_guard`:
+
+- A `filter.<name>.clean`, `smudge` or `process` in repo config, plus a `.gitattributes` line, ran when the hooks diffed the working tree.
+- `log.showSignature=true` with `gpg.program` ran a script when `git log` met a commit with a `gpgsig` header.
+- A plain `git diff HEAD` also ran the filter.
+
+The fix, in both hooks:
+
+- Pass `-c log.showSignature=false`.
+- List filter names with `git config --null --name-only --get-regexp ^filter\.`. Reading config runs nothing.
+- Override each name's `clean`, `smudge` and `process` with an empty value, and set `required=false`.
+
+Tests: marker-file tests for clean, smudge, process and gpg run for both hooks. Mutation checks: removing an override fails the clean and process tests. The hooks were then restored byte-identical. The planted-filter spike now shows the filter does not run from either hook. Plain `git` still runs it.
+
+Cost: filters from global config, such as git-lfs, are also overridden. LFS-tracked text diffs as raw content and can raise `skill_gate`'s line count.
+
+**Other fixes.**
+
+- A timeout in `bash_guard` keeps the asks already found.
+- A lone-surrogate path no longer makes `secrets_guard` fail open. It checks the basename before `realpath`. An unresolvable path denies.
+- Brace globs and Bash words with `?` or `[` are matched.
+- File opens use `lstat` and `S_ISREG` first.
+- The alarm is disarmed before printing.
+- The squash reason no longer reads words after the merge command. `merge_method=squash` on `gh api` counts.
+- `git commit <paths>`, `--include` and `--only` are scanned.
+- `git add` scans only added lines for tracked files.
+- `git worktree add <path>` and `git branch -c/-C` get the branch-name check.
+- A parity test keeps the duplicated git-runner constants of `skill_gate` and `bash_guard` equal.
+- The lifecycle skills' "Prose for people" lines point to the single owner list in the global guardrails.
+- The `code-reviewer` bullet states the 300-line threshold.
+- The self-review rule runs once before the spec review and once before step 6.
+- The `team` bullet names the agents that `team`'s own stages already run: `verifier` always, `security-reviewer` for auth or crypto, and `code-reviewer` for over 20 files or architectural changes. These thresholds come from OMC 5.7.13 and may drift.
+
+**Latency after the fixes.** 20 runs each, with the filter configured and a dirty tracked file:
+
+- `bash_guard`, `git commit -m x`: median 39 ms, p95 45 ms.
+- `skill_gate`, review payload: median 34 ms, p95 38 ms.
+
+Bar: p95 under 500 ms. Met.
+
+**Open items.**
+
+- The merge gate's broader false asks are tracked in issue #9.
+- The rendered-string question is tracked in issue #8.
 
 ## Consequences
 
