@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Deterministic helpers for the GitHub and Gitea issue lifecycle skills (stdlib, no network).
 
 Each skill ships an identical copy, so neither depends on the other being deployed.

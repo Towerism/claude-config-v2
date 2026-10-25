@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Helpers for the jira-ticket-lifecycle skill (stdlib only).
 
 Text checks, which never touch Jira:
