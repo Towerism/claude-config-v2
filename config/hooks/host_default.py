@@ -101,10 +101,12 @@ def session_bypassed(payload: dict) -> bool:
 
 
 def main() -> None:
-    try:
+    parsed = False
+    with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
         payload = json.loads(sys.stdin.buffer.read().decode("utf-8"))
         event = payload.get("hook_event_name")
-    except Exception:
+        parsed = True
+    if not parsed:
         return
     if event not in ("SessionStart", "SubagentStart") or session_bypassed(payload):
         return
