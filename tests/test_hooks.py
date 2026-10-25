@@ -1,12 +1,15 @@
 """The hooks: merge_confirm asks before a PR merge; host_default states the tracker; skill_gate adds review context; secrets_guard blocks secret files; bash_guard asks before a command breaks a source-control rule."""
 
 import ast
+import io
 import json
 import os
+import signal
 import stat
 import subprocess
 import sys
 import time
+import types
 
 import pytest
 
@@ -157,6 +160,28 @@ def test_plain_merge_keeps_the_usual_reason(command):
     assert reason(command) == PLAIN_REASON
 
 
+@pytest.mark.parametrize("command", [
+    "gh pr merge 5 --merge && ls -sh",
+    "gh pr merge 5 --merge; ls -s",
+    "gh pr merge 5 --merge || ls -s",
+    "gh pr merge 5 --merge | tee -s",
+    "gh pr merge 5 --merge\nls -s",
+])
+def test_squash_flags_of_later_commands_do_not_count(command):
+    assert reason(command) == PLAIN_REASON
+
+
+@pytest.mark.parametrize("command", [
+    "gh api repos/o/r/pulls/3/merge -X PUT -f merge_method=squash",
+    "gh api -X PUT repos/o/r/pulls/3/merge --field merge_method=squash",
+    "gh api repos/o/r/pulls/3/merge -X PUT --raw-field=merge_method=squash",
+    "gh api repos/o/r/pulls/3/merge -X PUT -F 'merge_method=squash'",
+])
+def test_an_api_squash_merge_gets_the_squash_reason(command):
+    text = reason(command)
+    assert "squash" in text.lower() and "against" in text and text != PLAIN_REASON
+
+
 # skill_gate
 
 GIT_ENV = {
@@ -278,6 +303,10 @@ def test_fixup_already_on_the_default_branch_is_not_the_branchs(repo):
 PATTERNS = [
     ("auth", "login = 1", "log = 1"),
     ("auth", "OAuth ok", "o aut"),
+    ("auth", "authorize(x)", "author"),
+    ("auth", "get_password()", "authors"),
+    ("auth", "session_id = 1", "set the author name"),
+    ("auth", "jwt = 1", "the session ended"),
     ("input", "json.loads(x)", "json.dumps(x)"),
     ("input", "eval(x)", "evaluate(x)"),
     ("secrets", "api_key = 1", "api = 1"),
@@ -485,7 +514,7 @@ def entries(event, name):
 
 
 def test_skill_gate_is_registered_for_both_events():
-    hook = {"type": "command", "command": "python3 -I {claude_home}/hooks/skill_gate.py", "timeout": 5}
+    hook = {"type": "command", "command": "python3 -I {claude_home}/hooks/skill_gate.py", "timeout": 10}
     assert entries("PreToolUse", "skill_gate.py") == [("Skill", hook)]
     assert entries("UserPromptExpansion", "skill_gate.py") == [(None, hook)]
 
@@ -620,7 +649,7 @@ def test_secrets_guard_is_linear_on_long_commands(fake_home):
 
 
 def test_secrets_guard_is_registered_and_listed():
-    hook = {"type": "command", "command": "python3 -I {claude_home}/hooks/secrets_guard.py", "timeout": 5}
+    hook = {"type": "command", "command": "python3 -I {claude_home}/hooks/secrets_guard.py", "timeout": 10}
     assert entries("PreToolUse", "secrets_guard.py") == [("Read|Grep|Glob|Bash", hook)]
     for host in ("personal", "work"):
         assert "secrets_guard.py" in json.loads((ROOT / "hosts" / f"{host}.json").read_text())["hooks"]
@@ -644,6 +673,59 @@ def test_secrets_guard_prints_only_checked_values(fake_home, tmp_path):
         )
         assert done.returncode == 0 and done.stdout and done.stderr == b""
         assert word.encode() not in done.stdout and str(tmp_path).encode() not in done.stdout
+
+
+@pytest.mark.parametrize("payload", [
+    tool("Read", file_path="/tmp/\udfff/../proj/.env"),
+    tool("Read", file_path="/tmp/\udfff/x"),
+    tool("Glob", path="/tmp/\udfff/..", pattern=".env"),
+    tool("Glob", path="/tmp/\udfff/..", pattern="*.py"),
+])
+def test_an_unresolvable_path_is_denied(fake_home, payload):
+    assert decision(guard(payload, fake_home)) == "deny"
+
+
+@pytest.mark.parametrize("glob", ["{.env,x}", "src/{x,.env.local}", "{*.py,.e*}", "{a,b}/{c,deny-terms}"])
+def test_brace_alternatives_are_checked_one_by_one(fake_home, glob):
+    assert decision(guard(tool("Grep", pattern="x", glob=glob), fake_home)) == "deny"
+    assert decision(guard(tool("Glob", pattern=glob), fake_home)) == "deny"
+
+
+@pytest.mark.parametrize("glob", ["{a,b}.py", "**/*.{js,ts}", "src/{lib,bin}/*", "{*.md,*.txt}"])
+def test_brace_alternatives_without_a_secret_pass(fake_home, glob):
+    assert guard(tool("Grep", pattern="x", glob=glob), fake_home) == ""
+    assert guard(tool("Glob", pattern=glob), fake_home) == ""
+
+
+def test_more_than_16_brace_alternatives_are_denied(fake_home):
+    glob = "{" + ",".join(f"a{i}" for i in range(17)) + "}"
+    assert decision(guard(tool("Glob", pattern=glob), fake_home)) == "deny"
+    assert guard(tool("Glob", pattern="{" + ",".join(f"a{i}" for i in range(16)) + "}"), fake_home) == ""
+
+
+@pytest.mark.parametrize("command", ["cat .en?", "cat .en[v]", "cat src/.e*", "cat deny-t*", "cat '.en?'", "X=.e* cmd"])
+def test_bash_glob_words_matching_a_secret_ask(fake_home, command):
+    assert decision(guard(bash(command), fake_home)) == "ask"
+
+
+@pytest.mark.parametrize("command", ["cat *.env", "ls *", "cat x.e*", "ls src/*.py", "cat ?env"])
+def test_bash_wildcard_led_and_other_glob_words_pass(fake_home, command):
+    assert guard(bash(command), fake_home) == ""
+
+
+@pytest.mark.parametrize("payload", [tool("Read", file_path="/x/.env"), bash("cat .env")])
+def test_secrets_guard_disarms_its_alarm_before_printing(monkeypatch, payload):
+    hook = hook_module("secrets_guard.py")
+    seen = []
+    monkeypatch.setattr(hook, "emit", lambda **fields: seen.append(signal.getitimer(signal.ITIMER_REAL)[0]))
+    monkeypatch.setattr(hook.sys, "stdin", types.SimpleNamespace(buffer=io.BytesIO(json.dumps(payload).encode())))
+    handler = signal.getsignal(signal.SIGALRM)
+    try:
+        hook.main()
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, handler)
+    assert seen == [0.0]
 
 
 # bash_guard
@@ -1208,8 +1290,171 @@ def test_secret_file_definitions_agree():
 
 
 def test_bash_guard_is_registered_and_listed():
-    hook = {"type": "command", "command": "python3 -I {claude_home}/hooks/bash_guard.py", "timeout": 5}
+    hook = {"type": "command", "command": "python3 -I {claude_home}/hooks/bash_guard.py", "timeout": 10}
     assert entries("PreToolUse", "bash_guard.py") == [("Bash", hook)]
     assert entries("PreToolUse", "merge_confirm.py")[0][0] == "Bash"
     for host in ("personal", "work"):
         assert "bash_guard.py" in json.loads((ROOT / "hosts" / f"{host}.json").read_text())["hooks"]
+
+
+def test_every_hook_entry_outlasts_the_hooks_own_deadline():
+    for groups in FRAGMENT["hooks"].values():
+        for group in groups:
+            for hook in group["hooks"]:
+                assert hook["timeout"] == 10, hook["command"]
+    for name in ("bash_guard.py", "skill_gate.py", "secrets_guard.py"):
+        assert hook_module(name).DEADLINE_SECONDS == 5, name
+
+
+# review fixes: repo config that runs programs, commit paths, tracked adds, branch names
+
+
+def executable(path, body):
+    path.write_text(body)
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+    return path
+
+
+GUARDED_DIFFS = (
+    "git commit -a -m x", "git commit -m x", "git add base.txt", "git add -A && git commit -m x",
+    "git commit -m x -- base.txt", "git commit -m x base.txt",
+)
+
+
+@pytest.mark.parametrize("kind", ["clean", "smudge", "process"])
+def test_hooks_do_not_run_repo_filters(repo, tmp_path, kind):
+    mark = tmp_path / "filter-ran"
+    script = executable(tmp_path / "filter.sh", f"#!/bin/sh\ntouch {mark}\ncat\n")
+    write_lines(repo, "big.txt", 301)
+    commit(repo, "feat: big (#1)")
+    (repo / ".gitattributes").write_text("* filter=p.w\n")  # a filter name may hold dots
+    git(repo, "config", f"filter.p.w.{kind}", str(script))
+    write_lines(repo, "base.txt", 20, word="new")
+    if kind != "smudge":  # the fixture works: plain git runs the program on a diff
+        subprocess.run(["git", "-C", str(repo), "diff", "HEAD"], capture_output=True, env=GIT_ENV)
+        assert mark.exists()
+        mark.unlink()
+    assert "code-simplifier" in context(repo)
+    for command in GUARDED_DIFFS:
+        run("bash_guard.py", bash(command) | {"cwd": str(repo)})
+    assert not mark.exists()
+
+
+def test_hooks_do_not_run_gpg_from_repo_config(repo, tmp_path):
+    mark = tmp_path / "gpg-ran"
+    script = executable(tmp_path / "gpg.sh", f"#!/bin/sh\ntouch {mark}\nexit 1\n")
+    commit(repo, "feat: signed (#1)")
+    raw = subprocess.run(["git", "-C", str(repo), "cat-file", "commit", "HEAD"], capture_output=True, check=True, env=GIT_ENV).stdout
+    header, _, message = raw.partition(b"\n\n")
+    signature = b"gpgsig -----BEGIN PGP SIGNATURE-----\n \n iQEzBAABCAAdFiEE\n -----END PGP SIGNATURE-----\n"
+    signed = subprocess.run(
+        ["git", "-C", str(repo), "hash-object", "-t", "commit", "-w", "--stdin"],
+        input=header + b"\n" + signature + b"\n" + message, capture_output=True, check=True, env=GIT_ENV,
+    ).stdout.decode().strip()
+    git(repo, "update-ref", "HEAD", signed)
+    git(repo, "config", "log.showSignature", "true")
+    git(repo, "config", "gpg.program", str(script))
+    subprocess.run(["git", "-C", str(repo), "log", "--format=%s", "-1"], capture_output=True, env=GIT_ENV)
+    assert mark.exists()  # the fixture works: plain git log runs gpg.program
+    mark.unlink()
+    context(repo)
+    for command in GUARDED_DIFFS:
+        run("bash_guard.py", bash(command) | {"cwd": str(repo)})
+    assert not mark.exists()
+
+
+FILTER_LISTING_ARGS = ["config", "--null", "--name-only", "--get-regexp", r"^filter\."]
+
+
+def test_skill_gate_and_bash_guard_share_their_git_hardening(repo):
+    gate_mod, guard_mod = hook_module("skill_gate.py"), hook_module("bash_guard.py")
+    for name in ("SAFE_PATH", "GIT_FLAGS", "CAP", "DEADLINE_SECONDS"):
+        assert getattr(gate_mod, name) == getattr(guard_mod, name), name
+    git(repo, "config", "filter.a.b.clean", "x")
+    git(repo, "config", "filter.c.process", "y")
+    git(repo, "config", "filter.a.b.required", "true")
+    exe = guard_mod.shutil.which("git", path=guard_mod.SAFE_PATH)
+    listing = guard_mod.run_git(exe, str(repo), FILTER_LISTING_ARGS, time.monotonic() + 5)
+    assert listing == gate_mod.Git(str(repo)).run(*FILTER_LISTING_ARGS)  # the runners agree
+    expected = []
+    for name in ("a.b", "c"):
+        for key in ("clean=", "smudge=", "process=", "required=false"):
+            expected += ["-c", f"filter.{name}.{key}"]
+    assert gate_mod.filter_overrides(listing) == guard_mod.filter_overrides(listing) == expected
+    for odd in ("filter.a=b.clean\0", "filter.�.clean\0", "filter.a.clean"):  # cannot be overridden or cut short
+        assert gate_mod.filter_overrides(odd) is None and guard_mod.filter_overrides(odd) is None, odd
+    assert gate_mod.filter_overrides("") == guard_mod.filter_overrides("") == []
+
+
+def test_a_timeout_keeps_the_asks_found_before_it(lifecycle, monkeypatch):
+    hook = hook_module("bash_guard.py")
+    real = hook.run_git
+
+    def slow_diff(exe, cwd, args, deadline):
+        if "diff" in args:
+            time.sleep(max(0.0, deadline - time.monotonic()) + 0.05)
+            return None
+        return real(exe, cwd, args, deadline)
+
+    monkeypatch.setattr(hook, "run_git", slow_diff)
+    monkeypatch.setattr(hook, "DEADLINE_SECONDS", 1)
+    assert SUBJECT in hook.evaluate(bash("git commit -m wip") | {"cwd": str(lifecycle)})
+
+
+def test_files_named_by_a_command_are_lstat_checked_before_opening(lifecycle, monkeypatch):
+    hook = hook_module("bash_guard.py")
+    os.mkfifo(lifecycle / "fifo")
+    opened = []
+    real = os.open
+
+    def recording_open(path, *args, **kw):
+        opened.append(os.fspath(path))
+        return real(path, *args, **kw)
+
+    monkeypatch.setattr(hook.os, "open", recording_open)
+    for command in ("git add fifo", "git commit -F fifo"):
+        hook.evaluate(bash(command) | {"cwd": str(lifecycle)})
+    assert not [p for p in opened if p.endswith("fifo")]
+
+
+def test_a_commit_naming_paths_scans_those_paths(repo):
+    (repo / "key.py").write_text("other = 1\n")
+    (repo / "other.py").write_text("x = 1\n")
+    (repo / ".env").write_text("FAKE=1\n")
+    commit(repo, "chore: key")
+    (repo / "key.py").write_text(f"other = 1\nkey = '{TOKEN_SAMPLES['ghp']}'\n")
+    msg = "-m 'fix(x): y (#1)'"
+    for command in (
+        f"git commit {msg} key.py", f"git commit {msg} -- key.py", f"git commit -i key.py {msg}",
+        f"git commit --only key.py {msg}", f"git commit -o {msg} key.py", f"git commit --include {msg} -- key.py",
+    ):
+        assert asks(command, repo, "patterns: ghp)"), command
+    assert guarded(f"git commit {msg} other.py", repo) is None
+    (repo / ".env").write_text("FAKE=2\n")
+    assert asks(f"git commit {msg} .env", repo, "1 secret file name")
+
+
+def test_adding_a_tracked_file_scans_only_its_added_lines(repo):
+    (repo / "key.py").write_text(f"key = '{TOKEN_SAMPLES['ghp']}'\n")
+    commit(repo, "chore: key")
+    (repo / "key.py").write_text(f"key = '{TOKEN_SAMPLES['ghp']}'\nother = 1\n")
+    assert guarded("git add key.py", repo) is None
+    (repo / "key.py").write_text(f"key = '{TOKEN_SAMPLES['ghp']}'\nother = '{TOKEN_SAMPLES['gho']}'\n")
+    text = guarded("git add key.py", repo)
+    assert text is not None and "1 token match" in text and "patterns: gho)" in text
+
+
+@pytest.mark.parametrize("command", [
+    "git worktree add ../fix-thing", "git worktree add -f ../wt/fix-thing", "git worktree add --lock --reason r ../fix-thing",
+    "git branch -c feature/1-x fix-thing", "git branch -C fix-thing", "git branch --copy feature/1-x fix-thing",
+])
+def test_worktree_add_and_branch_copy_check_the_new_name(repo, command):
+    assert asks(command, repo, BRANCH_NAME)
+
+
+@pytest.mark.parametrize("command", [
+    "git worktree add ../wt main", "git worktree add --detach ../fix-thing", "git worktree add -d ../fix-thing",
+    "git worktree add ../main", "git branch -c feature/1-x feature/8-y", "git worktree list",
+])
+def test_worktree_add_and_branch_copy_with_good_or_no_new_names_pass(repo, command):
+    assert guarded(command, repo) is None

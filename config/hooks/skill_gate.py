@@ -7,10 +7,13 @@ security-reviewer (a secret-prone category in the diff). It uses integers and fi
 On PreToolUse, `autopilot` prints an "ask": the model must not start autopilot unprompted. A
 typed /autopilot arrives as UserPromptExpansion and passes. Always exits 0.
 
-Git runs hardened. A diff in a repo with core.fsmonitor or diff.external set runs those
-programs (a spike left marker files). The flags override that config, GIT_* variables are
-dropped, git is found once on a fixed PATH, output is capped at 64 KiB, and one 5-second
-deadline covers every git call.
+Git runs hardened. A diff in a repo with core.fsmonitor, diff.external or a filter.<name>
+program set runs those programs, and so does `git log` with log.showSignature and gpg.program
+(spikes left marker files). The flags override that config; each filter name in the config is
+listed first and its programs emptied on every diff, and a name that cannot be overridden skips
+the diff. GIT_* variables are dropped, git is found once on a fixed PATH, output is capped at
+64 KiB, and one 5-second deadline covers every git call. bash_guard.py holds the same hardening;
+a test keeps the two equal.
 """
 
 import json
@@ -36,7 +39,12 @@ AUTOPILOT_REASON = "Autopilot runs only when you ask for it (global rule: do not
 FIXUP = re.compile(r"(fixup|squash|amend)!")
 WIP = re.compile(r"(?i)wip\b")
 CATEGORIES = {
-    "auth": re.compile(r"(?i)(auth|login|session|passw(or)?d|credential|oauth|jwt)"),
+    # Whole words only, so prose such as "author" or "the session ended" misses; `_` and digits
+    # still separate words, so `get_password` hits. A session counts only as a token name.
+    "auth": re.compile(
+        r"(?i)(?<![a-z])(auth(n|z|enticat(e[ds]?|ion|ors?)|ori[sz](e[ds]?|ation))?|logins?|passw(or)?ds?"
+        r"|credentials?|oauth|jwts?|session[_-]?(id|token|key|cookie)s?)(?![a-z])"
+    ),
     "input": re.compile(r"\b(json\.loads|yaml\.load|pickle\.loads?|eval\(|exec\()"),
     "secrets": re.compile(r"(?i)(secret|api[_-]?key|private[_ ]key|bearer)"),
     "shell": re.compile(r"\b(subprocess|os\.system|shell=True|child_process)"),
@@ -47,9 +55,35 @@ CATEGORIES = {
 # Override repo config that would run programs (see the module docstring).
 GIT_FLAGS = [
     "--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "diff.external=",
+    "-c", "log.showSignature=false",
 ]
 # A repo's diff driver or textconv filter is a program; keep diffs to built-in output.
 DIFF_FLAGS = ["--no-ext-diff", "--no-textconv"]
+# Lists the filter keys of every config file; reading config runs nothing.
+FILTER_LISTING = ["config", "--null", "--name-only", "--get-regexp", r"^filter\."]
+
+
+def filter_overrides(listing: str) -> list[str] | None:
+    """-c flags that empty the programs of each filter in a FILTER_LISTING output.
+
+    None when a name cannot be passed as `-c filter.<name>.<key>=` (it holds `=` or bytes that
+    are not UTF-8) or the listing is cut short; the caller then skips the diff.
+    """
+    if not listing:
+        return []
+    if not listing.endswith("\0") or "�" in listing or len(listing.encode()) >= CAP:
+        return None
+    flags: list[str] = []
+    names: set[str] = set()
+    for key in listing[:-1].split("\0"):
+        name = key[len("filter."):].rpartition(".")[0]  # filter.<name>.<key>; a name may hold dots
+        if "=" in name:
+            return None
+        if name and name not in names:
+            names.add(name)
+            for setting in ("clean=", "smudge=", "process=", "required=false"):
+                flags += ["-c", f"filter.{name}.{setting}"]
+    return flags
 
 
 class Git:
@@ -61,6 +95,17 @@ class Git:
         self.exe = shutil.which("git", path=SAFE_PATH)
         self.env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
         self.env["PATH"] = SAFE_PATH
+        self.filters: list[str] | None = None
+        self.filters_read = False
+
+    def diff(self, *args: str) -> str | None:
+        """`git diff` with the repo's filter programs emptied; None when they cannot be."""
+        if not self.filters_read:
+            self.filters_read = True
+            self.filters = filter_overrides(self.run(*FILTER_LISTING) or "")
+        if self.filters is None:
+            return None
+        return self.run(*self.filters, "diff", *args)
 
     def run(self, *args: str) -> str | None:
         if self.exe is None:
@@ -131,15 +176,15 @@ def review_context(cwd: str) -> str | None:
         return None
     base = base.strip()
     parts = []
-    numstat = git.run("diff", "--numstat", *DIFF_FLAGS, base) or ""
+    numstat = git.diff("--numstat", *DIFF_FLAGS, base) or ""
     lines = changed_lines(numstat)
     if lines > LARGE_DIFF:
         parts.append(f"the diff is {lines} changed lines (over {LARGE_DIFF}): run oh-my-claudecode:code-simplifier first")
     subjects = git.run("log", "--format=%s", f"{base}..HEAD") or ""
     if any(FIXUP.match(s) or WIP.match(s) for s in subjects.splitlines()):  # history cleanup first
         parts.append("the branch has fixup or WIP commits: run oh-my-claudecode:git-master to clean the history first")
-    paths = git.run("diff", "--name-only", *DIFF_FLAGS, base) or ""
-    patch = git.run("diff", "-U0", *DIFF_FLAGS, base) or ""
+    paths = git.diff("--name-only", *DIFF_FLAGS, base) or ""
+    patch = git.diff("-U0", *DIFF_FLAGS, base) or ""
     hits = security_hits(paths, patch)
     if hits:
         parts.append(f"the changes touch {', '.join(hits)}: run oh-my-claudecode:security-reviewer")

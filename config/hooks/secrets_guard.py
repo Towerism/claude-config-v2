@@ -11,10 +11,13 @@ Read, Grep, Glob look only at path-like fields (`file_path`, `path`, `glob`, and
 a Grep regex `pattern` is never scanned. A path denies when its basename, or its os.path.realpath
 (~ expanded), names a secret file, or it resolves to ~/.config/claude-config/deny-terms or the
 directory holding it (that directory only, so a search over the home directory is not denied). A
-glob denies when its basename names a secret file, or fnmatch matches one of `.env`, `.env.local`,
-`.env.production` or `deny-terms`. A glob whose basename opens with a wildcard (`*`, `?`, `[`)
-never denies: it is ordinary listing. Bash asks when a command token holds a secret name at its
-start or right after `/`, a quote or `=`.
+path that cannot be expanded or resolved (a lone surrogate, say) denies. A glob denies when its
+basename names a secret file, or fnmatch matches one of `.env`, `.env.local`, `.env.production` or
+`deny-terms`. A glob whose basename opens with a wildcard (`*`, `?`, `[`) never denies: it is
+ordinary listing. Each `{a,b}` alternative is checked on its own; a glob with more than 16
+alternatives or brace groups denies. Bash asks when a command token holds a secret name at its
+start or right after `/`, a quote or `=`, or a glob word there that opens with a literal character
+and matches one of the same four names (`.en?`, `.e*`).
 
 Nothing named by the input is opened, only resolved. The Bash scan is linear in the command
 length. Nothing from the input is printed. Always exits 0; one 5-second deadline; every error is
@@ -38,6 +41,10 @@ GLOB_NAMES = (".env", ".env.local", ".env.production", "deny-terms")
 PATH_FIELDS = {"Read": ("file_path",), "Grep": ("path", "glob"), "Glob": ("path", "pattern")}
 # Fields whose value is a glob, not a plain path.
 GLOB_FIELDS = {"glob", "pattern"}
+# A `{a,b}` group in a glob; each alternative is checked. Past these bounds the glob is denied.
+BRACE_GROUP = re.compile(r"\{([^{}]*)\}")
+MAX_ALTERNATIVES = 16
+MAX_BRACE_GROUPS = 16
 
 DENY_REASON = "Secret files (.env, deny-terms) are off limits: do not read, search or list them."
 ASK_REASON = "This command names a secret file (.env or deny-terms). Confirm you want it touched."
@@ -47,6 +54,9 @@ OPERATORS = str.maketrans({c: " " for c in ";&|<>()`"})
 # A word starts at a token start or after / ' " =, and ends before the next of those or a glob
 # character. Words never overlap, so the scan is linear in the command length.
 WORD = re.compile(r"(?:^|(?<=[/'\"=]))([^/'\"=*?\[\]]*)([*?\[]?)")
+# The same word starts, for the glob match: a token splits into pieces at / ' " =.
+PIECE_BREAK = re.compile(r"[/'\"=]")
+GLOB_CHARS = re.compile(r"[*?\[]")
 
 
 def names_secret(name: str) -> bool:
@@ -57,20 +67,57 @@ def names_secret(name: str) -> bool:
 
 
 def path_denied(value: str, deny_file: str | None) -> bool:
-    expanded = os.path.expanduser(value)
-    resolved = os.path.realpath(expanded)
-    if names_secret(os.path.basename(expanded)) or names_secret(os.path.basename(resolved)):
+    try:
+        expanded = os.path.expanduser(value)
+    except (ValueError, UnicodeError, OSError):
+        return True
+    if names_secret(os.path.basename(expanded)):
+        return True
+    try:
+        resolved = os.path.realpath(expanded)
+    except (ValueError, UnicodeError, OSError):
+        return True  # a path that cannot be resolved could name anything: deny
+    if names_secret(os.path.basename(resolved)):
         return True
     # The deny-terms directory counts, its parents do not: a search over $HOME is not a deny.
     return deny_file is not None and resolved in (deny_file, os.path.dirname(deny_file))
 
 
-def glob_denied(value: str) -> bool:
-    base = os.path.basename(value)
-    if names_secret(base):
-        return True
+def glob_matches_secret(base: str) -> bool:
+    """Whether a glob basename that opens with a literal character matches one of GLOB_NAMES."""
     # A basename opening with a wildcard is ordinary listing: `Glob **/*` must pass.
     return base[:1] not in ("", "*", "?", "[") and any(fnmatch.fnmatchcase(name, base) for name in GLOB_NAMES)
+
+
+def brace_alternatives(value: str) -> list[str] | None:
+    """The globs a `{a,b}` pattern stands for; None past MAX_ALTERNATIVES or MAX_BRACE_GROUPS."""
+    values = [value]
+    for _ in range(MAX_BRACE_GROUPS):
+        expanded = []
+        for v in values:
+            group = BRACE_GROUP.search(v)
+            if group is None:
+                expanded.append(v)
+            else:
+                head, tail = v[:group.start()], v[group.end():]
+                expanded += [head + alt + tail for alt in group.group(1).split(",")]
+            if len(expanded) > MAX_ALTERNATIVES:
+                return None
+        if expanded == values:
+            return values
+        values = expanded
+    return None if any(BRACE_GROUP.search(v) for v in values) else values
+
+
+def glob_denied(value: str) -> bool:
+    alternatives = brace_alternatives(value)
+    if alternatives is None:
+        return True  # too many alternatives to check: deny
+    for alt in alternatives:
+        base = os.path.basename(alt)
+        if names_secret(base) or glob_matches_secret(base):
+            return True
+    return False
 
 
 def deny_terms_file() -> str | None:
@@ -86,10 +133,15 @@ def command_names_secret(command: str) -> bool:
         for match in WORD.finditer(token):
             word, glob = match.groups()
             if glob:
-                # A glob word asks only when its literal start is .env or deny-terms.
+                # A glob word asks when its literal start is .env or deny-terms.
                 if word.startswith(".env") or word.startswith("deny-terms"):
                     return True
             elif names_secret(word):
+                return True
+        # A glob word with a literal start, such as `.en?` or `.e*`, asks when it matches a
+        # secret name, as the Glob rule does.
+        for piece in PIECE_BREAK.split(token):
+            if GLOB_CHARS.search(piece) and glob_matches_secret(piece):
                 return True
     return False
 
@@ -117,6 +169,7 @@ def main() -> None:
         if name == "Bash":
             command = fields.get("command")
             if isinstance(command, str) and "\0" not in command and command_names_secret(command):
+                signal.alarm(0)  # disarm before printing, so the alarm cannot fire mid-output
                 emit(permissionDecision="ask", permissionDecisionReason=ASK_REASON)
         elif name in PATH_FIELDS:
             deny_file = deny_terms_file()
@@ -125,6 +178,7 @@ def main() -> None:
                 if not isinstance(value, str) or "\0" in value:
                     continue
                 if glob_denied(value) if field in GLOB_FIELDS else path_denied(value, deny_file):
+                    signal.alarm(0)
                     emit(permissionDecision="deny", permissionDecisionReason=DENY_REASON)
                     return
     except Exception:

@@ -13,21 +13,28 @@ directory after the `cd` steps, else the payload's cwd. It asks when:
    `git branch -d/-D/-m/-M` names it; in a repo with an origin.
 3. the commit subject is not a Conventional Commit ending in (#N), (owner/repo#N) or (KEY-N), only on
    a lifecycle branch (type/{issue}-slug); a `chore(release):` subject and an unreadable message pass.
-4. a new branch name (checkout -b/-B, switch -c/-C, branch <name>, worktree add -b/-B) is not
-   type/{issue}-slug, in a repo with an origin; improve/, experiment/ and omc-team/ are exempt.
+4. a new branch name (checkout -b/-B, switch -c/-C, branch <name>, branch -c/-C, worktree add -b/-B,
+   and worktree add <path>, which names a new branch after the path) is not type/{issue}-slug, in a
+   repo with an origin; improve/, experiment/ and omc-team/ are exempt.
 5. the content going into a commit holds a secret file name or an added line matching a token pattern.
+   The content is the index, the work tree for -a or for the paths `git commit <paths>` names, the
+   added lines of a tracked file `git add` names, and the whole of an untracked one.
 6. `gh issue edit`, `gh issue create` or `gh api` adds the label `approved`.
 
-Anything it cannot determine passes. Every decision is "ask" with fixed reason strings; the only
+Anything it cannot determine passes; past the deadline, the asks already found still print. Every
+decision is "ask" with fixed reason strings; the only
 values added are counts and fixed pattern names. Not a security boundary: aliases, eval and
 scripts get past it; branch protection on the remote is the control that holds. OMC's
 git-guardrails hook covers only active OMC modes; this hook covers interactive sessions
 (ADR-0004).
 
-Hardening: git runs by absolute path with a fixed argv, no repo config that executes code, no
-external diff or textconv, no GIT_* variables, output capped at 64 KiB. A file a command names is
-opened O_NONBLOCK|O_NOFOLLOW, read only when fstat says regular, at most 64 KiB. One 5-second
-deadline covers the hook. Always exits 0; an unexpected error is one fixed code on stderr.
+Hardening: git runs by absolute path with a fixed argv, no repo config that executes code (fsmonitor,
+hooks, external diff, signature checks through gpg.program; each configured filter.<name> program is
+emptied on every diff, and a diff is skipped when a name cannot be overridden), no textconv, no GIT_*
+variables, output capped at 64 KiB; skill_gate.py holds the same hardening and a test keeps the two
+equal. A file a command names is read only when lstat says regular, then opened
+O_NONBLOCK|O_NOFOLLOW and checked again with fstat, at most 64 KiB. One 5-second deadline covers the
+hook. Always exits 0; an unexpected error is one fixed code on stderr.
 """
 
 import json
@@ -54,9 +61,12 @@ SAFE_PATH = "/usr/local/bin:/usr/bin:/bin"  # git is looked up here, never on th
 # Override repo config that would run programs (see the module docstring).
 GIT_FLAGS = [
     "--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "diff.external=",
+    "-c", "log.showSignature=false",
 ]
 # No color codes, so added_lines sees plain "+" lines; no external or textconv diff programs.
 DIFF_FLAGS = ["--no-ext-diff", "--no-textconv", "--no-color"]
+# Lists the filter keys of every config file; reading config runs nothing.
+FILTER_LISTING = ["config", "--null", "--name-only", "--get-regexp", r"^filter\."]
 
 # Copies of the lifecycle scripts' subject rules (github-issue-lifecycle/scripts/issue_lifecycle.py,
 # jira-ticket-lifecycle/scripts/ticket_lifecycle.py). A test compares them with `ast`, so they cannot drift.
@@ -111,7 +121,7 @@ RESERVED = {"if", "then", "else", "elif", "do", "while", "until", "!", "{", "tim
 REPO_VARIABLES = ("GIT_DIR=", "GIT_WORK_TREE=", "GIT_INDEX_FILE=")
 
 
-# The 5-second deadline passed: the hook passes silently.
+# The 5-second deadline passed: evaluate returns the asks found so far; the alarm in main passes silently.
 class Timeout(Exception):
     pass
 
@@ -395,6 +405,29 @@ def run_git(exe: str, cwd: str, args: list[str], deadline: float) -> str | None:
     return b"".join(chunks).decode("utf-8", errors="replace")
 
 
+def filter_overrides(listing: str) -> list[str] | None:
+    """-c flags that empty the programs of each filter in a FILTER_LISTING output.
+
+    None when a name cannot be passed as `-c filter.<name>.<key>=` (it holds `=` or bytes that
+    are not UTF-8) or the listing is cut short; the caller then skips the diff.
+    """
+    if not listing:
+        return []
+    if not listing.endswith("\0") or "�" in listing or len(listing.encode()) >= CAP:
+        return None
+    flags: list[str] = []
+    names: set[str] = set()
+    for key in listing[:-1].split("\0"):
+        name = key[len("filter."):].rpartition(".")[0]  # filter.<name>.<key>; a name may hold dots
+        if "=" in name:
+            return None
+        if name and name not in names:
+            names.add(name)
+            for setting in ("clean=", "smudge=", "process=", "required=false"):
+                flags += ["-c", f"filter.{name}.{setting}"]
+    return flags
+
+
 def git_parts(words: list[Word]) -> tuple[list[str] | None, str, list[Word]] | None:
     """The -C paths (None when --git-dir or --work-tree leaves the repo open), subcommand and arguments."""
     paths: list[str] | None = []
@@ -435,7 +468,10 @@ def join_path(base: str | None, path: str) -> str | None:
 def read_file(path: str, first_line: bool = False) -> bytes | None:
     """At most CAP bytes of a regular file, never following a final symlink and never blocking."""
     try:
-        # O_NONBLOCK: a FIFO or device named by -F cannot block the hook. O_NOFOLLOW: no symlink.
+        # lstat first: a FIFO, device or symlink is never opened at all.
+        if not stat.S_ISREG(os.lstat(path).st_mode):
+            return None
+        # O_NONBLOCK: a FIFO or device swapped in after the lstat cannot block. O_NOFOLLOW: no symlink.
         fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC)
     except (OSError, ValueError):
         return None
@@ -515,10 +551,11 @@ COMMIT_VALUE_LONG = {
 }
 
 
-def commit_options(args: list[Word]) -> tuple[list[tuple[str, Word]], list[str], bool, bool]:
-    """(the -m values, the -F values, whether the message comes from a commit, whether -a is set)."""
+def commit_options(args: list[Word]) -> tuple[list[tuple[str, Word]], list[str], bool, bool, list[Word]]:
+    """(the -m values, the -F values, whether the message comes from a commit, whether -a is set, the paths)."""
     messages: list[tuple[str, Word]] = []
     files: list[str] = []
+    paths: list[Word] = []
     reused = every = False
     i = 0
     while i < len(args):
@@ -526,6 +563,7 @@ def commit_options(args: list[Word]) -> tuple[list[tuple[str, Word]], list[str],
         text = word.text
         i += 1
         if text == "--":
+            paths += args[i:]
             break
         kind, value = None, None
         if text.startswith("--"):
@@ -554,6 +592,8 @@ def commit_options(args: list[Word]) -> tuple[list[tuple[str, Word]], list[str],
                     break
                 elif ch == "S":
                     break  # -S[<keyid>]: the rest is its value
+        else:
+            paths.append(word)  # git commit <paths>, also with --include or --only
         if value is None:
             continue
         if kind == "m":
@@ -562,11 +602,11 @@ def commit_options(args: list[Word]) -> tuple[list[tuple[str, Word]], list[str],
             files.append(value[0])
         elif kind == "C":
             reused = True
-    return messages, files, reused, every
+    return messages, files, reused, every, paths
 
 
 def commit_subject(args: list[Word], seg: Segment, cwd: str) -> str | None:
-    messages, files, reused, _ = commit_options(args)
+    messages, files, reused, _, _ = commit_options(args)
     if reused:  # -C, -c, --fixup and --squash reuse a message this hook does not read
         return None
     if messages:
@@ -671,6 +711,11 @@ class Guard:
             raise Timeout
         return out
 
+    def diff(self, top: str, *args: str) -> str | None:
+        """`git diff` with the repo's filter programs emptied; None when they cannot be."""
+        flags = self.cached(("filters", top), lambda: filter_overrides(self.git(top, *FILTER_LISTING) or ""))
+        return None if flags is None else self.git(top, *flags, "diff", *args)
+
     def cached(self, key: tuple, compute):
         if key not in self.cache:
             self.cache[key] = compute()
@@ -742,6 +787,10 @@ class Guard:
                 self.git_command(seg, words, cwd)
             elif name == "gh" and adds_approved(words[1:]):
                 self.ask(LABEL_REASON)
+        return self.verdict()
+
+    def verdict(self) -> str | None:
+        """The reasons found so far, the secret reason last; also used when the deadline cuts the walk short."""
         if self.secret_files or self.tokens:
             kinds = sorted({kind for kind, _ in self.tokens})
             self.ask(SECRET_REASON.format(
@@ -798,12 +847,20 @@ class Guard:
                 self.ask(SUBJECT_REASON)
         if self.add_and_commit:
             self.scan(top, "broad")
+        _, _, _, every, paths = commit_options(args)
         # -a commits tracked edits from the work tree, so scan against HEAD; otherwise scan the index.
-        self.scan(top, "head" if commit_options(args)[3] else "cached")
+        self.scan(top, "head" if every else "cached")
+        if paths:  # git commit <paths> takes those paths from the work tree as well
+            literal = [join_path(d, w.text) for w in paths]
+            if None in literal or any(w.text.startswith(":") for w in paths):
+                self.scan(top, "head")  # pathspec magic or an unknown path: scan every tracked edit
+            elif not self.scan_diff(top, "HEAD", literal):
+                self.scan_diff(top, "--cached", literal)  # no commit yet
 
     def add(self, top: str, d: str, args: list[Word], seg: Segment) -> None:
         broad = False
         options = True
+        files: list[str] = []
         for word in args:
             text = word.text
             if options and text == "--":
@@ -823,9 +880,18 @@ class Guard:
                     continue
                 if names_secret(os.path.basename(path)):
                     self.secret_files.add(path)
-                data = read_file(path)
-                if data is not None:
-                    self.scan_lines(data.decode("utf-8", errors="replace").split("\n"))
+                files.append(path)
+        if files:
+            # A tracked file brings only its added lines; an untracked one is new, so all of it is read.
+            listed = self.git(d, "ls-files", "-z", "--", *files)
+            tracked = {os.path.normpath(os.path.join(d, n)) for n in (listed or "").split("\0") if n}
+            if not (tracked and self.scan_diff(top, "HEAD", sorted(tracked))):
+                tracked = set()  # no commit yet: read every named file whole
+            for path in files:
+                if path not in tracked:
+                    data = read_file(path)
+                    if data is not None:
+                        self.scan_lines(data.decode("utf-8", errors="replace").split("\n"))
         if broad:
             self.scan(top, "broad")
 
@@ -853,15 +919,17 @@ class Guard:
                         self.untracked_left -= len(data)
                         self.scan_lines(data.decode("utf-8", errors="replace").split("\n"))
 
-    def scan_diff(self, top: str, rev: str) -> bool:
+    def scan_diff(self, top: str, rev: str, paths: list[str] = ()) -> bool:
+        """Scan the names and added lines of `git diff <rev> [-- <paths>]`; False when git gives none."""
+        limit = ["--", *paths] if paths else []
         # A deleted file is not in the commit, so its name is not checked.
-        names = self.git(top, "diff", *DIFF_FLAGS, "--name-only", "-z", "--diff-filter=d", rev)
+        names = self.diff(top, *DIFF_FLAGS, "--name-only", "-z", "--diff-filter=d", rev, *limit)
         if names is None:
             return False
         for name in names.split("\0"):
             if name and names_secret(os.path.basename(name)):
                 self.secret_files.add(os.path.join(top, name))
-        self.scan_lines(added_lines(self.git(top, "diff", *DIFF_FLAGS, "-U0", rev) or ""))
+        self.scan_lines(added_lines(self.diff(top, *DIFF_FLAGS, "-U0", rev, *limit) or ""))
         return True
 
     def scan_lines(self, lines) -> None:
@@ -936,7 +1004,7 @@ class Guard:
             self.ask(PUSH_REASON)
 
     def branch_command(self, top: str, d: str, args: list[Word], seg: Segment) -> None:
-        delete = move = other = remote = False
+        delete = move = copy = other = remote = False
         positional: list[str] = []
         i = 0
         while i < len(args):
@@ -951,6 +1019,8 @@ class Guard:
                     delete = True
                 elif name == "--move":
                     move = True
+                elif name == "--copy":
+                    copy = True
                 elif name in ("--remotes",):
                     remote = other = True
                 elif name not in ("--force", "--track", "--no-track", "--quiet", "--create-reflog", "--recurse-submodules"):
@@ -963,6 +1033,8 @@ class Guard:
                         delete = True
                     elif ch in "mM":
                         move = True
+                    elif ch in "cC":
+                        copy = True
                     elif ch == "r":
                         remote = other = True
                     elif ch == "u":
@@ -982,7 +1054,11 @@ class Guard:
             old = positional[0] if len(positional) >= 2 else self.branch(top)
             if self.has_origin(top) and self.is_default(top, old):
                 self.ask(PUSH_REASON)
-        elif not other and positional:  # git branch <name> creates a branch; list and copy modes do not
+        elif copy:
+            # git branch -c [<old>] <new> creates <new>.
+            if positional:
+                self.new_branch(top, positional[-1])
+        elif not other and positional:  # git branch <name> creates a branch; list modes do not
             self.new_branch(top, positional[0])
 
     # rule 4 and the branch a later commit lands on
@@ -1056,13 +1132,33 @@ class Guard:
             self.branches[top] = None if detach or target == "-" or EXPANSION in target else target
 
     def worktree(self, top: str, d: str, args: list[Word], seg: Segment) -> None:
-        """Rule 4 for `git worktree add -b/-B <name>`."""
+        """Rule 4 for `git worktree add -b/-B <name>`, and for `git worktree add <path>`, which
+        creates a branch named after the path's last component when no branch of that name exists."""
         if not args or args[0].text != "add":
             return
-        for i, word in enumerate(args[1:-1], 1):
-            if word.text in ("-b", "-B"):
-                self.new_branch(top, args[i + 1].text)
+        positional: list[str] = []
+        detach = False
+        i = 1
+        while i < len(args):
+            text = args[i].text
+            i += 1
+            if text in ("-b", "-B"):
+                if i < len(args):
+                    self.new_branch(top, args[i].text)
                 return
+            if text in ("-d", "--detach"):
+                detach = True
+            elif text == "--reason":
+                i += 1
+            elif text.startswith("-") and text != "-":
+                continue
+            else:
+                positional.append(text)
+        if detach or len(positional) != 1:  # a commit-ish names what to check out: no new branch
+            return
+        name = os.path.basename(positional[0].rstrip("/"))
+        if name and EXPANSION not in name and f"refs/heads/{name}" not in self.refs(top, f"refs/heads/{name}"):
+            self.new_branch(top, name)
 
 
 # ── entry ────────────────────────────────────────────────────────────────────
@@ -1081,11 +1177,12 @@ def evaluate(payload) -> str | None:
     # A relative or NUL cwd is not trusted; cd steps then have no base to resolve from.
     if not isinstance(cwd, str) or "\0" in cwd or not os.path.isabs(cwd):
         cwd = None
-    deadline = time.monotonic() + DEADLINE_SECONDS
+    guard = Guard(time.monotonic() + DEADLINE_SECONDS, shutil.which("git", path=SAFE_PATH))
     try:
-        segments = Parser(command).parse()
-        return Guard(deadline, shutil.which("git", path=SAFE_PATH)).check(segments, cwd)
-    except (Timeout, Unparsed):  # past the deadline or unparseable: pass, no ask
+        return guard.check(Parser(command).parse(), cwd)
+    except Timeout:  # past the deadline: keep the asks already found, skip the rest
+        return guard.verdict()
+    except Unparsed:  # unparseable: pass, no ask
         return None
 
 
