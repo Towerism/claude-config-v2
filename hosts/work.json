@@ -1,7 +1,7 @@
 {
   "name": "work",
   "defaultTracker": "jira",
-  "hooks": ["merge_confirm.py", "host_default.py"],
+  "hooks": ["merge_confirm.py", "host_default.py", "skill_gate.py"],
   "skills": [
     "github-issue-lifecycle",
     "gitea-issue-lifecycle",
