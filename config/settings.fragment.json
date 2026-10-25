@@ -8,6 +8,10 @@
       {
         "matcher": "Skill",
         "hooks": [{ "type": "command", "command": "python3 -I {claude_home}/hooks/skill_gate.py", "timeout": 5 }]
+      },
+      {
+        "matcher": "Read|Grep|Glob|Bash",
+        "hooks": [{ "type": "command", "command": "python3 -I {claude_home}/hooks/secrets_guard.py", "timeout": 5 }]
       }
     ],
     "UserPromptExpansion": [

@@ -44,7 +44,11 @@ def test_deploy_installs_everything_the_host_selects(home):
     settings = json.loads((home / "settings.json").read_text())
     assert settings["enabledPlugins"] == {"oh-my-claudecode@omc": True}
     commands = [h["command"] for g in settings["hooks"]["PreToolUse"] for h in g["hooks"]]
-    assert commands == [f"python3 -I {home}/hooks/merge_confirm.py", f"python3 -I {home}/hooks/skill_gate.py"]
+    assert commands == [
+        f"python3 -I {home}/hooks/merge_confirm.py",
+        f"python3 -I {home}/hooks/skill_gate.py",
+        f"python3 -I {home}/hooks/secrets_guard.py",
+    ]
     state = json.loads((home / "claude-config" / "state.json").read_text())
     assert state["host"] == "work" and state["defaultTracker"] == "jira"
     assert "{claude_home}" not in (home / "settings.json").read_text()
@@ -233,7 +237,7 @@ def test_retrying_after_a_failed_deploy_does_not_duplicate_hooks(home, monkeypat
     monkeypatch.setattr(cfg, "write_atomic", real)
     assert run(home, "deploy", "--host", "personal", "--yes") == 0
     settings = json.loads((home / "settings.json").read_text())
-    assert [len(g["hooks"]) for g in settings["hooks"]["PreToolUse"]] == [1, 1]
+    assert [len(g["hooks"]) for g in settings["hooks"]["PreToolUse"]] == [1, 1, 1]
     assert len(settings["hooks"]["UserPromptExpansion"]) == 1
     assert len(settings["hooks"]["SessionStart"]) == 1
 

@@ -1,4 +1,4 @@
-"""The hooks: merge_confirm asks before a PR merge; host_default states the tracker; skill_gate adds review context."""
+"""The hooks: merge_confirm asks before a PR merge; host_default states the tracker; skill_gate adds review context; secrets_guard blocks secret files."""
 
 import json
 import stat
@@ -476,3 +476,153 @@ def test_both_hosts_list_skill_gate_and_merge_confirm():
     for host in ("personal", "work"):
         listed = json.loads((ROOT / "hosts" / f"{host}.json").read_text())["hooks"]
         assert "skill_gate.py" in listed and "merge_confirm.py" in listed
+
+
+# secrets_guard
+
+
+def tool(name, **fields):
+    return {"hook_event_name": "PreToolUse", "tool_name": name, "tool_input": fields}
+
+
+def guard(payload, home):
+    return run("secrets_guard.py", payload, env={"HOME": str(home)})
+
+
+def decision(out):
+    return json.loads(out)["hookSpecificOutput"]["permissionDecision"]
+
+
+@pytest.fixture
+def fake_home(tmp_path):
+    home = tmp_path / "home"
+    (home / ".config" / "claude-config").mkdir(parents=True)
+    return home
+
+
+@pytest.mark.parametrize("tool_name,field", [("Read", "file_path"), ("Grep", "path"), ("Glob", "path")])
+@pytest.mark.parametrize("name", [".env", ".env.local", "deny-terms", ".env.production"])
+def test_secret_files_are_denied(fake_home, tool_name, field, name):
+    out = guard(tool(tool_name, **{field: f"/work/app/{name}"}), fake_home)
+    assert decision(out) == "deny"
+    assert json.loads(out)["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
+
+
+@pytest.mark.parametrize("tool_name,field", [("Read", "file_path"), ("Grep", "path"), ("Glob", "path")])
+@pytest.mark.parametrize("name", [".env.example", ".env.sample", ".env.template", ".envrc", "environment.ts", "notes.txt"])
+def test_other_files_pass(fake_home, tool_name, field, name):
+    assert guard(tool(tool_name, **{field: f"/work/app/{name}"}), fake_home) == ""
+
+
+def test_a_symlink_to_a_secret_file_is_denied_by_realpath(fake_home, tmp_path):
+    (tmp_path / ".env").write_text("FAKE=1\n")
+    (tmp_path / "notes").symlink_to(tmp_path / ".env")
+    assert decision(guard(tool("Read", file_path=str(tmp_path / "notes")), fake_home)) == "deny"
+
+
+def test_the_directory_holding_deny_terms_is_denied(fake_home):
+    folder = fake_home / ".config" / "claude-config"
+    assert decision(guard(tool("Grep", pattern="x", path=str(folder)), fake_home)) == "deny"
+    assert decision(guard(tool("Grep", pattern="x", path="~/.config/claude-config"), fake_home)) == "deny"
+    assert decision(guard(tool("Read", file_path=str(folder / "deny-terms")), fake_home)) == "deny"
+
+
+def test_the_home_directory_itself_is_not_denied(fake_home):
+    assert guard(tool("Grep", pattern="x", path=str(fake_home)), fake_home) == ""
+    assert guard(tool("Grep", pattern="x", path=str(fake_home / ".config")), fake_home) == ""
+
+
+@pytest.mark.parametrize("glob", [".env*", "**/.env", "src/.env.local", "deny-terms", "**/.env.production"])
+def test_secret_globs_are_denied(fake_home, glob):
+    assert decision(guard(tool("Grep", pattern="x", glob=glob), fake_home)) == "deny"
+
+
+def test_glob_tool_pattern_is_a_path_glob(fake_home):
+    assert decision(guard(tool("Glob", pattern="**/.env*"), fake_home)) == "deny"
+    assert guard(tool("Glob", pattern="**/*.py"), fake_home) == ""
+
+
+@pytest.mark.parametrize("glob", ["*.py", "**/*.md", ".envrc", ".env.example", "*", "**/*", "src/**/*.py", "[a-z]*", "?"])
+def test_other_globs_pass(fake_home, glob):
+    assert guard(tool("Grep", pattern="x", glob=glob), fake_home) == ""
+    assert guard(tool("Glob", pattern=glob), fake_home) == ""
+
+
+@pytest.mark.parametrize("glob", [".e*", ".*", ".env.staging", ".env", "deny-t*", "deny-terms", "src/.e*"])
+def test_globs_with_a_literal_start_still_match_secrets(fake_home, glob):
+    assert decision(guard(tool("Grep", pattern="x", glob=glob), fake_home)) == "deny"
+    assert decision(guard(tool("Glob", pattern=glob), fake_home)) == "deny"
+
+
+@pytest.mark.parametrize("pattern", ["process.env.API_KEY", r"\.env", "deny-terms", ".env"])
+def test_a_grep_regex_is_not_scanned(fake_home, pattern):
+    assert guard(tool("Grep", pattern=pattern, path="/work/app"), fake_home) == ""
+
+
+@pytest.mark.parametrize("command", [
+    "cat .env", "cat ./.env", "cat app/.env.local", "head -n1 '.env'", 'cat ".env"', "grep x .env*",
+    "source .env && run", "docker run --env-file=.env img", "cat ~/.config/claude-config/deny-terms",
+    "cat a;cat .env", "echo hi|cat .env", "cat deny-terms", "X=.env cmd",
+])
+def test_bash_naming_a_secret_file_asks(fake_home, command):
+    assert decision(guard(bash(command), fake_home)) == "ask"
+
+
+@pytest.mark.parametrize("command", [
+    "echo process.env.API_KEY", "cat .env.example", "cat .envrc", "cat src/environment.ts", "ls",
+    "cat myfile.env", "cat dotenv", "grep -r foo src", "echo a.env.b",
+])
+def test_bash_not_naming_a_secret_file_passes(fake_home, command):
+    assert guard(bash(command), fake_home) == ""
+
+
+@pytest.mark.parametrize("payload", [
+    b"", b"not json", b"[]", b"{}", b"\xff\xfe", b"[" * 100000, b"null", b'"x"',
+    json.dumps(tool("Read", file_path=7)).encode(),
+    json.dumps(tool("Read", file_path=None)).encode(),
+    json.dumps(tool("Read", file_path=["/x/.env"])).encode(),
+    json.dumps(tool("Read", file_path="/x/a\u0000.env")).encode(),
+    json.dumps(tool("Grep", glob={"a": 1})).encode(),
+    json.dumps(tool("Bash", command=7)).encode(),
+    json.dumps(tool("Bash", command="cat \u0000.env")).encode(),
+    json.dumps({"hook_event_name": "PreToolUse", "tool_name": "Read", "tool_input": []}).encode(),
+    json.dumps({"hook_event_name": "PreToolUse", "tool_name": 7, "tool_input": {}}).encode(),
+    json.dumps(tool("Write", file_path="/x/.env")).encode(),
+    json.dumps(tool("Skill", skill=".env")).encode(),
+])
+def test_secrets_guard_never_fails(fake_home, payload):
+    assert guard(payload, fake_home) == ""
+
+
+def test_secrets_guard_is_linear_on_long_commands(fake_home):
+    start = time.monotonic()
+    guard(bash("cat " + "'" * 200000), fake_home)
+    guard(bash("a=" * 100000), fake_home)
+    assert time.monotonic() - start < 5
+
+
+def test_secrets_guard_is_registered_and_listed():
+    hook = {"type": "command", "command": "python3 -I {claude_home}/hooks/secrets_guard.py", "timeout": 5}
+    assert entries("PreToolUse", "secrets_guard.py") == [("Read|Grep|Glob|Bash", hook)]
+    for host in ("personal", "work"):
+        assert "secrets_guard.py" in json.loads((ROOT / "hosts" / f"{host}.json").read_text())["hooks"]
+
+
+def test_secrets_guard_prints_only_checked_values(fake_home, tmp_path):
+    word = "LEAKCANARY"
+    link = tmp_path / f"{word}.link"
+    (tmp_path / ".env").write_text("FAKE=1\n")
+    link.symlink_to(tmp_path / ".env")
+    payloads = [
+        tool("Read", file_path=f"/x/{word}/.env"), tool("Read", file_path=str(link)),
+        tool("Grep", pattern=word, glob=f"{word}/.env*"), tool("Glob", pattern=f"{word}/.env*"),
+        bash(f"cat {word}/.env"),
+    ]
+    for payload in payloads:
+        done = subprocess.run(
+            [sys.executable, "-I", str(HOOKS / "secrets_guard.py")],
+            input=json.dumps(payload).encode(), capture_output=True,
+            env={"PATH": "/usr/bin:/bin", "HOME": str(fake_home)}, timeout=10,
+        )
+        assert done.returncode == 0 and done.stdout and done.stderr == b""
+        assert word.encode() not in done.stdout and str(tmp_path).encode() not in done.stdout
