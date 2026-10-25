@@ -23,7 +23,7 @@ LABELS = [
 
 
 def claim_block():
-    blocks = re.findall(r"```bash\n(.*?)```", SKILL, re.S)
+    blocks = re.findall(r"```bash\n(.*?)```", SKILL, re.DOTALL)
     return next(b for b in blocks if 'gh label create "in progress"' in b)
 
 

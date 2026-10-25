@@ -26,12 +26,12 @@ TRACKERS = hook_trackers()
 
 SKILLS = sorted(p for p in (ROOT / "config" / "skills").iterdir() if p.is_dir())
 HOSTS = sorted((ROOT / "hosts").glob("*.json"))
-PERSONAL = re.compile(r"/home/|/Users/|/omc-dev|mfracker", re.I)
+PERSONAL = re.compile(r"/home/|/Users/|/omc-dev|mfracker", re.IGNORECASE)
 
 
 def front_matter(skill):
     text = (skill / "SKILL.md").read_text()
-    match = re.match(r"---\n(.*?)\n---\n", text, re.S)
+    match = re.match(r"---\n(.*?)\n---\n", text, re.DOTALL)
     assert match, f"{skill.name}: SKILL.md has no front matter"
     return dict(line.split(": ", 1) for line in match.group(1).splitlines() if ": " in line)
 

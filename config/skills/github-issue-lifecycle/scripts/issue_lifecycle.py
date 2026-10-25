@@ -176,7 +176,7 @@ def branch_name(cc_type, issue, title, hotfix=False):
 
 SUBJECT_RE = re.compile(rf"^(?:{'|'.join(CC_TYPES)})(?:\([^()\s]+\))?(!)?: \S.*$")
 ISSUE_REF_RE = re.compile(r"\((?:[\w.-]+/[\w.-]+)?#\d+\)$")
-BREAKING_FOOTER_RE = re.compile(r"^BREAKING[ -]CHANGE: \S", re.M)
+BREAKING_FOOTER_RE = re.compile(r"^BREAKING[ -]CHANGE: \S", re.MULTILINE)
 
 
 def check_commit(message):
@@ -201,10 +201,10 @@ def check_pr_body(body, issue, repo=None):
     lines = [line.strip() for line in body.replace("\r\n", "\n").split("\n")]
     target = f"{repo}#{issue}" if repo else f"#{issue}"
     problems = []
-    if not any(re.fullmatch(r"closes " + re.escape(target), line, re.I) for line in lines):
+    if not any(re.fullmatch(r"closes " + re.escape(target), line, re.IGNORECASE) for line in lines):
         problems.append(("missing-closes", f"needs 'Closes {target}' alone on its own line"))
     spec_targets = "|".join(re.escape(t) for t in {target, f"#{issue}"})
-    spec_line = re.compile(rf"spec: (?:{spec_targets})", re.I)
+    spec_line = re.compile(rf"spec: (?:{spec_targets})", re.IGNORECASE)
     if not any(spec_line.fullmatch(line) for line in lines):
         problems.append(("missing-spec-line", f"needs a 'Spec: {target}' line"))
     if not any(line.startswith("#") and "review" in line.lower() for line in lines):
@@ -215,20 +215,20 @@ def check_pr_body(body, issue, repo=None):
 # ── diff hygiene ─────────────────────────────────────────────────────────────
 
 SPEC_ID_RE = re.compile(
-    r"(?<![A-Za-z0-9])(?:(?:fr|nfr|ac|ec|os)-\d+(?![0-9])|(?:fr|nfr|ac|ec)\d+(?=_))", re.I
+    r"(?<![A-Za-z0-9])(?:(?:fr|nfr|ac|ec|os)-\d+(?![0-9])|(?:fr|nfr|ac|ec)\d+(?=_))", re.IGNORECASE
 )
 # In documentation an ID counts in any spelling (FR-23, FR23, fr_23), but only as a
 # word of its own: the prefix may not follow a letter or digit.
-DOC_ID_RE = re.compile(r"(?<![A-Za-z0-9])(nfr|fr|ac|ec|os)[-_]?(\d+)", re.I)
+DOC_ID_RE = re.compile(r"(?<![A-Za-z0-9])(nfr|fr|ac|ec|os)[-_]?(\d+)", re.IGNORECASE)
 DOC_ID_GREP = "(nfr|fr|ac|ec|os)[-_]?[0-9]+"
-SPEC_BASENAME_RE = re.compile(r"(^spec(-.+)?\.md$|-spec\.md$|\.spec\.md$)", re.I)
+SPEC_BASENAME_RE = re.compile(r"(^spec(-.+)?\.md$|-spec\.md$|\.spec\.md$)", re.IGNORECASE)
 MARKDOWN = (".md", ".markdown")
 FROZEN_SEGMENTS = {"history", "archive"}
 
 
 def normal_id(text):
     """The comparable form of an ID: lowercase prefix, hyphen, number without leading zeros."""
-    match = re.match(r"([a-z]+)[-_]?(\d+)", text, re.I)
+    match = re.match(r"([a-z]+)[-_]?(\d+)", text, re.IGNORECASE)
     return f"{match.group(1).lower()}-{int(match.group(2))}"
 
 
@@ -336,7 +336,7 @@ ANSWER_HEAD = "Path declaration answer"
 DECL_LINE_RE = re.compile(r"- (run|waived|n/a): ([^\s—]+)(?:\s+—\s*(.*))?")
 OPEN_QUOTES, CLOSE_QUOTES = '"“', '"”'
 FENCE_RE = re.compile(r"(```|~~~)")
-SEAMS_RE = re.compile(r"#{1,6}\s+seams\b", re.I)
+SEAMS_RE = re.compile(r"#{1,6}\s+seams\b", re.IGNORECASE)
 
 
 def declaration_lines(text):

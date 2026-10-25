@@ -304,8 +304,8 @@ def branch_name(cc_type, key, title, hotfix=False):
 
 SUBJECT_RE = re.compile(rf"^(?:{'|'.join(CC_TYPES)})(?:\([^()\s]+\))?(!)?: \S.*$")
 TICKET_REF_RE = re.compile(r" \(([A-Z][A-Z0-9_]{1,9}-[0-9]+)\)$")
-BREAKING_FOOTER_RE = re.compile(r"^BREAKING[ -]CHANGE: \S", re.M)
-SPEC_TEXT_RE = re.compile(r"^(#{1,6} *AC-\d+|Given |When |Then )", re.M)
+BREAKING_FOOTER_RE = re.compile(r"^BREAKING[ -]CHANGE: \S", re.MULTILINE)
+SPEC_TEXT_RE = re.compile(r"^(#{1,6} *AC-\d+|Given |When |Then )", re.MULTILINE)
 
 
 def check_commit(message, key=None):
@@ -337,7 +337,7 @@ def check_pr_body(body, key, site):
         problems.append(
             ("missing-ticket-line", f"the first line must be 'Ticket: {site}/browse/{key}'")
         )
-    spec_line = re.compile(rf"spec: {re.escape(key)}", re.I)
+    spec_line = re.compile(rf"spec: {re.escape(key)}", re.IGNORECASE)
     if not any(spec_line.fullmatch(line) for line in lines):
         problems.append(("missing-spec-line", f"needs a 'Spec: {key}' line"))
     if not any(line.startswith("#") and "review" in line.lower() for line in lines):
@@ -355,17 +355,17 @@ def check_pr_body(body, key, site):
 # ── diff hygiene (the same rules as the GitHub lifecycle skill's script) ─────
 
 SPEC_ID_RE = re.compile(
-    r"(?<![A-Za-z0-9])(?:(?:fr|nfr|ac|ec|os)-\d+(?![0-9])|(?:fr|nfr|ac|ec)\d+(?=_))", re.I
+    r"(?<![A-Za-z0-9])(?:(?:fr|nfr|ac|ec|os)-\d+(?![0-9])|(?:fr|nfr|ac|ec)\d+(?=_))", re.IGNORECASE
 )
-DOC_ID_RE = re.compile(r"(?<![A-Za-z0-9])(nfr|fr|ac|ec|os)[-_]?(\d+)", re.I)
+DOC_ID_RE = re.compile(r"(?<![A-Za-z0-9])(nfr|fr|ac|ec|os)[-_]?(\d+)", re.IGNORECASE)
 DOC_ID_GREP = "(nfr|fr|ac|ec|os)[-_]?[0-9]+"
-SPEC_BASENAME_RE = re.compile(r"(^spec(-.+)?\.md$|-spec\.md$|\.spec\.md$)", re.I)
+SPEC_BASENAME_RE = re.compile(r"(^spec(-.+)?\.md$|-spec\.md$|\.spec\.md$)", re.IGNORECASE)
 MARKDOWN = (".md", ".markdown")
 FROZEN_SEGMENTS = {"history", "archive"}
 
 
 def normal_id(text):
-    match = re.match(r"([a-z]+)[-_]?(\d+)", text, re.I)
+    match = re.match(r"([a-z]+)[-_]?(\d+)", text, re.IGNORECASE)
     return f"{match.group(1).lower()}-{int(match.group(2))}"
 
 
@@ -474,7 +474,7 @@ ANSWER_HEAD = "Path declaration answer"
 DECL_LINE_RE = re.compile(r"- (run|waived|n/a): ([^\s—]+)(?:\s+—\s*(.*))?")
 OPEN_QUOTES, CLOSE_QUOTES = '"“', '"”'
 FENCE_RE = re.compile(r"(```|~~~)")
-SEAMS_RE = re.compile(r"#{1,6}\s+seams\b", re.I)
+SEAMS_RE = re.compile(r"#{1,6}\s+seams\b", re.IGNORECASE)
 
 
 def declaration_lines(text):
@@ -1469,7 +1469,7 @@ def cmd_sync_spec(res, jira, cfg, key, args):
         if len(description) > MAX_DESCRIPTION
         else jira.run("issue", "edit", key, "-b", description, "--no-input")
     )
-    if rc != 0 and not re.search(r"too long|exceed|limit", err + out, re.I):
+    if rc != 0 and not re.search(r"too long|exceed|limit", err + out, re.IGNORECASE):
         return res.step("description", "failed", error_text(rc, out, err, "jira issue edit"))
     rest = None
     if rc != 0:
