@@ -6,11 +6,12 @@ oh-my-claudecode (OMC) owns the development workflow. These rules add guardrails
 
 1. Unclear or large request: `/oh-my-claudecode:deep-interview`, then `/oh-my-claudecode:ralplan` (Planner, Architect and Critic loop until they agree; that loop is the plan review). A new repo: `/oh-my-claudecode:drydock` first.
 2. Start: the lifecycle skill for the tracker, `github-issue-lifecycle`, `gitea-issue-lifecycle` or `jira-ticket-lifecycle` (it owns claim, approval and merge even when `/launch`, `/harbor` or `/psm` is running; launch's parent issue holds the spec then), for the tracker the repo's CLAUDE.md names, else the host default stated at session start. Every code-change request in a repo with a tracker starts here, before editing code, even a bare "fix X".
-3. Spec: the deep-interview spec or ralplan plan, stored on the issue where the lifecycle skill says.
-4. Implement: `/oh-my-claudecode:execute` with `/oh-my-claudecode:tdd` for all code.
-5. Review: `/oh-my-claudecode:review` on the diff once, before the PR.
-6. Verify: `/oh-my-claudecode:verify`, then `/oh-my-claudecode:pr` for the body. Quote the test, lint and typecheck output before saying done.
-7. Merge: only after the user authorizes it; the lifecycle skill closes out.
+3. Test plan: the `oh-my-claudecode:test-engineer` agent plans the tests (seams, cases, expected behaviour) from the request, before any spec is written.
+4. Spec: the deep-interview spec or ralplan plan, written after the test plan and built on it, stored on the issue where the lifecycle skill says.
+5. Implement: `/oh-my-claudecode:execute` with `/oh-my-claudecode:tdd` for all code.
+6. Review: `/oh-my-claudecode:review` on the diff once, before the PR.
+7. Verify: `/oh-my-claudecode:verify`, then `/oh-my-claudecode:pr` for the body. Quote the test, lint and typecheck output before saying done.
+8. Merge: only after the user authorizes it; the lifecycle skill closes out.
 
 Prose: apply `oh-my-claudecode:minimal-prose-discipline` to commit messages, issue and PR text, code comments and error messages, and `oh-my-claudecode:agent-doc-discipline` to documents agents consume.
 Text a person reads later (commits, issues, PRs, READMEs, ADRs) is for a cold reader: state the point first, name the issue, file or command instead of "as discussed", and cut AI-tell filler.

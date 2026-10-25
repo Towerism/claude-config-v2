@@ -152,6 +152,14 @@ def test_global_rules_stay_short_and_name_only_real_skills():
     assert "writing-docs" not in text
 
 
+def test_workflow_plans_the_tests_before_the_spec():
+    text = (ROOT / "config" / "CLAUDE.global.md").read_text()
+    steps = re.findall(r"^\d+\. (.*)$", text, re.M)
+    plan = next(i for i, s in enumerate(steps) if "oh-my-claudecode:test-engineer" in s)
+    spec = next(i for i, s in enumerate(steps) if s.startswith("Spec:"))
+    assert plan < spec
+
+
 def test_nothing_personal_is_committed():
     for path in ROOT.rglob("*"):
         if path.is_file() and ".git" not in path.parts and ".venv" not in path.parts and path.suffix in {".md", ".json", ".py", ".toml"}:
