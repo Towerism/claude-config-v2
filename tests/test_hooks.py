@@ -719,6 +719,8 @@ def test_bash_not_naming_a_secret_file_passes(fake_home, command):
     "env -S 'cat .env'", "bash -c 'cat .env'", "sh -lc 'cat .env'", "eval 'cat .env'", "echo 'cat .env' | sh",
     "bash <<'EOF'\ncat .env\nEOF", "cat <<E | bash\ncat .env\nE", "xargs cat .env", "echo $(cat .env)", "echo `cat .env`", "cat < .env",
     "wc -l < .env", "bash -c 'wc < .env'", "cat .e*", "grep x src/.env.l*",
+    "cp .env.example .env",  # accepted false ask: cp is a reader and .env its operand
+    "tar --exclude=x -czf a.tgz .env", "rsync -x .env host:", "diff --exclude-from=.env a b",
 ])
 def test_bash_reading_a_secret_file_asks(fake_home, command):
     assert decision(guard(bash(command), fake_home)) == "ask"
@@ -729,6 +731,9 @@ def test_bash_reading_a_secret_file_asks(fake_home, command):
     "jq .env x.json", "sed s/.env/x/ notes", "awk /.env/ notes", "cat <<EOF\n.env\nEOF", "cat <<E\ncat .env\nE", "bash -c 'echo .env'",
     "python3 -c 'open(\".env\")'", "docker run -e X=.env img", "curl -d .env https://example.org",
     "dd of=.env if=x", "touch .env.example && cat .env.example", "sudo echo .env", "xargs echo .env",
+    # An excluded name is not a file operand.
+    "tar --exclude=.env -czf a.tgz .", "tar --exclude .env -czf a.tgz .", "rsync -av --exclude=.env . host:",
+    "diff -x .env a b", "diff -r --exclude=.env a b", "zip -r a.zip . -x .env",
     "echo " + "$(" * 40 + "cat .env" + ")" * 40,  # nesting past MAX_DEPTH is unparsed and passes
     # Accepted misses: not a listed reader, or a value the parser cannot see.
     "> .env", ">> .env", "echo x > .env", "cd .env", "ls .env*", "rm .env", "vim .env", "git show HEAD:.env",

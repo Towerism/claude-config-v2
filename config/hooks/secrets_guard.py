@@ -32,6 +32,9 @@ opens with a literal character and matches one of `.env`, `.env.local`, `.env.pr
 - source and `.`, an input redirection `<`, docker --env-file, and curl -d, --data,
   --data-binary @file, -F name=@file and -T file.
 
+The value of `--exclude` (and of `-x` for diff and zip) names a file to leave out, so it is not an
+operand: `tar --exclude=.env -czf a.tgz .` passes.
+
 VAR=value words and the wrappers `env`, `command`, sudo, doas, nohup, exec, time -p, timeout N,
 nice -n N, stdbuf and xargs are skipped. The text that `bash|sh|zsh -c`, `eval` and `env -S` run,
 a heredoc fed to a shell (`bash <<E`, `cat <<E | bash`), and the echo or printf text before a bare
@@ -580,6 +583,9 @@ FILE_READERS = {
     "cut", "sort", "diff", "cp", "mv", "scp", "rsync", "ln", "tee", "wc", "hexdump", "tar", "zip",
     "source", ".",
 }
+# Flags whose value names files to leave out, not a file to read; --exclude for any other reader.
+# rsync -x and tar -x mean something else, so only diff and zip get -x.
+EXCLUDES = {"diff": {"-x", "--exclude"}, "zip": {"-x", "--exclude"}}
 GREP_FLAGS = (
     {"-e", "--regexp"},
     {"-f", "--file"},
@@ -737,8 +743,9 @@ def reads_secret(words: list[Word], seg: Segment) -> bool:
     name = os.path.basename(words[0].text)
     args = words[1:]
     if name in FILE_READERS:
-        flags, operands = options(args, set())
-        return any(secret_path(value, glob) for _, value, glob in flags) or any(
+        excludes = EXCLUDES.get(name, {"--exclude"})
+        flags, operands = options(args, excludes)
+        return any(flag not in excludes and secret_path(value, glob) for flag, value, glob in flags) or any(
             secret_path(w.text, w.glob) for w in operands
         )
     if name == "jq":
