@@ -1,6 +1,8 @@
-"""The hooks: merge_confirm asks before a PR merge; host_default states the tracker; skill_gate adds review context; secrets_guard blocks secret files."""
+"""The hooks: merge_confirm asks before a PR merge; host_default states the tracker; skill_gate adds review context; secrets_guard blocks secret files; bash_guard asks before a command breaks a source-control rule."""
 
+import ast
 import json
+import os
 import stat
 import subprocess
 import sys
@@ -8,7 +10,7 @@ import time
 
 import pytest
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, load
 
 HOOKS = ROOT / "config" / "hooks"
 
@@ -406,10 +408,14 @@ def test_hooks_do_not_run_repo_config(repo, tmp_path):
     write_lines(repo, "big.txt", 301)
     commit(repo, "feat: big (#1)")
     write_lines(repo, "base.txt", 30)
+    (repo / "new.txt").write_text("row\n")
+    git(repo, "add", "base.txt")
     for f in marks.iterdir():  # the test's own git calls ran the scripts; only the hook's count
         f.unlink()
     assert "code-simplifier" in context(repo)
     run("merge_confirm.py", bash("gh pr merge 1 --squash"))
+    for command in ("git add -A && git commit -m 'fix(x): y (#1)'", "git commit -am 'fix(x): y (#1)'", "git commit -m x"):
+        run("bash_guard.py", bash(command) | {"cwd": str(repo)})
     assert list(marks.iterdir()) == []
 
 
@@ -433,6 +439,18 @@ def test_hooks_print_only_checked_values(repo):
     runs = [("skill_gate.py", review_payload(repo) | {"extra": word})]
     runs += [("merge_confirm.py", bash(c)) for c in (
         f"gh pr merge 1 --squash --body {word}", f"gh pr merge {word} -s", f"gh pr merge {word}",
+    )]
+    git(repo, "checkout", "-q", "-b", "feature/7-x")
+    (repo / f"{word}.py").write_text(f"key = '{TOKEN_SAMPLES['ghp']}'  # {word}\n")
+    (repo / ".env").write_text(f"FAKE={word}\n")
+    runs += [("bash_guard.py", bash(c) | {"cwd": str(repo)}) for c in (
+        f"git commit -m '{word} subject'",
+        f"git checkout -b {word}",
+        f"git add {word}.py .env && git commit -m 'fix(x): {word} (#7)'",
+        f"git add -A && git commit -m 'fix(x): y (#7)'",
+        f"cd {repo} && git switch main && git commit -m 'fix(x): {word} (#7)'",
+        f"git push origin HEAD:main {word}",
+        f"gh issue edit {word} --add-label approved,{word}",
     )]
     for name, payload in runs:
         done = subprocess.run(
@@ -626,3 +644,572 @@ def test_secrets_guard_prints_only_checked_values(fake_home, tmp_path):
         )
         assert done.returncode == 0 and done.stdout and done.stderr == b""
         assert word.encode() not in done.stdout and str(tmp_path).encode() not in done.stdout
+
+
+# bash_guard
+
+# Phrases of each rule's fixed reason, so a test names the rule that asked.
+COMMIT_DEFAULT = "lands on the default branch"
+PUSH_DEFAULT = "targets the default branch"
+SUBJECT = "commit subject"
+BRANCH_NAME = "branch name"
+SECRET = "secret file name"
+LABEL = "approved label"
+GOOD = "fix(x): y (#7)"
+
+# Test tokens are built by concatenation so this file never holds one.
+TOKEN_SAMPLES = {
+    "sk": "sk-" + "Ab1" * 8,
+    "ghp": "ghp_" + "a1" * 18,
+    "gho": "gho_" + "b2" * 18,
+    "github_pat": "github_pat_" + "c3_" * 8,
+    "xox": "xoxb-" + "12345-" * 3,
+}
+
+
+def guarded(command, cwd=None, env=None):
+    payload = bash(command) | ({"cwd": str(cwd)} if cwd is not None else {})
+    out = run("bash_guard.py", payload, env)
+    if not out:
+        return None
+    hook = json.loads(out)["hookSpecificOutput"]
+    assert out.count("\n") == 1 and hook["hookEventName"] == "PreToolUse" and hook["permissionDecision"] == "ask"
+    return hook["permissionDecisionReason"]
+
+
+def asks(command, cwd, phrase):
+    text = guarded(command, cwd)
+    return text is not None and phrase in text
+
+
+@pytest.fixture
+def on_main(repo):
+    """The repo fixture's work tree, back on main (origin/HEAD is main)."""
+    git(repo, "checkout", "-q", "main")
+    return repo
+
+
+@pytest.fixture
+def lifecycle(repo):
+    """The work tree on the lifecycle branch feature/7-x."""
+    git(repo, "checkout", "-q", "-b", "feature/7-x")
+    return repo
+
+
+def module(path, name):
+    """Import a file by path without leaving bytecode next to it."""
+    before = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        return load(path, name)
+    finally:
+        sys.dont_write_bytecode = before
+
+
+def hook_module(name):
+    return module(HOOKS / name, f"hook_{name[:-3]}_under_test")
+
+
+# rule 1: never commit to the default branch
+
+
+def test_commit_on_the_default_branch_asks(on_main):
+    assert asks(f"git commit -m '{GOOD}'", on_main, COMMIT_DEFAULT)
+    assert asks("git commit", on_main, COMMIT_DEFAULT)
+
+
+def test_commit_on_a_feature_branch_passes(repo):
+    assert guarded("git commit -m 'fix(x): y (#1)'", repo) is None
+
+
+def test_commit_in_a_repo_without_origin_passes(on_main):
+    git(on_main, "remote", "remove", "origin")
+    assert guarded(f"git commit -m '{GOOD}'", on_main) is None
+
+
+def test_default_falls_back_to_main_or_master_without_origin_head(on_main):
+    git(on_main, "remote", "set-head", "origin", "--delete")
+    assert asks(f"git commit -m '{GOOD}'", on_main, COMMIT_DEFAULT)
+    git(on_main, "branch", "-q", "-m", "main", "master")
+    assert guarded(f"git commit -m '{GOOD}'", on_main) is None  # origin/main still names main
+    git(on_main, "update-ref", "-d", "refs/remotes/origin/main")
+    assert asks(f"git commit -m '{GOOD}'", on_main, COMMIT_DEFAULT)
+
+
+def test_origin_head_names_the_default_branch(on_main):
+    git(on_main, "checkout", "-q", "-b", "trunk")
+    git(on_main, "push", "-q", "origin", "trunk")
+    git(on_main, "remote", "set-head", "origin", "trunk")
+    assert asks(f"git commit -m '{GOOD}'", on_main, COMMIT_DEFAULT)
+    git(on_main, "checkout", "-q", "main")
+    assert guarded(f"git commit -m '{GOOD}'", on_main) is None
+
+
+@pytest.fixture
+def sibling(on_main, tmp_path):
+    """work on main, and a linked worktree ../wt on feature/7-x."""
+    git(on_main, "worktree", "add", "-q", "-b", "feature/7-x", str(tmp_path / "wt"))
+    return on_main, tmp_path / "wt"
+
+
+def test_a_sibling_worktree_commit_is_judged_by_that_worktree(sibling):
+    work, wt = sibling
+    for command in (f"cd ../wt && git commit -m '{GOOD}'", f"git -C ../wt commit -m '{GOOD}'", f"cd .. && git -C wt commit -m '{GOOD}'"):
+        assert guarded(command, work) is None, command
+    assert asks("cd ../wt && git commit -m 'bad subject'", work, SUBJECT)
+    for command in (f"git -C ../work commit -m '{GOOD}'", f"cd ../work && git commit -m '{GOOD}'", f"cd {work} && git commit -m '{GOOD}'"):
+        assert asks(command, wt, COMMIT_DEFAULT), command
+
+
+@pytest.mark.parametrize("command", [
+    "cd \"$X\" && git commit -m x",
+    "cd - && git commit -m x",
+    "git -C \"$(pwd)\" commit -m x",
+    "git --git-dir=.git commit -m x",
+    "git --work-tree . commit -m x",
+    "GIT_DIR=.git git commit -m x",
+    "cd /nonexistent/dir && git commit -m x",
+])
+def test_an_undeterminable_target_passes(on_main, command):
+    assert guarded(command, on_main) is None
+
+
+def test_no_cwd_passes(on_main):
+    assert guarded("git commit -m x") is None
+    assert asks(f"git -C {on_main} commit -m x", None, COMMIT_DEFAULT)
+
+
+def test_checkout_and_switch_apply_in_order(on_main, repo):
+    assert guarded(f"git checkout -b feature/7-x && git commit -m '{GOOD}'", on_main) is None
+    git(on_main, "checkout", "-q", "feature/1-x")
+    assert asks(f"git switch main && git commit -m '{GOOD}'", repo, COMMIT_DEFAULT)
+    assert asks(f"git checkout main && git commit -m '{GOOD}'", repo, COMMIT_DEFAULT)
+    assert asks(f"git checkout -q main; git commit -m '{GOOD}'", repo, COMMIT_DEFAULT)
+    assert guarded(f"git checkout -- main.txt && git commit -m 'fix(x): y (#1)'", repo) is None
+    assert guarded("git switch --detach main && git commit -m x", repo) is None
+
+
+@pytest.mark.parametrize("command", [
+    "git commit -m x", "env git commit -m x", "command git commit -m x", "A=1 B=2 git commit -m x",
+    "ls && git commit -m x", "ls || git commit -m x", "ls; git commit -m x", "ls | git commit -m x",
+    "ls\ngit commit -m x", "(git commit -m x)", "echo $(git commit -m x)", "echo `git commit -m x`",
+    "echo \"$(git commit -m x)\"", "if true; then git commit -m x; fi", "/usr/bin/git commit -m x",
+    "git -c user.name=x commit -m x", "git --no-pager commit -m x",
+])
+def test_git_is_recognised_at_command_position(on_main, command):
+    assert asks(command, on_main, COMMIT_DEFAULT)
+
+
+@pytest.mark.parametrize("command", [
+    "grep \"cd /tmp/x && git commit\" notes", "echo git push", "echo 'git commit -m x'", "echo \"git push\"",
+    "ls # && git commit -m x", "cat <<EOF\ngit commit -m x\nEOF", "printf '%s' git commit", "gitk --all",
+    "git log --grep 'git push'", "echo hi > git", "man git-commit",
+])
+def test_git_text_outside_command_position_prints_nothing(on_main, command):
+    assert guarded(command, on_main) is None
+
+
+# rule 2: never push, force-push or delete the default branch
+
+
+@pytest.mark.parametrize("command", [
+    "git push", "git push origin", "git push origin HEAD", "git push -u origin HEAD", "git push origin main",
+    "git push --force", "git push -f origin feature/1-x", "git push origin +feature/1-x", "git push --force-with-lease",
+])
+def test_pushes_from_main_ask(on_main, command):
+    assert asks(command, on_main, PUSH_DEFAULT)
+
+
+@pytest.mark.parametrize("command", [
+    "git push origin HEAD:main", "git push origin :main", "git push origin --delete main", "git push -d origin main",
+    "git push --mirror", "git push --all", "git push --prune origin", "git push origin feature/1-x:refs/heads/main",
+    "git push origin +HEAD:main", "git branch -D main", "git branch -d main", "git branch --delete main",
+    "git branch -m main old", "git branch -M main old", "git switch main && git push",
+])
+def test_pushes_and_branch_changes_naming_main_ask(repo, command):
+    assert asks(command, repo, PUSH_DEFAULT)
+
+
+@pytest.mark.parametrize("command", [
+    "git push", "git push -u origin HEAD", "git push origin feature/1-x", "git push --force-with-lease",
+    "git push --force-with-lease origin feature/1-x", "git push origin --delete feature/old", "git push --tags",
+    "git branch -D feature/old", "git branch -m feature/1-x", "git branch -dr origin/main",
+])
+def test_pushes_and_branch_changes_off_main_pass(repo, command):
+    assert guarded(command, repo) is None
+
+
+def test_renaming_the_current_default_branch_asks(on_main):
+    assert asks("git branch -m trunk", on_main, PUSH_DEFAULT)
+
+
+def test_push_without_origin_passes(on_main):
+    git(on_main, "remote", "remove", "origin")
+    assert guarded("git push", on_main) is None and guarded("git push --force x main", on_main) is None
+
+
+# rule 3: commit subjects on lifecycle branches
+
+
+def subject_forms(subject, tmp):
+    (tmp / "msg.txt").write_text(subject + "\n\nbody line\n")
+    return [
+        f"git commit -m '{subject}'",
+        f"git commit -m '{subject}' -m 'second paragraph'",
+        f"git commit --message='{subject}'",
+        f"git commit --message '{subject}'",
+        f"git commit -am '{subject}'",
+        f"git commit -m\"{subject}\"",
+        f"git commit -m \"$(cat <<'EOF'\n{subject}\n\nbody\nEOF\n)\"",
+        f"git commit -F - <<'EOF'\n{subject}\n\nbody\nEOF",
+        f"git commit -F {tmp / 'msg.txt'}",
+        f"git commit --file=msg.txt",
+    ]
+
+
+def test_a_bad_subject_asks_on_a_lifecycle_branch_in_every_form(lifecycle):
+    for command in subject_forms("bad subject", lifecycle):
+        assert asks(command, lifecycle, SUBJECT), command
+
+
+def test_a_good_subject_passes_in_every_form(lifecycle):
+    for command in subject_forms(GOOD, lifecycle):
+        assert guarded(command, lifecycle) is None, command
+
+
+@pytest.mark.parametrize("subject", [
+    "fix: y (#7)", "feat(api)!: y (#7)", "docs(readme): y (owner/repo#7)", "feat(api): add x (PAY-142)",
+    "chore(release): v5.0.0", "revert: y (#12)",
+])
+def test_lifecycle_subjects_pass(lifecycle, subject):
+    assert guarded(f"git commit -m '{subject}'", lifecycle) is None
+
+
+@pytest.mark.parametrize("subject", [
+    "fix: y", "fix y (#7)", "Fix: y (#7)", "feature: y (#7)", "fix: y (#7) trailing", "fix: y(PAY-142)",
+    "fix(a b): y (#7)", "fix: (#7)x",
+])
+def test_bad_subjects_ask(lifecycle, subject):
+    assert asks(f"git commit -m '{subject}'", lifecycle, SUBJECT)
+
+
+@pytest.mark.parametrize("branch", ["improve/x", "feature/foo", "experiment/round_1_executor_a", "omc-team/w1", "release/5.0.0"])
+def test_a_bad_subject_passes_off_lifecycle_branches(repo, branch):
+    git(repo, "checkout", "-q", "-b", branch)
+    assert guarded("git commit -m 'bad subject'", repo) is None
+
+
+def test_jira_lifecycle_branches_check_subjects(repo):
+    git(repo, "checkout", "-q", "-b", "feature/PAY-142-x")
+    assert asks("git commit -m 'bad subject'", repo, SUBJECT)
+    assert guarded("git commit -m 'feat(api): add x (PAY-142)'", repo) is None
+
+
+@pytest.mark.parametrize("command", [
+    "git commit", "git commit -F missing.txt", "git commit -m \"$MSG\"", "git commit -C HEAD", "git commit --fixup HEAD",
+    "git commit --amend --no-edit", "git commit -F -", "git commit -m \"$(cat msg.txt)\"", "git commit -m",
+])
+def test_an_unextractable_message_passes(lifecycle, command):
+    (lifecycle / "msg.txt").write_text("bad subject\n")
+    assert guarded(command, lifecycle) is None
+
+
+def test_message_files_are_read_safely_within_the_deadline(lifecycle):
+    os.mkfifo(lifecycle / "fifo")
+    (lifecycle / "msg.txt").write_text("bad subject\n")
+    (lifecycle / "link").symlink_to(lifecycle / "msg.txt")
+    for target in ("fifo", "/dev/zero", "link", "."):
+        start = time.monotonic()
+        assert guarded(f"git commit -F {target}", lifecycle) is None, target
+        assert time.monotonic() - start < 5
+    assert asks("git commit -F msg.txt", lifecycle, SUBJECT)
+
+
+def test_long_subjects_and_dash_heavy_commands_are_linear(lifecycle):
+    start = time.monotonic()
+    guarded("git commit -m '" + "fix(" + "-" * 190 + "'", lifecycle)
+    guarded("git commit -m '" + "a-" * 100000 + "'", lifecycle)
+    guarded("git push " + "-a " * 20000, lifecycle)
+    guarded("git commit " + "-- " * 20000, lifecycle)
+    guarded("gh issue edit 1 " + "--add-label x " * 10000, lifecycle)
+    guarded("git commit -m \"$(cat <<'EOF'\n" + "-a\n" * 50000 + "EOF\n)\"", lifecycle)
+    guarded("echo " + "$(" * 5000, lifecycle)
+    assert time.monotonic() - start < 10
+
+
+def lifecycle_scripts():
+    skills = ROOT / "config" / "skills"
+    return (
+        skills / "github-issue-lifecycle" / "scripts" / "issue_lifecycle.py",
+        skills / "jira-ticket-lifecycle" / "scripts" / "ticket_lifecycle.py",
+    )
+
+
+def assignments(path):
+    tree = ast.parse(path.read_text())
+    return {
+        node.targets[0].id: ast.dump(node.value)
+        for node in tree.body
+        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
+    }
+
+
+def test_subject_rules_are_the_lifecycle_scripts_own():
+    github, jira = (assignments(p) for p in lifecycle_scripts())
+    hook = assignments(HOOKS / "bash_guard.py")
+    for name in ("CC_TYPES", "SUBJECT_RE"):
+        assert hook[name] == github[name] == jira[name], name
+    assert hook["ISSUE_REF_RE"] == github["ISSUE_REF_RE"]
+    assert hook["TICKET_REF_RE"] == jira["TICKET_REF_RE"]
+
+
+PARITY_SUBJECTS = [
+    "fix: y (#7)", "feat(api)!: y (#7)", "docs: y (o/r#7)", "feat(api): add x (PAY-142)", "fix: y", "fix y (#7)",
+    "fix: y (PAY-142) x", "fix: y(PAY-142)", "chore: y (#0)", "style(a-b.c): y (#7)", "fix(): y (#7)", "fix: y (#)",
+    "fix: y (a/b/c#7)", "perf: y (P-1)", "perf: y (PA-1)", "ci: y (#7) ", "fix:  y (#7)", "fix: y (pay-142)",
+]
+
+
+def test_subject_check_agrees_with_the_lifecycle_scripts():
+    github, jira = (module(p, f"lifecycle_{i}") for i, p in enumerate(lifecycle_scripts()))
+    hook = hook_module("bash_guard.py")
+    content = {"not-conventional", "missing-issue-ref", "missing-ticket-ref"}
+    for subject in PARITY_SUBJECTS:
+        gh_ok = not {code for code, _ in github.check_commit(subject)} & content
+        jira_ok = not {code for code, _ in jira.check_commit(subject)} & content
+        assert hook.subject_ok(subject) == (gh_ok or jira_ok), subject
+
+
+def test_lifecycle_branch_names_pass_the_branch_rule():
+    github, jira = (module(p, f"lifecycle_{i}") for i, p in enumerate(lifecycle_scripts()))
+    hook = hook_module("bash_guard.py")
+    for cc_type in ("feat", "fix", "docs", "chore", "refactor"):
+        for hotfix in (False, True):
+            assert hook.branch_name_ok(github.branch_name(cc_type, 7, "Add the thing!", hotfix=hotfix))
+            assert hook.branch_name_ok(jira.branch_name(cc_type, "PAY-142", "Add the thing!", hotfix=hotfix))
+
+
+# rule 4: branch names
+
+CREATORS = [
+    "git checkout -b {}", "git checkout -B {}", "git switch -c {}", "git switch -C {}", "git switch --create {}",
+    "git branch {}", "git branch -f {} HEAD", "git worktree add -b {} ../wt-x", "git worktree add -B {} ../wt-x main",
+]
+
+
+@pytest.mark.parametrize("creator", CREATORS)
+@pytest.mark.parametrize("name", ["fix-thing", "feature/foo", "feature/x-1-y", "Feature/7-x", "fix/7-X", "main"])
+def test_bad_branch_names_ask(repo, creator, name):
+    assert asks(creator.format(name), repo, BRANCH_NAME)
+
+
+@pytest.mark.parametrize("creator", CREATORS)
+@pytest.mark.parametrize("name", [
+    "feature/7-x", "fix/12-a-b", "hotfix/3-y", "docs/PAY-142-x", "chore/9-z", "feature/PAY-142-x",
+    "improve/x", "experiment/round_1_executor_a", "omc-team/w1",
+])
+def test_good_branch_names_pass(repo, creator, name):
+    assert guarded(creator.format(name), repo) is None
+
+
+@pytest.mark.parametrize("command", ["git branch", "git branch -a", "git branch --list 'f*'", "git branch -v", "git branch -u origin/x"])
+def test_branch_listing_passes(repo, command):
+    assert guarded(command, repo) is None
+
+
+def test_branch_names_pass_without_origin(repo):
+    git(repo, "remote", "remove", "origin")
+    for creator in CREATORS:
+        assert guarded(creator.format("fix-thing"), repo) is None
+
+
+# rule 5: secrets in commit content
+
+
+def test_add_all_and_commit_with_a_new_env_asks(repo):
+    (repo / ".env").write_text("FAKE=1\n")
+    for command in ("git add -A && git commit -m 'fix(x): y (#1)'", "git add . && git commit -m 'fix(x): y (#1)'", "git add .env", "git add -A"):
+        assert asks(command, repo, SECRET), command
+
+
+def test_add_all_with_an_env_example_passes(repo):
+    (repo / ".env.example").write_text("FAKE=1\n")
+    (repo / ".envrc").write_text("FAKE=1\n")
+    assert guarded("git add -A && git commit -m 'fix(x): y (#1)'", repo) is None
+
+
+def test_a_staged_env_asks_on_a_plain_commit(repo):
+    (repo / "sub").mkdir()
+    (repo / "sub" / ".env.local").write_text("FAKE=1\n")
+    git(repo, "add", "-A")
+    assert asks("git commit -m 'fix(x): y (#1)'", repo, SECRET)
+
+
+def test_removing_a_tracked_env_passes(repo):
+    (repo / ".env").write_text("FAKE=1\n")
+    commit(repo, "chore: env")
+    git(repo, "rm", "-q", ".env")
+    assert guarded("git commit -m 'fix(x): y (#1)'", repo) is None
+
+
+@pytest.mark.parametrize("kind", sorted(TOKEN_SAMPLES))
+def test_a_token_asks_in_every_content_source(repo, kind):
+    line = f"key = '{TOKEN_SAMPLES[kind]}'\n"
+    (repo / "key.py").write_text(line)
+    for command in ("git add key.py", "git add key.py && git commit -m 'fix(x): y (#1)'", "git add -A && git commit -m 'fix(x): y (#1)'"):
+        text = guarded(command, repo)
+        assert text is not None and SECRET in text and f"patterns: {kind})" in text, command
+        assert TOKEN_SAMPLES[kind] not in text
+    git(repo, "add", "key.py")
+    assert asks("git commit -m 'fix(x): y (#1)'", repo, f"patterns: {kind})")
+
+
+def test_token_reason_names_patterns_and_counts(repo):
+    (repo / "a.py").write_text(f"{TOKEN_SAMPLES['ghp']}\n{TOKEN_SAMPLES['sk']}\n")
+    (repo / ".env").write_text("FAKE=1\n")
+    text = guarded("git add -A", repo)
+    assert "1 secret file name" in text and "2 token match" in text and "patterns: ghp, sk)" in text
+
+
+@pytest.mark.parametrize("text", ["task-list", "disk-usage", "sk-short", "ghp_" + "a" * 10, "risk-" + "a" * 30, "xoxa-1234567890"])
+def test_lookalikes_pass_the_token_scan(repo, text):
+    (repo / "f.txt").write_text(text + "\n")
+    assert guarded("git add f.txt && git commit -m 'fix(x): y (#1)'", repo) is None
+
+
+def test_the_hooks_own_source_passes_the_token_scan(repo):
+    for name in ("bash_guard.py", "secrets_guard.py"):
+        (repo / name).write_text((HOOKS / name).read_text())
+    (repo / "test_hooks.py").write_text((ROOT / "tests" / "test_hooks.py").read_text())
+    assert guarded("git add bash_guard.py && git commit -m 'fix(x): y (#1)'", repo) is None
+    assert guarded("git add -A && git commit -m 'fix(x): y (#1)'", repo) is None
+
+
+def test_a_removed_token_line_does_not_ask(repo):
+    (repo / "key.py").write_text(f"key = '{TOKEN_SAMPLES['ghp']}'\nother = 1\n")
+    commit(repo, "chore: key")
+    (repo / "key.py").write_text("other = 1\n")
+    git(repo, "add", "key.py")
+    assert guarded("git commit -m 'fix(x): y (#1)'", repo) is None
+    assert guarded("git commit -am 'fix(x): y (#1)'", repo) is None
+
+
+def test_commit_all_scans_the_diff_against_head(repo):
+    (repo / "key.py").write_text("other = 1\n")
+    commit(repo, "chore: key")
+    (repo / "key.py").write_text(f"other = 1\nkey = '{TOKEN_SAMPLES['gho']}'\n")
+    assert guarded("git commit -m 'fix(x): y (#1)'", repo) is None  # nothing staged
+    for command in ("git commit -am 'fix(x): y (#1)'", "git commit -a -m 'fix(x): y (#1)'", "git commit --all -m 'fix(x): y (#1)'"):
+        assert asks(command, repo, "patterns: gho)"), command
+
+
+def test_a_symlink_added_by_path_is_not_followed(repo, tmp_path):
+    (tmp_path / "outside.txt").write_text(TOKEN_SAMPLES["ghp"] + "\n")
+    (repo / "link.txt").symlink_to(tmp_path / "outside.txt")
+    os.mkfifo(repo / "fifo")
+    assert guarded("git add link.txt fifo", repo) is None
+
+
+# rule 6: the approved label
+
+
+@pytest.mark.parametrize("command", [
+    "gh issue edit 1 --add-label approved", "gh issue edit 1 --add-label=approved",
+    "gh issue edit 1 --add-label \"in progress,approved\"", "gh issue edit 1 --add-label 'draft, approved'",
+    "gh issue create --title t --label approved", "gh issue create -t t -l approved", "gh issue create --label=approved",
+    "gh api repos/o/r/issues/1/labels -f 'labels[]=approved'", "gh api -X POST repos/o/r/issues/1/labels -f labels=approved",
+    "cd /tmp && gh issue edit 1 --remove-label draft --add-label approved",
+])
+def test_adding_the_approved_label_asks(tmp_path, command):
+    assert asks(command, tmp_path, LABEL)
+
+
+@pytest.mark.parametrize("command", [
+    "gh issue edit 1 --remove-label approved", "gh label create approved", "gh issue edit 1 --add-label draft",
+    "gh issue edit 1 --add-label approved-later", "echo gh issue edit 1 --add-label approved",
+    "gh issue view 1 --json labels", "gh api repos/o/r/labels -f name=approved", "gh pr list --label approved",
+    "gh issue list --label approved",
+])
+def test_other_label_commands_pass(tmp_path, command):
+    assert guarded(command, tmp_path) is None
+
+
+# robustness and hardening
+
+
+def test_non_git_directory_passes(tmp_path):
+    assert guarded("git commit -m x && git push && git checkout -b fix-thing", tmp_path) is None
+
+
+@pytest.mark.parametrize("payload", [
+    b"", b"not json", b"[]", b"{}", b"\xff\xfe", b"[" * 100000, b"null", b'"x"',
+    json.dumps(bash(7)).encode(),
+    json.dumps(bash(["git", "commit"])).encode(),
+    json.dumps(bash("git commit -m x") | {"cwd": 7}).encode(),
+    json.dumps(bash("git commit -m x") | {"cwd": "/tmp/a\u0000b"}).encode(),
+    json.dumps(bash("git -C \"/tmp/a\u0000b\" commit -m x") | {"cwd": "/tmp"}).encode(),
+    json.dumps(bash("git commit -m x") | {"cwd": "relative/dir"}).encode(),
+    json.dumps({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": []}).encode(),
+    json.dumps({"hook_event_name": "PreToolUse", "tool_name": "Read", "tool_input": {"command": "git push"}}).encode(),
+    b'{"tool_input": {"command": "git push"}, "cwd": "/\\ud800"}',
+])
+def test_bash_guard_never_fails(payload):
+    assert run("bash_guard.py", payload) == ""
+
+
+def test_bash_guard_ignores_git_environment_variables(on_main, tmp_path):
+    other = tmp_path / "other"
+    other.mkdir()
+    git(other, "init", "-q", "-b", "feature/7-x")
+    env = {"GIT_DIR": str(other / ".git"), "GIT_WORK_TREE": str(other)}
+    out = run("bash_guard.py", bash(f"git commit -m '{GOOD}'") | {"cwd": str(on_main)}, env)
+    assert COMMIT_DEFAULT in out
+
+
+def test_a_missing_git_passes(on_main, tmp_path, monkeypatch):
+    hook = hook_module("bash_guard.py")
+    payload = bash(f"git commit -m '{GOOD}'") | {"cwd": str(on_main)}
+    assert COMMIT_DEFAULT in hook.evaluate(payload)
+    monkeypatch.setattr(hook, "SAFE_PATH", str(tmp_path / "empty"))
+    assert hook.evaluate(payload) is None
+    assert LABEL in hook.evaluate(bash("gh issue edit 1 --add-label approved"))
+
+
+def test_a_git_that_outlives_the_deadline_passes(on_main, monkeypatch):
+    hook = hook_module("bash_guard.py")
+    payload = bash(f"git commit -m '{GOOD}' && git push") | {"cwd": str(on_main)}
+    assert COMMIT_DEFAULT in hook.evaluate(payload)
+    real = hook.run_git
+
+    def slow(*args):
+        time.sleep(0.2)
+        return real(*args)
+
+    monkeypatch.setattr(hook, "run_git", slow)
+    monkeypatch.setattr(hook, "DEADLINE_SECONDS", 0.5)
+    start = time.monotonic()
+    assert hook.evaluate(payload) is None
+    assert time.monotonic() - start < 1.5
+
+
+SECRET_NAME_SAMPLES = [
+    ".env", ".env.local", ".env.production", ".env.staging", ".env.example", ".env.sample", ".env.template", ".envrc",
+    ".env.", ".env.example.bak", "deny-terms", "deny-terms.bak", "env", "x.env", ".ENV", "", ".env.Example",
+]
+
+
+def test_secret_file_definitions_agree():
+    bash_guard, secrets_guard = hook_module("bash_guard.py"), hook_module("secrets_guard.py")
+    for name in SECRET_NAME_SAMPLES:
+        assert bash_guard.names_secret(name) == secrets_guard.names_secret(name), name
+    assert [n for n in SECRET_NAME_SAMPLES if bash_guard.names_secret(n)] == [
+        ".env", ".env.local", ".env.production", ".env.staging", ".env.", ".env.example.bak", "deny-terms", ".env.Example",
+    ]
+
+
+def test_bash_guard_is_registered_and_listed():
+    hook = {"type": "command", "command": "python3 -I {claude_home}/hooks/bash_guard.py", "timeout": 5}
+    assert entries("PreToolUse", "bash_guard.py") == [("Bash", hook)]
+    assert entries("PreToolUse", "merge_confirm.py")[0][0] == "Bash"
+    for host in ("personal", "work"):
+        assert "bash_guard.py" in json.loads((ROOT / "hosts" / f"{host}.json").read_text())["hooks"]

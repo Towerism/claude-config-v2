@@ -6,6 +6,10 @@
         "hooks": [{ "type": "command", "command": "python3 -I {claude_home}/hooks/merge_confirm.py" }]
       },
       {
+        "matcher": "Bash",
+        "hooks": [{ "type": "command", "command": "python3 -I {claude_home}/hooks/bash_guard.py", "timeout": 5 }]
+      },
+      {
         "matcher": "Skill",
         "hooks": [{ "type": "command", "command": "python3 -I {claude_home}/hooks/skill_gate.py", "timeout": 5 }]
       },
