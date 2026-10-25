@@ -112,10 +112,9 @@ def test_test_and_lint_run_through_the_venv():
 
 
 @needs_make
-def test_test_sets_the_venv_up_when_missing():
-    if (ROOT / ".venv/bin/python").exists():
-        pytest.skip("a venv exists here")
-    assert any("-m venv .venv" in line for line in make_n("test"))
+def test_test_and_lint_set_the_venv_up_when_missing_or_rebuilt():
+    for target in ["test", "lint"]:
+        assert any("-m venv .venv" in line for line in make_n("-B", target))
 
 
 @needs_make
@@ -125,6 +124,35 @@ def test_plan_forwards_host_and_target_as_single_arguments():
     assert argv[argv.index("tools/cfg.py") + 1] == "plan"
     assert argv[argv.index("--host") + 1] == "work"
     assert argv[argv.index("--target") + 1] == "/tmp/a b"
+
+
+@needs_make
+def test_double_quote_in_target_stays_one_argument():
+    argv = cfg_line("plan", 'TARGET=/tmp/a"b`c')
+    assert argv[argv.index("--target") + 1] == '/tmp/a"b`c'
+
+
+@needs_make
+def test_single_quote_in_host_or_target_is_rejected():
+    for var in ["HOST", "TARGET"]:
+        result = subprocess.run(
+            ["make", "-n", "-C", str(ROOT), "plan", f"{var}=it's"], capture_output=True, text=True, check=False
+        )
+        assert result.returncode != 0 and "single quote" in result.stderr
+
+
+@needs_make
+def test_exported_variables_are_ignored(monkeypatch):
+    for var in ["HOST", "TARGET", "YES", "FORCE"]:
+        monkeypatch.setenv(var, "1")
+    argv = cfg_line("deploy")
+    assert argv[argv.index("tools/cfg.py") + 1 :] == ["deploy"]
+
+
+@needs_make
+def test_yes_and_force_must_be_exactly_one():
+    argv = cfg_line("deploy", "YES=0", "FORCE=no")
+    assert "--yes" not in argv and "--force" not in argv
 
 
 @needs_make
@@ -151,9 +179,9 @@ def test_force_and_yes_only_reach_deploy():
 @needs_make
 def test_status_and_rollback_map_to_cfg_subcommands():
     for target in ["status", "rollback"]:
-        argv = cfg_line(target, "TARGET=/tmp/x")
+        argv = cfg_line(target, "TARGET=/tmp/a b")
         assert argv[argv.index("tools/cfg.py") + 1] == target
-        assert argv[argv.index("--target") + 1] == "/tmp/x"
+        assert argv[argv.index("--target") + 1] == "/tmp/a b"
 
 
 def test_cfg_plan_against_a_temp_target_changes_nothing(tmp_path):

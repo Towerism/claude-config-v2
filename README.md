@@ -32,7 +32,7 @@ V1 (`claude-config`) built its own pipeline from 24 skills, overlays and three h
    ```
 
    `make deploy` without `YES=1` only prints the plan. Later deploys remember the host, so `HOST` can be left out. `TARGET=DIR` (or `CLAUDE_CONFIG_DIR`) deploys somewhere else, such as a scratch directory. The same runs without make: `python3 -I tools/cfg.py plan --host personal`, then `... deploy --host personal --yes`.
-3. `make status` lists files edited since the last deploy and changes still pending. A deploy stops on an edited file until you pass `FORCE=1` (`--force`; the old copy is backed up). `make rollback` undoes the last deploy. A `TARGET` holding `"`, `$` or a backtick needs the raw command.
+3. `make status` lists files edited since the last deploy and changes still pending. A deploy stops on an edited file until you pass `FORCE=1` (`--force`; the old copy is backed up). `make rollback` undoes the last deploy. A `HOST` or `TARGET` holding `'` or `$` needs the raw command. Only values typed after `make` count; exported variables are ignored.
 
 Per-machine values that never enter the repo live in `~/.config/claude-config/local.json`: a `defaultTracker` override and the `jira` settings that tailor `jira-ticket-lifecycle` to your Jira project (see its `references/settings.md`).
 

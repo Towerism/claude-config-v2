@@ -5,7 +5,14 @@
 PY ?= python3
 VENV := .venv
 CFG := $(PY) -I tools/cfg.py
-CFG_ARGS = $(if $(HOST),--host '$(HOST)') $(if $(TARGET),--target '$(TARGET)')
+
+# Only values typed on the make command line count, never exported environment variables
+# (HOST is set by some shells), and YES/FORCE must be exactly 1.
+cmdline = $(if $(filter command line,$(origin $(1))),$($(1)))
+HOST_ARG = $(call cmdline,HOST)
+TARGET_ARG = $(call cmdline,TARGET)
+$(if $(findstring ',$(HOST_ARG)$(TARGET_ARG)),$(error HOST and TARGET must not contain a single quote))
+CFG_ARGS = $(if $(HOST_ARG),--host '$(HOST_ARG)') $(if $(TARGET_ARG),--target '$(TARGET_ARG)')
 
 .PHONY: setup test lint plan deploy status rollback
 
@@ -28,4 +35,4 @@ plan status rollback:
 	@$(CFG) $@ $(CFG_ARGS)
 
 deploy:
-	@$(CFG) deploy $(CFG_ARGS) $(if $(YES),--yes) $(if $(FORCE),--force)
+	@$(CFG) deploy $(CFG_ARGS) $(if $(filter 1,$(call cmdline,YES)),--yes) $(if $(filter 1,$(call cmdline,FORCE)),--force)
