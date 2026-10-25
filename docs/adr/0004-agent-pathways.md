@@ -284,7 +284,10 @@ When the session's first prompt starts `ralph` or `autopilot` (`/ralph`, `/oh-my
 - `CLAUDE.global.md` opens with a rule telling the model to ignore the whole block, including the host-default tracker line.
 - All five hooks print nothing in such a session. Each reads the first user message from `transcript_path` (first 256 KB, stdlib) and treats anything unreadable as "not bypassed". The check is one function copied into each hook, because a hook runs with `python3 -I` and cannot import a sibling; a test asserts the copies are identical.
 - This includes `secrets_guard`: in such a session `.env` and `deny-terms` reads are not denied. That follows the request for a complete bypass. OMC's own `git-guardrails` still blocks pushes while ralph or autopilot is active.
-- Limits: `host_default` on SessionStart runs before any prompt exists, so only the rule text covers it. Whether a subagent's hook payload carries the parent's `transcript_path` is unverified; if it carries the subagent's own, subagent tool calls stay guarded.
+- The bare word must be followed by whitespace, a colon or the end of the text, in any case, so `ralph's loop is broken` and `ralph.py crashes` do not trigger. A first prompt that is another command (`/model`, `! git status`) or a compact summary is the first prompt; entries marked `isSidechain` are skipped.
+- A subagent's hook payload carries the parent session's `transcript_path` (checked with a throwaway headless run), so a subagent prompt the model writes cannot trigger the bypass, and a bypassed session's subagents stay bypassed.
+- Limits: `host_default` on a fresh SessionStart (`source: startup`) runs before any prompt exists, so only the rule text covers it. A trigger past the first 256 KB of the transcript is missed by the hooks while the model still applies the rule.
+- Accepted: the check trusts the transcript file, which the model could edit, and the bypass lasts the whole session, also after `/cancel`. The hooks are already advisory (see Known limits); branch protection is the control that holds.
 
 ## Consequences
 

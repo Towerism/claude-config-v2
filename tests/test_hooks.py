@@ -1468,6 +1468,8 @@ INVOKES = [
     "  /oh-my-claudecode:autopilot build a thing",
     "ralph: fix it",
     "autopilot build me a thing",
+    "Ralph fix it",
+    "ralph",
     "<command-message>oh-my-claudecode:ralph</command-message>\n<command-name>/oh-my-claudecode:ralph</command-name>\n<command-args>x</command-args>",
 ]
 MENTIONS = [
@@ -1475,6 +1477,10 @@ MENTIONS = [
     "please run /ralph",
     "ralphson is a name",
     "autopilot-style prompts",
+    "ralph's loop is broken, fix it",
+    "ralph.py crashes",
+    "autopilot/README is stale",
+    "ralph?",
 ]
 
 
@@ -1538,7 +1544,11 @@ def test_an_unusable_transcript_never_bypasses(name, bypass_cases, machine, tmp_
     garbage.write_bytes(b"\xff\xfe not json\n[]\n{}\n")
     huge = tmp_path / "huge.jsonl"
     huge.write_text(json.dumps({"type": "user", "message": {"content": "x" * 300_000 + " /ralph"}}) + "\n")
-    for path in [str(tmp_path / "missing"), str(tmp_path), str(garbage), str(huge), 7, None, ["a"], "\0"]:
+    fifo = tmp_path / "fifo"
+    os.mkfifo(fifo)  # opening it for reading would block
+    sidechain = tmp_path / "sidechain.jsonl"
+    sidechain.write_text(json.dumps({"type": "user", "isSidechain": True, "message": {"content": "ralph go"}}) + "\n")
+    for path in [str(tmp_path / "missing"), str(tmp_path), str(garbage), str(huge), str(fifo), str(sidechain), 7, None, ["a"], "\0"]:
         assert run_case(name, payload | {"transcript_path": path}, env, home) == baseline, path
 
 

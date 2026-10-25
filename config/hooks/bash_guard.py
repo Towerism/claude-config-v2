@@ -1192,7 +1192,7 @@ def on_deadline(signum, frame) -> None:
 
 # A session whose first prompt starts ralph or autopilot runs unguarded (#12).
 BYPASS_PROMPT = re.compile(
-    r"\s*(?:<command-message>[^<]*</command-message>\s*)?(?:<command-name>)?/?(?:oh-my-claudecode:)?(?:ralph|autopilot)(?![\w-])"
+    r"(?i)\s*(?:<command-message>[^<]*</command-message>\s*)?(?:<command-name>)?/?(?:oh-my-claudecode:)?(?:ralph|autopilot)(?=\s|:|<|$)"
 )
 
 
@@ -1200,13 +1200,16 @@ def session_bypassed(payload: dict) -> bool:
     """Whether the session's first user prompt starts ralph or autopilot. Reads the first 256 KB of the
     transcript; anything unreadable means no."""
     try:
-        with open(payload["transcript_path"], "rb") as f:
+        path = payload["transcript_path"]
+        if not isinstance(path, str) or not os.path.isfile(path):
+            return False
+        with open(path, "rb") as f:
             lines = f.read(256 * 1024).splitlines()
         for line in lines:
             try:
                 entry = json.loads(line)
                 content = entry["message"]["content"]
-                if entry["type"] != "user" or entry.get("isMeta"):
+                if entry["type"] != "user" or entry.get("isMeta") or entry.get("isSidechain"):
                     continue
             except (ValueError, KeyError, TypeError):
                 continue
