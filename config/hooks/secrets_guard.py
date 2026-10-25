@@ -19,9 +19,9 @@ alternatives or brace groups denies.
 
 Bash parses the command as bash_guard.py does (a copy of its parser; a test keeps them equal) and
 asks only when a secret path is an operand of a listed reader at command position. A secret path
-names a secret file, with or without a directory or a `--flag=` prefix; an unquoted glob word that
-opens with a literal character and matches one of the four names (`.en?`, `.e*`) counts too. The
-readers:
+names a secret file, with or without a directory or a `--flag=` prefix. An unquoted glob word that
+opens with a literal character and matches one of `.env`, `.env.local`, `.env.production` or
+`deny-terms` (`.en?`, `.e*`) counts too. The readers:
 
 - viewers: cat, tac, bat, less, more, head, tail, nl, od, xxd, strings, base64;
 - filters, with the secret as a file and not the pattern: grep, rg, sed, awk, cut, sort, diff, jq
@@ -32,13 +32,13 @@ readers:
 - source and `.`, an input redirection `<`, docker --env-file, and curl -d, --data,
   --data-binary @file, -F name=@file and -T file.
 
-VAR=value words, env, command and the prefixes sudo, doas, nohup, exec, time -p, timeout N,
+VAR=value words and the wrappers `env`, `command`, sudo, doas, nohup, exec, time -p, timeout N,
 nice -n N, stdbuf and xargs are skipped. The text that `bash|sh|zsh -c`, `eval` and `env -S` run,
-a heredoc fed to a shell, and the echo or printf text before a bare shell are parsed again. Any
-other command (echo, printf, git commit -m, python3 -c, git log --grep), comments and heredoc
-bodies stay silent. It is a reminder, not a security boundary: an unlisted reader gets past it, as
-do an output redirection, `python3 x.py .env`, `git show HEAD:.env` and `cat $(echo .env)`. Nesting
-past MAX_DEPTH, re-parses included, is unparsed and passes.
+a heredoc fed to a shell, and the echo or printf text before a bare shell are parsed again. Other
+commands (echo, printf, git commit -m, python3 -c, git log --grep), comments and heredoc bodies stay
+silent. It is a reminder, not a security boundary: an unlisted reader gets past it, and so do an
+output redirection, `python3 x.py .env`, `git show HEAD:.env` and `cat $(echo .env)`. Nesting past
+MAX_DEPTH, re-parses included, is unparsed and passes.
 
 Nothing named by the input is opened, only resolved. Each Bash parse is one left-to-right pass, so
 the scan is linear in the command length. Nothing from the input is printed. Always exits 0; one
@@ -399,7 +399,7 @@ def command_words(seg: Segment) -> list[Word]:
 # ── wrappers around the copied parser ────────────────────────────────────────
 
 SHELLS = {"bash", "sh", "zsh"}
-# Commands that run the command after their options, with the short and long options that take a value.
+# Prefix commands, each with its short and long options that take a value; the command follows them.
 PREFIXES = {
     "sudo": (
         {"-u", "-g", "-h", "-p", "-C", "-D", "-r", "-t", "-U", "-T"},
@@ -408,7 +408,7 @@ PREFIXES = {
     "doas": ({"-u", "-C"}, set()),
     "nohup": (set(), set()),
     "exec": ({"-a"}, set()),
-    "timeout": ({"-s", "-k"}, {"--signal", "--kill-after"}),  # then the duration
+    "timeout": ({"-s", "-k"}, {"--signal", "--kill-after"}),  # a duration word follows the options
     "nice": ({"-n"}, {"--adjustment"}),
     "stdbuf": ({"-i", "-o", "-e"}, {"--input", "--output", "--error"}),
     "xargs": (
@@ -542,8 +542,8 @@ class InputParser(Parser):
 
 
 def walk(text: str, depth: int, visit) -> bool:
-    """Whether a `<` input names a secret, or visit(words, seg) holds for a command, in the text or in
-    the text a shell, eval or env -S runs. Each re-parse counts one level toward MAX_DEPTH."""
+    """Whether a `<` input names a secret, or visit(words, seg) holds for a command, in text or in text
+    that a shell, eval or env -S runs. Each re-parse adds one to depth, which MAX_DEPTH bounds."""
     parser = InputParser(text)
     parser.commands(None, depth)
     if any(secret_path(w.text, w.glob) for w in parser.inputs):
@@ -571,7 +571,7 @@ def walk(text: str, depth: int, visit) -> bool:
     return False
 
 
-# Every operand, and every --flag=value, of these is taken as a file.
+# Readers whose every operand, and every --flag=value, is a file.
 FILE_READERS = {
     "cat", "tac", "bat", "less", "more", "head", "tail", "nl", "od", "xxd", "strings", "base64",
     "cut", "sort", "diff", "cp", "mv", "scp", "rsync", "ln", "tee", "wc", "hexdump", "tar", "zip",
@@ -586,8 +586,8 @@ GREP_FLAGS = (
         "--exclude-from", "--label", "--binary-files", "--group-separator",
     },
 )
-# Readers whose first operand is a pattern, script or filter: the flags whose value is the pattern
-# instead, the flags whose value is a file read for it, and the other flags that take a value.
+# Readers whose first operand is a pattern, script or filter. Each entry is (flags whose value is
+# the pattern, flags whose value is a file, other flags that take a value).
 PATTERN_READERS = {
     "grep": GREP_FLAGS,
     "egrep": GREP_FLAGS,
@@ -615,7 +615,7 @@ GIT_VALUES = {
 CURL_DATA = {"-d", "--data", "--data-binary", "--data-ascii", "--data-urlencode", "--json"}
 CURL_FORM = {"-F", "--form"}
 CURL_UPLOAD = {"-T", "--upload-file"}
-# Other curl flags that take a value, so a group such as -XPOST is one flag and its value.
+# Other curl flags that take a value; -XPOST reads as -X with the value POST.
 CURL_VALUES = {"-X", "-H", "-o", "-u", "-A", "-e", "-b", "-c", "-K", "-m", "-w", "-x", "-E", "-r", "-C", "-Y", "-y", "-z"}
 
 
@@ -730,7 +730,7 @@ def flag_reads(args: list[Word], flag: str) -> bool:
 
 
 def reads_secret(words: list[Word], seg: Segment) -> bool:
-    """Whether a command is a listed reader taking a secret path (see the module docstring)."""
+    """Whether a command is a listed reader that takes a secret path (see the module docstring)."""
     name = os.path.basename(words[0].text)
     args = words[1:]
     if name in FILE_READERS:
@@ -756,7 +756,7 @@ def reads_secret(words: list[Word], seg: Segment) -> bool:
 
 
 def command_names_secret(command: str) -> bool:
-    """Whether a Bash command has a listed reader take a secret file. Unparsed input passes."""
+    """Whether a listed reader in the Bash command takes a secret file. Unparsed input passes."""
     try:
         return walk(command, 0, reads_secret)
     except Unparsed:

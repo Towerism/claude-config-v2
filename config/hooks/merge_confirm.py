@@ -1,26 +1,26 @@
 """PreToolUse(Bash) hook: every PR merge waits for the user's click.
 
-The command is parsed as bash_guard.py parses it, and a merge counts only at command position (the
-start, or after && || ; | & a newline ( $( or a backtick, past VAR=value words, `env`, `command` and
-the prefixes sudo, doas, nohup, exec, time -p, timeout N, nice -n N, stdbuf and xargs). It asks for:
+The command is parsed as bash_guard.py parses it. A merge counts only at command position: at the
+start of the command or after a separator (`&& || ; | &`, a newline, `(`, `$(` or a backtick), past
+VAR=value words and the wrappers `env`, `command`, sudo, doas, nohup, exec, time -p, timeout N,
+nice -n N, stdbuf and xargs. It asks for:
 
 - `gh [flags] pr [flags] merge`;
 - `gh api` or `tea api` (tea is the Gitea CLI) with a `/merge` path word, or with
   `mergePullRequest` or `enablePullRequestAutoMerge` among its words or in its heredoc body.
 
-The text that `bash|sh|zsh -c`, `eval` and `env -S` run is parsed again, as is a heredoc fed to a
-shell and the echo or printf text before a bare shell (`echo 'gh pr merge 5' | bash`). Quoted text,
-heredoc bodies and comments of any other command never ask: `echo "gh pr merge"`, `grep`,
-`git commit -m` and `python3 -c` pass. A squash merge (`--squash` or a short flag group holding `s`
+The text that `bash|sh|zsh -c`, `eval` and `env -S` run is parsed again, and so are a heredoc fed to
+a shell and the echo or printf text before a bare shell (`echo 'gh pr merge 5' | bash`). Quoted text,
+heredoc bodies and comments of other commands do not ask: `echo "gh pr merge"`, `grep`,
+`git commit -m` and `python3 -c` pass. A squash merge (`--squash`, a short flag group holding `s`
 after `merge`, or a `gh api …/merge` sending merge_method=squash) gets its own reason, because the
-global rule forbids squash. Prints nothing otherwise.
+global rule forbids squash. Otherwise the hook prints nothing.
 
 It is a reminder, not a security boundary: aliases, scripts, `curl` and any runner it does not list
-get past it. The control that holds is branch protection on the remote. The parser is a copy of
-bash_guard.py's, and a test keeps the two equal. Nesting past MAX_DEPTH, re-parses included, is
-unparsed and passes. Each parse is one left-to-right pass, so the time is linear in the command
-length (#20). Always exits 0 and never denies; past the 5-second deadline, or on any error, it
-prints nothing.
+get past it. The control that holds is branch protection on the remote. Nesting past MAX_DEPTH,
+re-parses included, is unparsed and passes. The parse is one left-to-right pass, so the time is
+linear in the command length (#20). The hook always exits 0 and never denies; past the 5-second
+deadline, or on any error, it prints nothing.
 """
 
 import contextlib
@@ -35,7 +35,7 @@ DEADLINE_SECONDS = 5
 REASON = "Merging needs your confirmation (global rule: merge only with your authorization)"
 
 SQUASH_REASON = "Squash merges are against the global rule (merge commit or rebase, never squash); merging also needs your authorization"
-# gh pr merge's --squash, or a short flag group that holds s.
+# `--squash`, or a short flag group holding `s`, in the arguments of gh pr merge.
 SQUASH_FLAG = re.compile(r"--squash|-[A-Za-z]*s[A-Za-z]*")
 
 API_MERGE = re.compile(r"/merge\b")
@@ -302,7 +302,7 @@ def command_words(seg: Segment) -> list[Word]:
 # ── wrappers around the copied parser ────────────────────────────────────────
 
 SHELLS = {"bash", "sh", "zsh"}
-# Commands that run the command after their options, with the short and long options that take a value.
+# Prefix commands, each with its short and long options that take a value; the command follows them.
 PREFIXES = {
     "sudo": (
         {"-u", "-g", "-h", "-p", "-C", "-D", "-r", "-t", "-U", "-T"},
@@ -311,7 +311,7 @@ PREFIXES = {
     "doas": ({"-u", "-C"}, set()),
     "nohup": (set(), set()),
     "exec": ({"-a"}, set()),
-    "timeout": ({"-s", "-k"}, {"--signal", "--kill-after"}),  # then the duration
+    "timeout": ({"-s", "-k"}, {"--signal", "--kill-after"}),  # a duration word follows the options
     "nice": ({"-n"}, {"--adjustment"}),
     "stdbuf": ({"-i", "-o", "-e"}, {"--input", "--output", "--error"}),
     "xargs": (
@@ -422,8 +422,8 @@ def shell_texts(words: list[Word], seg: Segment, previous: list[Word]) -> list[s
 
 
 def walk(text: str, depth: int, visit) -> bool:
-    """Whether visit(words, seg) holds for a command in the text, or in the text a shell, eval or
-    env -S runs. Each re-parse counts one level toward MAX_DEPTH."""
+    """Whether visit(words, seg) holds for a command in text, or in text that a shell, eval or env -S
+    runs. Each re-parse adds one to depth, which MAX_DEPTH bounds."""
     parser = Parser(text)
     parser.commands(None, depth)
     previous: list[Word] = []
@@ -479,8 +479,8 @@ def pr_merge_args(words: list[Word]) -> list[Word] | None:
 
 
 def calls_merge_api(words: list[Word], seg: Segment) -> bool:
-    """`gh api` or `tea api` with a /merge path word, or a merge mutation in its words or heredocs,
-    also the heredoc of a $(cat <<EOF ...) in its words."""
+    """Whether a `gh api` or `tea api` call merges: a /merge path word, or a merge mutation in its words
+    or heredoc, or in the words or heredoc of a $(...) or backtick among its words."""
     if os.path.basename(words[0].text) not in ("gh", "tea") or subcommand(words, 1, "api") is None:
         return False
     texts = [w.text for w in words]
@@ -590,10 +590,10 @@ def main() -> None:
     # Past the deadline, or on any error, nothing is printed.
     with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
         signal.signal(signal.SIGALRM, on_deadline)
-        signal.alarm(DEADLINE_SECONDS)  # one deadline for the whole check
+        signal.alarm(DEADLINE_SECONDS)
         if isinstance(command, str) and "\0" not in command and merges_a_pr(command):
             reason = SQUASH_REASON if squashes(command) else REASON
-            signal.alarm(0)  # disarm before printing, so the alarm cannot fire mid-output
+            signal.alarm(0)  # disarm first, so the alarm cannot fire during the print
             print(json.dumps({"hookSpecificOutput": {
                 "hookEventName": "PreToolUse", "permissionDecision": "ask", "permissionDecisionReason": reason,
             }}))

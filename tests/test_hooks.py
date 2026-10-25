@@ -91,7 +91,7 @@ def test_merge_confirm_is_linear_on_dash_heavy_commands():
     "bash -s <<'EOF'\ngh pr merge 5\nEOF", "sudo bash -c 'gh pr merge 5'", "`gh pr merge 5`",
     "echo 5 | xargs -n 1 gh pr merge", "eval eval 'gh pr merge 5'",
     "gh api graphql -f query=\"$(cat <<'EOF'\nmutation { mergePullRequest(input: {}) { clientMutationId } }\nEOF\n)\"",
-    "echo gh pr merge 5; bash",  # accepted false ask: the parser keeps no separator, so `;` counts as `|`
+    "echo gh pr merge 5; bash",  # accepted false ask: the parser records no separator, so `;` acts like `|`
 ])
 def test_merges_behind_prefixes_and_shell_runners_ask(command):
     out = json.loads(run("merge_confirm.py", bash(command)))
@@ -102,10 +102,10 @@ def test_merges_behind_prefixes_and_shell_runners_ask(command):
     "bash -c 'echo \"gh pr merge 5\"'", "sh -c 'grep \"gh pr merge\" notes.md'", "bash merge.sh gh pr merge 5",
     "printf 'gh pr merge 5'", "xargs echo gh pr merge 5", "sudo echo gh pr merge 5", "command -v gh pr merge",
     'bash -c "$CMD"',
-    "tea pulls merge 5",  # known gap: tea's own merge command never asked, and a new rule is out of scope
-    "cat <<EOF\n$(gh pr merge 5)\nEOF",  # accepted miss: a heredoc body is data unless a shell reads it
+    "tea pulls merge 5",  # known gap: `tea pulls merge` does not ask; a rule for it is out of scope
+    "cat <<EOF\n$(gh pr merge 5)\nEOF",  # accepted miss: bash expands $(...) in an unquoted heredoc, the parser reads the body as data
     "echo " + "$(" * 40 + "gh pr merge 5" + ")" * 40,  # nesting past MAX_DEPTH is unparsed and passes
-    "eval " * 40 + "gh pr merge 5",  # so is a re-parse chain past MAX_DEPTH
+    "eval " * 40 + "gh pr merge 5",  # same for a chain of eval re-parses past MAX_DEPTH
 ])
 def test_merge_confirm_ignores_text_no_shell_runs(command):
     assert run("merge_confirm.py", bash(command)) == ""
