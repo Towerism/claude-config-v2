@@ -34,7 +34,8 @@ opens with a literal character and matches one of `.env`, `.env.local`, `.env.pr
 
 VAR=value words and the wrappers `env`, `command`, sudo, doas, nohup, exec, time -p, timeout N,
 nice -n N, stdbuf and xargs are skipped. The text that `bash|sh|zsh -c`, `eval` and `env -S` run,
-a heredoc fed to a shell, and the echo or printf text before a bare shell are parsed again. Other
+a heredoc fed to a shell (`bash <<E`, `cat <<E | bash`), and the echo or printf text before a bare
+shell are parsed again. Other
 commands (echo, printf, git commit -m, python3 -c, git log --grep), comments and heredoc bodies stay
 silent. It is a reminder, not a security boundary: an unlisted reader gets past it, and so do an
 output redirection, `python3 x.py .env`, `git show HEAD:.env` and `cat $(echo .env)`. Nesting past
@@ -493,9 +494,10 @@ def resolve(words: list[Word]) -> tuple[list[Word], str | None]:
     raise Unparsed
 
 
-def shell_texts(words: list[Word], seg: Segment, previous: list[Word]) -> list[str]:
-    """What a bash, sh or zsh command runs: its -c string; with no script, its heredocs and the text
-    of the echo or printf before it (the parser keeps no separator, so `echo x; bash` counts too)."""
+def shell_texts(words: list[Word], seg: Segment, previous: list[Word], previous_heredocs: list[str]) -> list[str]:
+    """What a bash, sh or zsh command runs: its -c string; with no script, its heredocs, the heredocs
+    of the command before it, and the text of the echo or printf before it (the parser keeps no
+    separator, so `echo x; bash` counts too)."""
     with_c = False
     i = 1
     while i < len(words):
@@ -509,7 +511,7 @@ def shell_texts(words: list[Word], seg: Segment, previous: list[Word]) -> list[s
             return [text] if with_c else []  # the -c string, or a script file
     if with_c:
         return []
-    texts = list(seg.heredocs)
+    texts = seg.heredocs + previous_heredocs
     if previous and os.path.basename(previous[0].text) in ("echo", "printf"):
         args = previous[1:]
         while args and re.fullmatch(r"-[neE]+", args[0].text):
@@ -549,6 +551,7 @@ def walk(text: str, depth: int, visit) -> bool:
     if any(secret_path(w.text, w.glob) for w in parser.inputs):
         return True
     previous: list[Word] = []
+    previous_heredocs: list[str] = []
     for seg in parser.segments:
         words, script = resolve(seg.words)
         if script is not None:
@@ -558,14 +561,14 @@ def walk(text: str, depth: int, visit) -> bool:
         else:
             name = os.path.basename(words[0].text)
             if name in SHELLS:
-                texts = shell_texts(words, seg, previous)
+                texts = shell_texts(words, seg, previous, previous_heredocs)
             elif name == "eval":
                 texts = [" ".join(w.text for w in words[1:])]
             elif visit(words, seg):
                 return True
             else:
                 texts = []
-            previous = words
+            previous, previous_heredocs = words, seg.heredocs
         if any(walk(t, depth + 1, visit) for t in texts):
             return True
     return False

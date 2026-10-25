@@ -10,7 +10,8 @@ nice -n N, stdbuf and xargs. It asks for:
   `mergePullRequest` or `enablePullRequestAutoMerge` among its words or in its heredoc body.
 
 The text that `bash|sh|zsh -c`, `eval` and `env -S` run is parsed again, and so are a heredoc fed to
-a shell and the echo or printf text before a bare shell (`echo 'gh pr merge 5' | bash`). Quoted text,
+a shell (`bash <<E`, `cat <<E | bash`) and the echo or printf text before a bare shell
+(`echo 'gh pr merge 5' | bash`). Quoted text,
 heredoc bodies and comments of other commands do not ask: `echo "gh pr merge"`, `grep`,
 `git commit -m` and `python3 -c` pass. A squash merge (`--squash`, a short flag group holding `s`
 after `merge`, or a `gh api …/merge` sending merge_method=squash) gets its own reason, because the
@@ -396,9 +397,10 @@ def resolve(words: list[Word]) -> tuple[list[Word], str | None]:
     raise Unparsed
 
 
-def shell_texts(words: list[Word], seg: Segment, previous: list[Word]) -> list[str]:
-    """What a bash, sh or zsh command runs: its -c string; with no script, its heredocs and the text
-    of the echo or printf before it (the parser keeps no separator, so `echo x; bash` counts too)."""
+def shell_texts(words: list[Word], seg: Segment, previous: list[Word], previous_heredocs: list[str]) -> list[str]:
+    """What a bash, sh or zsh command runs: its -c string; with no script, its heredocs, the heredocs
+    of the command before it, and the text of the echo or printf before it (the parser keeps no
+    separator, so `echo x; bash` counts too)."""
     with_c = False
     i = 1
     while i < len(words):
@@ -412,7 +414,7 @@ def shell_texts(words: list[Word], seg: Segment, previous: list[Word]) -> list[s
             return [text] if with_c else []  # the -c string, or a script file
     if with_c:
         return []
-    texts = list(seg.heredocs)
+    texts = seg.heredocs + previous_heredocs
     if previous and os.path.basename(previous[0].text) in ("echo", "printf"):
         args = previous[1:]
         while args and re.fullmatch(r"-[neE]+", args[0].text):
@@ -427,6 +429,7 @@ def walk(text: str, depth: int, visit) -> bool:
     parser = Parser(text)
     parser.commands(None, depth)
     previous: list[Word] = []
+    previous_heredocs: list[str] = []
     for seg in parser.segments:
         words, script = resolve(seg.words)
         if script is not None:
@@ -436,14 +439,14 @@ def walk(text: str, depth: int, visit) -> bool:
         else:
             name = os.path.basename(words[0].text)
             if name in SHELLS:
-                texts = shell_texts(words, seg, previous)
+                texts = shell_texts(words, seg, previous, previous_heredocs)
             elif name == "eval":
                 texts = [" ".join(w.text for w in words[1:])]
             elif visit(words, seg):
                 return True
             else:
                 texts = []
-            previous = words
+            previous, previous_heredocs = words, seg.heredocs
         if any(walk(t, depth + 1, visit) for t in texts):
             return True
     return False
