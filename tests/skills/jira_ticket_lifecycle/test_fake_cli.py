@@ -1,4 +1,4 @@
-"""The fake CLI itself: answers the tests rely on."""
+"""Tests the fake CLI's answers, which the other tests rely on."""
 
 import json
 import subprocess

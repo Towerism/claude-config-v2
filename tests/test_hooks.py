@@ -1726,8 +1726,8 @@ def test_an_event_without_tool_input_gives_the_usual_output(name, machine):
     assert hook_result(name, json.dumps(EVENT_ONLY[name]).encode(), machine) == (0, expected, b"")
 
 
-# Runs a hook's main() as its __main__ block does, after `patch` (source run with the module
-# bound to `hook`) replaces one of its functions.
+# Runs a hook's main() as its __main__ block does. `patch` is Python source, run after the
+# module loads as `hook`, that replaces one of the hook's functions.
 DRIVER = """
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("hook", sys.argv[1])
