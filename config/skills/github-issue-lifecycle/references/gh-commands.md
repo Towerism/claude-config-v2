@@ -16,6 +16,7 @@ Every GitHub read and write goes through `gh` with the user's login. Bodies alwa
 | Publish spec | `gh issue edit N --body-file <new-body>` | 403 → tell the user |
 | Status labels | `gh issue edit N --add-label draft --remove-label approved` (and the reverse on approval) | |
 | Comment | `gh issue comment N --body-file <file>` | 403 |
+| Path declaration check | `gh api --paginate --slurp "repos/{owner}/{repo}/issues/N/comments" \| jq '[.[][] \| {url: .html_url, body: .body}]'` to a file, then `declaration-check` (step 2a; at step 5 and, with `--stamp`, at step 7) | exit 1 lists problems; `gh pr create` is asked about until the stamp exists |
 | Default branch | `gh repo view --json defaultBranchRef --jq .defaultBranchRef.name` | |
 | Open PRs for the issue | `gh pr list --search "N in:title,body" --state open --json number,headRefName` | |
 | Create PR | `gh pr create --base <default> --title "<type(scope): subject (#N)>" --body-file <file> [--label hotfix]` | can't target default → warn the issue won't auto-close |

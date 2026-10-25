@@ -323,3 +323,76 @@ def test_adr_records_the_pathway_departure():
     assert "Status" in text and "#7" in text and "pathway" in text.lower()
     for agent in OMC_AGENTS:
         assert re.search(rf"\b{re.escape(agent)}\b", text), agent
+
+
+def test_precedence_over_omc_is_stated_before_the_workflow():
+    head = global_text().split("### Workflow, in order")[0]
+    assert "override" in head and "lightest-weight path" in head
+    assert "only the user can waive" in head.lower()
+    assert "untagged" in head and "required" in head
+
+
+def script_constant(name):
+    """A module-level constant of the GitHub lifecycle script, read without importing it."""
+    path = ROOT / "config" / "skills" / "github-issue-lifecycle" / "scripts" / "issue_lifecycle.py"
+    for node in ast.parse(path.read_text()).body:
+        if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", None) == name:
+            return ast.literal_eval(node.value)
+    raise AssertionError(f"issue_lifecycle.py has no {name}")
+
+
+def test_advisory_tags_match_the_scripts_advisory_set():
+    tagged = re.findall(r"\(advisory: ([a-z-]+)\)", global_text())
+    assert len(tagged) == len(set(tagged))
+    assert set(tagged) == set(script_constant("ADVISORY_STEPS"))
+    assert not set(tagged) & set(script_constant("REQUIRED_STEPS"))
+
+
+def test_path_declaration_follows_step_2_and_asks_a_plain_question():
+    text = global_text()
+    start = text.index("2. Start:")
+    end = text.index("3. Test plan:")
+    block = text[start:end]
+    assert "Path declaration" in block
+    for needle in ("Review the proposed pipeline?", "yes/no", "lists no skipped steps", "wizard",
+                   "waived", "never skipped", "spec approval"):
+        assert needle in block, needle
+
+
+def test_self_review_does_not_let_required_steps_be_skipped():
+    line = next(l for l in global_text().splitlines() if l.startswith("Self-review:"))
+    assert "otherwise say why not" not in line
+    assert "required" in line and "advisory" in line
+
+
+LIFECYCLE_SKILLS = ("github-issue-lifecycle", "gitea-issue-lifecycle", "jira-ticket-lifecycle")
+
+
+@pytest.mark.parametrize("skill", LIFECYCLE_SKILLS)
+def test_lifecycle_skill_declares_the_path_after_the_claim_and_checks_it_twice(skill):
+    text = (ROOT / "config" / "skills" / skill / "SKILL.md").read_text()
+    claim = text.index("### 2. Claim it")
+    declare = text.index("Path declaration")
+    approval = text.index("### 5. Approval and labels")
+    pr = text.index("### 7. Open the PR")
+    assert claim < declare < text.index("### 3. Settle the approval mode")
+    section = text[declare:text.index("### 3. Settle the approval mode")]
+    for needle in ("Review the proposed pipeline?", "plain yes or no", "lists no skipped steps",
+                   "verbatim", "<!-- path-declaration v1 -->", "<!-- /path-declaration -->",
+                   "- run: ", "- waived: ", "- n/a: ", "variant:"):
+        assert needle in section, needle
+    checks = [m.start() for m in re.finditer("declaration-check", text)]
+    assert any(declare < c < approval for c in checks) is False, "check belongs to approval and PR time"
+    assert any(approval < c < pr for c in checks), "check before approved is set"
+    assert any(c > pr for c in checks), "check at PR time"
+    assert "--stamp" in text[pr:] and "--approval-mode" in text and "--spec" in text
+
+
+def test_adr_records_that_required_steps_bind_omc():
+    adrs = sorted((ROOT / "docs" / "adr").glob("0005-*.md"))
+    assert len(adrs) == 1
+    text = adrs[0].read_text()
+    assert "Status" in text and "pending the user" in text
+    assert "ADR-0001" in text and "ADR-0004" in text
+    assert "lightest-weight path" in text and "bash_guard" in text
+    assert "writes the comments itself" in text

@@ -56,6 +56,27 @@ Read the labels with `GET repos/<o>/<r>/labels`, following pages until a short p
 
 Then assign the user (`PATCH repos/<o>/<r>/issues/N` with `{"assignees": ["<login>"]}`) and add `in progress`. Labels are added with `POST repos/<o>/<r>/issues/N/labels` and `{"labels": [<ids>]}` and removed with `DELETE repos/<o>/<r>/issues/N/labels/<id>`, always by id from the label list.
 
+### 2a. Path declaration
+
+Right after the claim, once per change, ask (AskUserQuestion) "Review the proposed pipeline?" as a plain yes or no. The question lists no skipped steps. A hotfix gets the same question and no pre-waived steps.
+- **Yes:** open the wizard. Show the proposed path: the steps that will run and the advisory steps you would skip, each with a reason. The user confirms or changes each skip.
+- **No:** you may skip the advisory steps you judge fit. The "No" answer is the recorded waiver for each.
+
+Post the user's answer to the question, and each wizard answer, verbatim as an issue comment (`POST repos/<o>/<r>/issues/N/comments`) right after it is given. A wizard selection counts as the user's words: the quote is the selected option plus any free text. Keep each comment's URL.
+
+Step ids. Advisory (may be waived): `interview`, `analyst`, `docs-lookup`, `test-plan`, `history-cleanup`, `simplifier`, `qa`, `design`. Required (never waived): `self-review`, `spec-review`, `review-notes`, `tdd`, `diff-review`, `security-gate`, `verify`, plus `repro` for variant bug. `security-gate` is `n/a` with the trigger fact when the diff touches none of auth, input parsing, secrets, shell, network or deserialization. `spec-review` is `n/a` only with fact `approval: no-review`. Variant docs marks `test-plan` and `tdd` `n/a` with fact `variant: docs`.
+
+Keep the declaration as one issue comment; post it, then update it as steps run. List every advisory step on its own line (`run`, `waived` or `n/a`): a step left out fails the check:
+```
+<!-- path-declaration v1 -->
+variant: feature
+- run: <step-id> — <comment URL>
+- waived: <step-id> — "<quote>" — <comment URL of the verbatim answer>
+- n/a: <step-id> — <fact>
+<!-- /path-declaration -->
+```
+A `run` line cites an issue comment that records the step (a review note, a self-review list). Under "No", every skipped advisory step is a `waived` line whose quote and URL are the "No" answer. A later wish to waive re-opens the wizard: replace the line and cite the new comment. A spec returned to draft re-opens the declaration. A waiver covers one issue. The check runs at approval (step 5) and at PR time (step 7).
+
 ### 3. Settle the approval mode
 
 Settle it before any spec is written. Take the first that applies:
@@ -91,6 +112,12 @@ tea api --login <login> -X PATCH repos/<o>/<r>/issues/N -d @"$tmp/patch.json"
 - **Adversarial approval.** A single review pass with no CRITICAL that changed nothing: post the note and add `approved`. Otherwise raise it with the user and wait.
 - **No review.** Add `approved` with a comment saying it was self-approved under "no review".
 
+Before `approved` is set, in every mode, show the declaration in the approval prompt and run the check. Write the issue's comments (`GET repos/<o>/<r>/issues/N/comments`, every page) to `$tmp/comments.json` as a JSON list of `{url, body}` with `url` from `html_url`, the latest comment holding `<!-- path-declaration v1 -->` to `$tmp/declaration.md`, and the spec to `$tmp/spec.md`; then:
+```bash
+python3 -I <skill-dir>/scripts/issue_lifecycle.py declaration-check --declaration "$tmp/declaration.md" --comments "$tmp/comments.json" --approval-mode manual --spec "$tmp/spec.md"
+```
+Use the mode from the `approval: *` label (`manual`, `adversarial` or `no-review`). Exit 1 lists the problems: fix the declaration and rerun; don't set `approved` until it passes.
+
 Implementation starts only when `approved` is on the issue **and the user's login added it** (the timeline check from step 3). An `approved` added by any other account is reported and treated as `draft`. If the spec must change later, change the spec first; that returns it to `draft`. Every review pass, on the spec or the PR diff, gets its note posted as an issue comment; one pass per spec and one per diff, never re-run after fixes.
 
 ### 6. Branch, worktree, commits
@@ -105,7 +132,7 @@ The title is issue text, so reduce it to letters, digits and single spaces befor
 
 ### 7. Open the PR
 
-Draft the body with `/oh-my-claudecode:pr`, shaped by [assets/pr-body-template.md](assets/pr-body-template.md): `Closes #42` alone on its line, `Spec: #42`, a map from each acceptance criterion to its test, and a `## Review` section with the PR-diff review note. Check it with `pr-body-check --body "$tmp/pr.md" --issue 42` on the script. Read the default branch from `GET repos/<o>/<r>` (`default_branch`), then `POST repos/<o>/<r>/pulls` with `{"title": ..., "body": ..., "head": ..., "base": ...}` in a file. Give a hotfix PR the `hotfix` label.
+Draft the body with `/oh-my-claudecode:pr`, shaped by [assets/pr-body-template.md](assets/pr-body-template.md): `Closes #42` alone on its line, `Spec: #42`, a map from each acceptance criterion to its test, and a `## Review` section with the PR-diff review note. Check it with `pr-body-check --body "$tmp/pr.md" --issue 42` on the script. Then refetch the comments and rerun the step 5 `declaration-check` with `--stamp --issue 42`; a pass leaves the stamp. The PR hook gates only `gh pr create`, so this PR call is not blocked without it: run the check anyway. Read the default branch from `GET repos/<o>/<r>` (`default_branch`), then `POST repos/<o>/<r>/pulls` with `{"title": ..., "body": ..., "head": ..., "base": ...}` in a file. Give a hotfix PR the `hotfix` label.
 
 Gitea doesn't report which issues a PR will close, so don't claim a link you can't read. The body check plus step 8's close check stand in for it. If the PR can't target the default branch, warn that the issue won't close on merge.
 

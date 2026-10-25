@@ -31,6 +31,7 @@ Every call is `tea api --login <login> -i -X <METHOD> <endpoint> [-d @<file>]`; 
 | Label provenance | `tea api --login <login> -X GET repos/<o>/<r>/issues/N/timeline` | entry with `type` `label`, `label.name`, `user.login`, `body` `1` when added; follow pages |
 | Publish spec | `tea api --login <login> -X PATCH repos/<o>/<r>/issues/N -d @patch.json` | `body` |
 | Comment | `tea api --login <login> -X POST repos/<o>/<r>/issues/N/comments -d @comment.json` | `id` |
+| List comments (path declaration check, steps 2a, 5, 7) | `tea api --login <login> repos/<o>/<r>/issues/N/comments` (every page) | `html_url` and `body` go to the comments file |
 | Repo facts | `tea api --login <login> -X GET repos/<o>/<r>` | `default_branch`, `allow_merge_commits`, `allow_rebase`, `allow_squash_merge` |
 | Create PR | `tea api --login <login> -X POST repos/<o>/<r>/pulls -d @pr.json` | `number` |
 | Merge | `tea api --login <login> -X POST repos/<o>/<r>/pulls/N/merge -d @merge.json` | only after the chat confirmation; never `"Do": "squash"` |

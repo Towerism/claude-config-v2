@@ -62,6 +62,27 @@ Run `claim --key <key>`. It assigns the ticket to you, adds it to the active spr
 - `unknown-state`: the ticket's state isn't in `stateOrder`. Ask the user whether the settings need it.
 - `none` or `ambiguous` on `sprint`: report it and go on.
 
+### 2a. Path declaration
+
+Right after the claim, once per change, ask (AskUserQuestion) "Review the proposed pipeline?" as a plain yes or no. The question lists no skipped steps. A hotfix gets the same question and no pre-waived steps.
+- **Yes:** open the wizard. Show the proposed path: the steps that will run and the advisory steps you would skip, each with a reason. The user confirms or changes each skip.
+- **No:** you may skip the advisory steps you judge fit. The "No" answer is the recorded waiver for each.
+
+Post the user's answer to the question, and each wizard answer, verbatim as a ticket comment (`comment --key <key> --body-file <file>`) right after it is given. A wizard selection counts as the user's words: the quote is the selected option plus any free text. Keep each comment's URL.
+
+Step ids. Advisory (may be waived): `interview`, `analyst`, `docs-lookup`, `test-plan`, `history-cleanup`, `simplifier`, `qa`, `design`. Required (never waived): `self-review`, `spec-review`, `review-notes`, `tdd`, `diff-review`, `security-gate`, `verify`, plus `repro` for variant bug. `security-gate` is `n/a` with the trigger fact when the diff touches none of auth, input parsing, secrets, shell, network or deserialization. `spec-review` is `n/a` only with fact `approval: no-review`. Variant docs marks `test-plan` and `tdd` `n/a` with fact `variant: docs`.
+
+Keep the declaration as one ticket comment; post it, then update it as steps run. List every advisory step on its own line (`run`, `waived` or `n/a`): a step left out fails the check:
+```
+<!-- path-declaration v1 -->
+variant: feature
+- run: <step-id> — <comment URL>
+- waived: <step-id> — "<quote>" — <comment URL of the verbatim answer>
+- n/a: <step-id> — <fact>
+<!-- /path-declaration -->
+```
+A `run` line cites a ticket comment that records the step (a review note, a self-review list). Under "No", every skipped advisory step is a `waived` line whose quote and URL are the "No" answer. A later wish to waive re-opens the wizard: replace the line and cite the new comment. A spec returned to draft re-opens the declaration. A waiver covers one issue. The check runs at approval (step 5) and at PR time (step 7).
+
 ### 3. Settle the approval mode
 
 Settle it before any spec is written. Take the first that applies:
@@ -92,6 +113,12 @@ Publishing a spec sets the draft label and removes the approved one. Then, by mo
 
 Every review pass, on the spec or the PR diff, gets its review note posted as a ticket comment listing each finding and how it was handled. One pass per spec and one per diff; never re-run it after fixes.
 
+Before the approve step, in every mode, show the declaration in the approval prompt and run the check. Read the ticket with `view --key <key>`, write its comments to `$tmp/comments.json` as a JSON list of `{url, body}` (url `<site>/browse/<key>?focusedCommentId=<id>`), the latest comment holding `<!-- path-declaration v1 -->` to `$tmp/declaration.md`, and the working-copy spec to `$tmp/spec.md`; then:
+```bash
+python3 -I <skill-dir>/scripts/ticket_lifecycle.py declaration-check --declaration "$tmp/declaration.md" --comments "$tmp/comments.json" --approval-mode manual --spec "$tmp/spec.md"
+```
+Use the mode from the approval label (`manual`, `adversarial` or `no-review`). Exit 1 lists the problems: fix the declaration (post a new declaration comment; the latest counts) and rerun; don't approve until it passes.
+
 Implementation starts only when `label-actor --key <key> --label <approved label>` reports `addedByMe: true`. A later spec change goes into the spec first, which returns the ticket to draft and back through the mode's approval path.
 
 ### 6. Branch, worktree, commits
@@ -113,6 +140,7 @@ Requirement IDs (FR-, AC-, EC-…) stay out of code, test names and comments unl
 Draft the body with `/oh-my-claudecode:pr`, shaped by [assets/pr-body-template.md](assets/pr-body-template.md): the first line `Ticket: <site>/browse/KEY-N`, a `Spec: KEY-N` line, a map from each acceptance criterion to the test or check that covers it (`not verified` with the reason, never a false pass), and a `## Review` section with the PR-diff review note. Then:
 ```bash
 python3 -I <skill-dir>/scripts/ticket_lifecycle.py pr-body-check --body "$tmp/pr.md" --key PAY-142
+python3 -I <skill-dir>/scripts/ticket_lifecycle.py declaration-check --declaration "$tmp/declaration.md" --comments "$tmp/comments.json" --approval-mode manual --spec "$tmp/spec.md" --stamp --key PAY-142   # refetch the files first; a pass leaves the stamp. The PR hook gates only `gh pr create`, so run the check anyway
 gh pr create --draft --base <default> --title "feat(export): add CSV export (PAY-142)" --body-file "$tmp/pr.md"
 python3 -I <skill-dir>/scripts/ticket_lifecycle.py pr-body --key PAY-142 --pr <n> --body "$tmp/pr.md"
 python3 -I <skill-dir>/scripts/ticket_lifecycle.py link-pr --key PAY-142 --pr-url <url gh printed>
