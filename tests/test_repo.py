@@ -409,7 +409,7 @@ def test_adr_records_that_required_steps_bind_omc():
     adrs = sorted((ROOT / "docs" / "adr").glob("0005-*.md"))
     assert len(adrs) == 1
     text = adrs[0].read_text()
-    assert "**Status:** Proposed (issue #14), pending the owner's acceptance." in text
+    assert "**Status:** Accepted by the owner on 2026-10-25, issue #14." in text
     assert "branch, issue and HEAD" in text
     limit = text[text.index("## Limit"):]
     for needle in ("gh pr new", "--repo", "tea api", "gh api", "unverifiable"):
