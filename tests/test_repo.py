@@ -3,6 +3,7 @@
 import ast
 import json
 import re
+import subprocess
 import sys
 
 import pytest
@@ -417,3 +418,26 @@ def test_adr_records_that_required_steps_bind_omc():
     assert "ADR-0001" in text and "ADR-0004" in text
     assert "lightest-weight path" in text and "bash_guard" in text
     assert "writes the comments itself" in text
+
+
+def suppresses_exception(node):
+    """Whether `node` is contextlib.suppress(Exception) or suppress(Exception)."""
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    named = (isinstance(func, ast.Attribute) and func.attr == "suppress"
+             and isinstance(func.value, ast.Name) and func.value.id == "contextlib")
+    named = named or (isinstance(func, ast.Name) and func.id == "suppress")
+    return named and any(isinstance(a, ast.Name) and a.id == "Exception" for a in node.args)
+
+
+def test_only_hooks_suppress_every_exception():
+    """The hook contract allows a blind catch; anywhere else it hides real bugs (#3)."""
+    tracked = subprocess.run(
+        ["git", "-C", str(ROOT), "ls-files", "*.py"], capture_output=True, text=True, check=True
+    ).stdout.split()
+    others = [path for path in tracked if not path.startswith("config/hooks/")]
+    assert others
+    for path in others:
+        tree = ast.parse((ROOT / path).read_text())
+        assert not any(suppresses_exception(node) for node in ast.walk(tree)), path

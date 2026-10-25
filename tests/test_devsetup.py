@@ -50,6 +50,34 @@ def test_requirements_dev_matches_pyproject_dev_group():
     assert {"pytest", "pytest-cov", "ruff"} <= {re.split(r"[<>=]", d)[0] for d in dev}
 
 
+def test_ruff_is_pinned_to_one_version():
+    dev = tomllib.loads((ROOT / "pyproject.toml").read_text())["dependency-groups"]["dev"]
+    assert "ruff==0.17.2" in dev
+
+
+def ruff_config():
+    return tomllib.loads((ROOT / "pyproject.toml").read_text())["tool"]["ruff"]
+
+
+def test_lint_silences_nothing():
+    ruff = ruff_config()
+    for table in (ruff, ruff.get("lint", {})):
+        assert not {"per-file-ignores", "extend-per-file-ignores"} & set(table)
+        assert not table.get("ignore") and not table.get("extend-ignore")
+    tracked = subprocess.run(
+        ["git", "-C", str(ROOT), "ls-files", "*.py"], capture_output=True, text=True, check=True
+    ).stdout.split()
+    needle = "# " + "noqa"
+    assert tracked
+    assert [path for path in tracked if needle in (ROOT / path).read_text()] == []
+
+
+def test_lint_excludes_only_the_claude_directory_by_path():
+    ruff = ruff_config()
+    assert ruff["extend-exclude"] == [".claude"]
+    assert "exclude" not in ruff and "exclude" not in ruff.get("lint", {})
+
+
 def test_requirements_dev_has_no_paths_urls_or_flags():
     for line in requirement_lines(ROOT / "requirements-dev.txt"):
         assert re.fullmatch(r"[A-Za-z0-9_.-]+(\[\w+\])?[<>=!~]=?[\w.]+", line), line
@@ -109,6 +137,12 @@ def test_setup_creates_venv_before_installing_requirements():
 def test_test_and_lint_run_through_the_venv():
     assert any(".venv/bin/python -I -m pytest" in line for line in make_n("test"))
     assert any(".venv/bin/ruff check" in line for line in make_n("lint"))
+
+
+@needs_make
+def test_lint_passes_no_paths_or_excludes():
+    lines = [line for line in make_n("lint") if "ruff check" in line]
+    assert lines and all(line.split() == [".venv/bin/ruff", "check"] for line in lines), lines
 
 
 @needs_make
