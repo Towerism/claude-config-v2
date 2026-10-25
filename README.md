@@ -27,12 +27,12 @@ V1 (`claude-config`) built its own pipeline from 24 skills, overlays and three h
 2. Preview, then apply:
 
    ```bash
-   python3 -I tools/cfg.py plan --host personal      # or: work
-   python3 -I tools/cfg.py deploy --host personal --yes
+   make plan HOST=personal            # or: work
+   make deploy HOST=personal YES=1
    ```
 
-   Later deploys remember the host. `--target DIR` (or `CLAUDE_CONFIG_DIR`) deploys somewhere else, such as a scratch directory.
-3. `python3 -I tools/cfg.py status` lists files edited since the last deploy and changes still pending. A deploy stops on an edited file until you pass `--force` (the old copy is backed up). `python3 -I tools/cfg.py rollback` undoes the last deploy.
+   `make deploy` without `YES=1` only prints the plan. Later deploys remember the host, so `HOST` can be left out. `TARGET=DIR` (or `CLAUDE_CONFIG_DIR`) deploys somewhere else, such as a scratch directory. The same runs without make: `python3 -I tools/cfg.py plan --host personal`, then `... deploy --host personal --yes`.
+3. `make status` lists files edited since the last deploy and changes still pending. A deploy stops on an edited file until you pass `FORCE=1` (`--force`; the old copy is backed up). `make rollback` undoes the last deploy. A `HOST` or `TARGET` holding `'` or `$` needs the raw command. Only values typed after `make` count; exported variables are ignored.
 
 Per-machine values that never enter the repo live in `~/.config/claude-config/local.json`: a `defaultTracker` override and the `jira` settings that tailor `jira-ticket-lifecycle` to your Jira project (see its `references/settings.md`).
 
@@ -45,7 +45,11 @@ Per-machine values that never enter the repo live in `~/.config/claude-config/lo
 ## Develop
 
 ```bash
-python3 -I -m pytest          # needs pytest; pip install pytest pytest-cov
+make setup    # creates .venv and installs requirements-dev.txt (pytest, pytest-cov, ruff)
+make test     # python3 -I -m pytest in the venv
+make lint     # ruff check
 ```
+
+On Debian and Ubuntu, `make setup` needs the `python3-venv` package. `requirements-dev.txt` mirrors the `dev` group in `pyproject.toml`; a test keeps them equal.
 
 CI is not set up yet; run the tests before every push.

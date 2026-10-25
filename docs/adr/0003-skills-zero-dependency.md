@@ -1,6 +1,6 @@
 # ADR-0003: Skills have no third-party dependencies and nothing to install
 
-**Status:** Accepted 2026-10-24. Amended 2026-10-24 at the user's direction: the lifecycle skills carry deterministic stdlib-only scripts; "zero dependency" now means no third-party packages and no install step, only `python3`.
+**Status:** Accepted 2026-10-24. Amended 2026-10-25 (#2): development tooling may use make, a venv and ruff. Amended 2026-10-24 at the user's direction: the lifecycle skills carry deterministic stdlib-only scripts; "zero dependency" now means no third-party packages and no install step, only `python3`.
 
 ## Context
 
@@ -12,7 +12,7 @@ A skill directory holds markdown, plus Python under `scripts/` that imports only
 
 Each skill is self-contained, because a host may deploy any subset: it never reads a file from a sibling skill. The Gitea skill ships its own copy of the GitHub skill's script; a test keeps the two copies identical.
 
-Scripts that are plumbing (`tools/cfg.py`, the hooks, tests) may depend on anything that keeps the repo small. Today they need only Python 3.11+, and the tests need `pytest`.
+Scripts that are plumbing (`tools/cfg.py`, the hooks, tests) may depend on anything that keeps the repo small. Today they need only Python 3.11+, and the tests need `pytest`. Development tooling (`make`, a `.venv` from `requirements-dev.txt`, `ruff`) is allowed for working on the repo only; skills and deployed code stay standard-library only.
 
 ## Consequences
 

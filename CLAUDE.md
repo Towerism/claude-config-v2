@@ -9,7 +9,9 @@ The workflow here is OMC's: `/oh-my-claudecode:deep-interview` or `:ralplan` for
 
 ## Commands
 
-- Tests: `python3 -I -m pytest`. Quote the result before saying done.
+- Set up: `make setup` (venv in `.venv`, installs `requirements-dev.txt`). Lint: `make lint`.
+- Tests: `python3 -I -m pytest` (`make test` runs it in the venv). Quote the result before saying done.
+- cfg.py: `make plan|deploy|status|rollback [HOST=] [TARGET=]`; `deploy` applies only with `YES=1`.
 - Dry-run a deploy without touching `~/.claude`: `python3 -I tools/cfg.py plan --host personal --target "$(mktemp -d)"`.
 
 ## Rules
