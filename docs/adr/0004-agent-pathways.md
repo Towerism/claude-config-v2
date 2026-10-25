@@ -46,7 +46,7 @@ This replaces the earlier single `Prose:` line.
 ### Hook results
 
 - `skill_gate.py`: stage 2, shipped. Addendum below.
-- `secrets_guard.py`: Addendum at stage 3 (real-harness run and p95 latency).
+- `secrets_guard.py`: stage 3, shipped. Addendum below.
 - `bash_guard.py`: Addendum at stage 4 (real-harness run and p95 latency).
 
 #### Addendum at stage 2: `skill_gate.py`
@@ -88,12 +88,56 @@ This replaces the earlier single `Prose:` line.
 - The "git outlives the deadline" case is enforced in code. Only a wide-diff test exercises it, because the hook sanitizes `PATH` and a fake `git` cannot be injected.
 - `ruff` is not installed on the owner's machine, so lint was not run. Issues #2 and #3 track the dev environment.
 
+#### Addendum at stage 3: `secrets_guard.py`
+
+**Shipped.** `config/hooks/secrets_guard.py`, registered for `PreToolUse` with matcher `Read|Grep|Glob|Bash` and timeout 5. Both host profiles list it.
+
+**Secret files.** One definition serves all four tools:
+
+- A file named `deny-terms` or `.env`.
+- A file named `.env.<suffix>`, except suffixes `example`, `sample` and `template`. `.env.` with an empty suffix counts.
+- `.envrc` is not a secret file.
+
+**Read, Grep, Glob: deny.** The hook denies when a path-like field names a secret file. The fields are `file_path`, `path` and `glob`, plus a Glob `pattern`. A field is denied when:
+
+- it names a secret file, or its real path does (symlinks resolved);
+- it resolves to `~/.config/claude-config/deny-terms`, or to the directory that holds it. Only that directory counts, so a search over the home directory is not denied.
+
+A Grep regex `pattern` is never scanned. Searching for `process.env.API_KEY` passes.
+
+**Bash: ask.** The hook asks when a command token holds a secret name at its start, or right after `/`, a quote or `=`. `cat .env` and `--env-file=.env` ask. `process.env.API_KEY`, `.env.example`, `.envrc` and `environment.ts` pass.
+
+**Hook mechanics.** The hook never opens a file named by its input. It resolves paths only. Reasons are fixed strings. An unexpected error prints one fixed stderr code. The deadline is a 5-second `SIGALRM`.
+
+**Deviations from the approved spec text.** The owner accepts or rejects each at PR time.
+
+1. The `=` boundary for Bash tokens is an addition. It makes `--env-file=.env` ask.
+2. The glob rule is narrowed. A glob whose basename opens with `*`, `?` or `[` is never matched against the secret names. The literal rule denied the ordinary listings `Glob **/*` and `Grep glob *`. The hook was fed those payloads, and the fix was written test-first. Cost: wildcard-led patterns such as `*env` or `*.env` pass. Globs that open with a literal character (`.env*`, `.e*`, `.*`, `deny-t*`) still deny.
+
+**Real-harness run.** Headless `claude -p --model haiku` in a scratch directory holding `notes.txt`, a `.env` with only fake text, and a symlink to that `.env`. The real hook was registered. Tool results were read from the stream, so a model refusal could not hide the hook.
+
+- `Read notes.txt`: passed.
+- `Read .env`: denied with "Secret files (.env, deny-terms) are off limits: do not read, search or list them."
+- `Read` of the symlink: denied through its real path.
+- Bash `cat .env`: asked, with "This command names a secret file (.env or deny-terms). Confirm you want it touched." Headless, an ask becomes a denial.
+- `Grep` for a word, with `path` set to a directory holding a `.env`: passed, and listed the `.env` file name. This is the known gap below.
+
+**Latency.** 20 direct runs on a `Read` payload: median 17 ms, p95 18 ms, max 18 ms. Bar: p95 under 500 ms. Met.
+
+**Tests.** 537 pass at this stage.
+
+**Known limits.**
+
+- The `Grep` gap is open. The hook is not a `permissions.deny` rule, and it does not read file content. See addenda item 4.
+- Wildcard-led globs pass (see deviation 2).
+- Bash matching is per token. Quoting tricks and aliases get past it, as the consequences section already says.
+
 ### Addenda to come (settled now, built at the stage named)
 
 1. V1's hook ban on subprocesses (H1) is not carried. Hooks may start `git` with a fixed argv, no shell and a timeout. Stage 2, built (see the `skill_gate` addendum).
-2. V1's "never blocks" bar is amended. Hooks may ask: `skill_gate`'s autopilot ask is the first example. `secrets_guard` may deny reads of secret files. Asks in headless runs are denials. Stage 2 (asks), built; stage 3 (deny), to come.
-3. The 500 ms p95 latency bar per hook stays: 20 direct runs, p95 under 500 ms, recorded per hook. Stage 2 measured (see the `skill_gate` addendum); stages 3-4 to come.
-4. `secrets_guard` is a hook, not a `permissions.deny` rule. `cfg.py` deploys hooks, plugins and marketplaces only. A `Grep` over a directory that holds a `.env` is not covered. Stage 3.
+2. V1's "never blocks" bar is amended. Hooks may ask: `skill_gate`'s autopilot ask is the first example. `secrets_guard` may deny reads of secret files. Asks in headless runs are denials. Stage 2 (asks) and stage 3 (deny) are built.
+3. The 500 ms p95 latency bar per hook stays: 20 direct runs, p95 under 500 ms, recorded per hook. Stages 2 and 3 measured (see the `skill_gate` and `secrets_guard` addenda); stage 4 to come.
+4. `secrets_guard` is a hook, not a `permissions.deny` rule. `cfg.py` deploys hooks, plugins and marketplaces only. A `Grep` over a directory that holds a `.env` is not covered. Stage 3 built and measured: the real-harness `Grep` passed and listed the `.env` file name (see the `secrets_guard` addendum). Open.
 5. `bash_guard` layers on OMC's own `git-guardrails.mjs`. OMC blocks pushes while ralph, autopilot, team or ultragoal is active, or when `OMC_GIT_GUARDRAILS=1`. The host profiles do not set that variable. `bash_guard` adds interactive asks and the default-branch rules. Stage 4.
 6. OMC's opt-in `code-simplifier` Stop hook is not enabled. It simplifies changed files at every Stop. The rule is a size gate at review. Stage 2, built: `skill_gate` prints the review size check.
 7. Issue #7 link: stage 4 records the PR numbers that carried each stage.
