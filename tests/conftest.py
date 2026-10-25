@@ -11,4 +11,3 @@ def load(path: Path, name: str):
     sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
-import os
