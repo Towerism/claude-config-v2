@@ -16,6 +16,7 @@ the diff. GIT_* variables are dropped, git is found once on a fixed PATH, output
 a test keeps the two equal.
 """
 
+import contextlib
 import json
 import os
 import re
@@ -206,7 +207,7 @@ BYPASS_PROMPT = re.compile(
 def session_bypassed(payload: dict) -> bool:
     """Whether the session's first user prompt starts ralph or autopilot. Reads the first 256 KB of the
     transcript; anything unreadable means no."""
-    try:
+    with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
         path = payload["transcript_path"]
         if not isinstance(path, str) or not os.path.isfile(path):
             return False
@@ -224,8 +225,6 @@ def session_bypassed(payload: dict) -> bool:
                 content = "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
             if isinstance(content, str) and content.strip():
                 return BYPASS_PROMPT.match(content) is not None
-    except Exception:
-        pass
     return False
 
 
