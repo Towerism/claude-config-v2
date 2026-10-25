@@ -8,7 +8,7 @@ V1 built a seven-stage pipeline from vendored skills, overlays that bend them, a
 
 ## Decision
 
-Follow OMC's workflow. Add only what OMC lacks, each with a reason in [the gap analysis](../gap-analysis.md): tracker lifecycle, the merge hook, approval and git guardrails, a cold-reader rule for prose, session handoff, Linux triage, and the two-machine deploy.
+Follow OMC's workflow. Add only what OMC lacks, each with a reason in [the gap analysis](../gap-analysis.md): tracker lifecycle, the merge hook, approval and git guardrails, the rule that `test-engineer` plans the tests before the spec is written, a cold-reader rule for prose, session handoff, Linux triage, and the two-machine deploy.
 
 ## Consequences
 
