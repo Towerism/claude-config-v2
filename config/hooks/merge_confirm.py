@@ -528,15 +528,17 @@ def merging_commands(command: str) -> list[list[Word]]:
     return found
 
 
-def merges_a_pr(command: str) -> bool:
-    """Whether the command merges a pull request through `gh` or `tea`."""
-    return bool(merging_commands(command))
+def merges_a_pr(command: str | list[list[Word]]) -> bool:
+    """Whether the command, or its merging commands from merging_commands, merges a pull request
+    through `gh` or `tea`."""
+    return bool(merging_commands(command) if isinstance(command, str) else command)
 
 
-def squashes(command: str) -> bool:
+def squashes(command: str | list[list[Word]]) -> bool:
     """Whether a merging `gh pr merge` passes `--squash` or a short flag group holding `s` after `merge`,
-    or a merging `gh api …/merge` sends the field merge_method=squash."""
-    for words in merging_commands(command):
+    or a merging `gh api …/merge` sends the field merge_method=squash. Takes the command or its merging
+    commands from merging_commands."""
+    for words in merging_commands(command) if isinstance(command, str) else command:
         args = pr_merge_args(words)
         if args is not None and any(SQUASH_FLAG.fullmatch(w.text) for w in args):
             return True
@@ -594,8 +596,9 @@ def main() -> None:
     with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
         signal.signal(signal.SIGALRM, on_deadline)
         signal.alarm(DEADLINE_SECONDS)
-        if isinstance(command, str) and "\0" not in command and merges_a_pr(command):
-            reason = SQUASH_REASON if squashes(command) else REASON
+        found = merging_commands(command) if isinstance(command, str) and "\0" not in command else []
+        if merges_a_pr(found):
+            reason = SQUASH_REASON if squashes(found) else REASON
             signal.alarm(0)  # disarm first, so the alarm cannot fire during the print
             print(json.dumps({"hookSpecificOutput": {
                 "hookEventName": "PreToolUse", "permissionDecision": "ask", "permissionDecisionReason": reason,

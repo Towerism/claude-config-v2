@@ -1897,6 +1897,26 @@ def test_bash_guard_past_its_deadline_writes_nothing():
     assert driven("bash_guard.py", patch, bash("git status")) == (0, b"", b"")
 
 
+def test_merge_confirm_parses_the_command_once_for_both_checks(monkeypatch, capsys):
+    hook = hook_module("merge_confirm.py")
+    walk, parses = hook.walk, []
+
+    def counted(text, depth, visit):
+        parses.append(depth)
+        return walk(text, depth, visit)
+
+    monkeypatch.setattr(hook, "walk", counted)
+    monkeypatch.setattr(hook.sys, "stdin", types.SimpleNamespace(buffer=io.BytesIO(json.dumps(bash("gh pr merge 5 -s")).encode())))
+    handler = signal.getsignal(signal.SIGALRM)
+    try:
+        hook.main()
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, handler)
+    assert parses == [0]
+    assert json.loads(capsys.readouterr().out)["hookSpecificOutput"]["permissionDecisionReason"] == hook.SQUASH_REASON
+
+
 def test_merge_confirm_past_its_deadline_writes_nothing():
     patch = "import time\nhook.DEADLINE_SECONDS = 1\nhook.merges_a_pr = lambda command: time.sleep(5)\n"
     assert driven("merge_confirm.py", patch, bash("gh pr merge 5")) == (0, b"", b"")
