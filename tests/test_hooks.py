@@ -1484,13 +1484,15 @@ def test_skill_gate_and_bash_guard_share_their_git_hardening(repo):
     gate_mod, guard_mod = hook_module("skill_gate.py"), hook_module("bash_guard.py")
     for name in ("SAFE_PATH", "GIT_FLAGS", "CAP", "DEADLINE_SECONDS"):
         assert getattr(gate_mod, name) == getattr(guard_mod, name), name
+    exe = guard_mod.shutil.which("git", path=guard_mod.SAFE_PATH)
+    # A machine may define filters outside the repo (git-lfs in the system config on CI runners).
+    ambient = guard_mod.run_git(exe, str(repo), FILTER_LISTING_ARGS, time.monotonic() + 5)
     git(repo, "config", "filter.a.b.clean", "x")
     git(repo, "config", "filter.c.process", "y")
     git(repo, "config", "filter.a.b.required", "true")
-    exe = guard_mod.shutil.which("git", path=guard_mod.SAFE_PATH)
     listing = guard_mod.run_git(exe, str(repo), FILTER_LISTING_ARGS, time.monotonic() + 5)
     assert listing == gate_mod.Git(str(repo)).run(*FILTER_LISTING_ARGS)  # the runners agree
-    expected = []
+    expected = guard_mod.filter_overrides(ambient or "")
     for name in ("a.b", "c"):
         for key in ("clean=", "smudge=", "process=", "required=false"):
             expected += ["-c", f"filter.{name}.{key}"]
