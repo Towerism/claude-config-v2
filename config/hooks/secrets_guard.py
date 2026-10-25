@@ -19,9 +19,10 @@ alternatives or brace groups denies.
 
 Bash parses the command as bash_guard.py does (a copy of its parser; a test keeps them equal) and
 asks only when a secret path is an operand of a listed reader at command position. A secret path
-names a secret file, with or without a directory or a `--flag=` prefix. An unquoted glob word that
-opens with a literal character and matches one of `.env`, `.env.local`, `.env.production` or
-`deny-terms` (`.en?`, `.e*`) counts too. The readers:
+names a secret file, with or without a directory or a `--flag=` prefix. An unquoted glob word
+counts too when its basename starts with the literal text `.env` or `deny-terms` (`.env*`,
+`.envrc*`), or opens with a literal character and matches one of `.env`, `.env.local`,
+`.env.production` or `deny-terms` (`.en?`, `.e*`, `deny-t*`). The readers:
 
 - viewers: cat, tac, bat, less, more, head, tail, nl, od, xxd, strings, base64;
 - filters, with the secret as a file and not the pattern: grep, rg, sed, awk, cut, sort, diff, jq
@@ -649,7 +650,8 @@ CURL_VALUES = {"-X", "-H", "-o", "-u", "-A", "-e", "-b", "-c", "-K", "-m", "-w",
 
 
 def secret_path(text: str, glob: bool) -> bool:
-    """Whether a path names a secret file; a glob word also when it matches one (`.en?`, `.e*`)."""
+    """Whether a path names a secret file; a glob word also when its basename starts with `.env` or
+    `deny-terms` (`.env*`) or matches one of GLOB_NAMES (`.en?`, `.e*`)."""
     base = os.path.basename(text)
     if names_secret(base):
         return True
