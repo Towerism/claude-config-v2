@@ -1,6 +1,6 @@
 # ADR-0004: Every OMC agent gets a pathway through the guardrails
 
-**Status:** Accepted by the owner on 2026-10-24, issue #7. This is the first version (stage 1 of 4). Stages 2-4 add addenda.
+**Status:** Accepted by the owner on 2026-10-24, issue #7. Stage 1 set the decision. Stages 2-4 built the hooks; each stage has an addendum below, and the deviations from the approved spec are listed in one section.
 
 ## Context
 
@@ -47,7 +47,7 @@ This replaces the earlier single `Prose:` line.
 
 - `skill_gate.py`: stage 2, shipped. Addendum below.
 - `secrets_guard.py`: stage 3, shipped. Addendum below.
-- `bash_guard.py`: Addendum at stage 4 (real-harness run and p95 latency).
+- `bash_guard.py`: stage 4, shipped. Addendum below.
 
 #### Addendum at stage 2: `skill_gate.py`
 
@@ -132,15 +132,82 @@ A Grep regex `pattern` is never scanned. Searching for `process.env.API_KEY` pas
 - Wildcard-led globs pass (see deviation 2).
 - Bash matching is per token. Quoting tricks and aliases get past it, as the consequences section already says.
 
-### Addenda to come (settled now, built at the stage named)
+#### Addendum at stage 4: `bash_guard.py`
+
+**Shipped.** `config/hooks/bash_guard.py`, registered for `PreToolUse` with matcher `Bash` and timeout 5, as a second `Bash` group beside `merge_confirm.py`. Both host profiles list it. One process runs per Bash call. The file is about 1,070 lines. Most of that is a single-pass shell lexer (quotes, escapes, `$(...)`, backticks, heredocs, here-strings, redirections), so that `git` and `gh` count only at command position. `echo git push origin main` and `grep "cd /tmp/x && git commit" notes` do nothing.
+
+**Target repo.** The hook takes the repo from `git -C`, a leading `cd`, or the payload cwd, and applies `cd`, `checkout` and `switch` in order. When it cannot tell the target, it passes silently.
+
+**Rules.** Every decision is an ask with a fixed reason for that rule.
+
+1. Commit on the default branch, in a repo with an origin.
+2. Push forms. A plain `push` and `push origin HEAD` resolve to the current branch. Asks on `HEAD:main`, `:main`, `--delete main`, `--mirror`, `--all`, `--prune`, a force push from the default branch, and `git branch -d/-D/-m/-M` naming it.
+3. Commit subject must be a Conventional Commit ending in `(#N)`, `(owner/repo#N)` or `(KEY-N)`. Checked only on branches already named `type/{issue}-slug`. `chore(release):` is never asked.
+4. New branch names (`git checkout -b`) must match `feature|fix|hotfix|docs|chore/{issue}-{slug}` in a repo with an origin. `improve/`, `experiment/` and `omc-team/` are exempt.
+5. Secrets in commit content: secret-file names and anchored token patterns, on added lines only.
+6. The `approved` label on `gh issue edit`, `gh issue create` and `gh api`.
+
+**Hardening and tests.** The hook uses the same hardened git as the other hooks. It opens files with `O_NONBLOCK|O_NOFOLLOW`, accepts regular files only, and reads at most 64 KiB. A FIFO, `/dev/zero` and a symlink given to `-F` return within the deadline. One 5-second deadline covers the whole hook. Stderr prints one fixed code.
+
+- Subject and branch patterns are copied from the lifecycle scripts. An AST parity test compares `CC_TYPES`, `SUBJECT_RE`, `ISSUE_REF_RE` and `TICKET_REF_RE` with those scripts, and a behavioural parity test runs both.
+- `test_secret_file_definitions_agree` keeps `bash_guard` and `secrets_guard` equal.
+- Mutation checks: removing `core.fsmonitor=false` fails the repo-config test; removing the `GIT_*` filter fails the env test.
+- In-process tests cover a missing git and a git that outlives the deadline, through the `run_git` seam. This closes the deadline gap that stage 2 left.
+- 855 tests pass.
+
+**Layering with OMC.** OMC's `git-guardrails` hook blocks every push, `branch -D`, `reset --hard`, `clean -f` and `checkout .` while ralph, autopilot, team or ultragoal is active, or when `OMC_GIT_GUARDRAILS=1`. `bash_guard` covers interactive sessions, default-branch commits, force-pushes and deletes of the default branch, subjects, branch names and tokens. The host profiles do not set `OMC_GIT_GUARDRAILS=1`, because it would block the lifecycle's own pushes. OMC's opt-in code-simplifier Stop hook stays off (item 6 below).
+
+**Latency.** 20 direct runs in a temp repo with a bare origin:
+
+- `git commit -m x`: min 33 ms, median 39 ms, p95 50 ms, max 52 ms.
+- Non-git `ls -la`: median 28 ms, p95 31 ms.
+
+Bar: p95 under 500 ms. Met.
+
+**Real-harness run.** Headless `claude -p --model haiku` in a scratch repo with a bare origin and a fake `.env`, with the real hook registered. Tool results were read from the stream. Headless, an ask becomes a denial.
+
+- Commit on `main`: denied, "This commit lands on the default branch...".
+- Bad subject on `feature/7-x`: denied.
+- `fix(x): y (#7)`: committed.
+- `git checkout -b fix-thing`: denied.
+- `git checkout -b improve/x`: passed.
+- `git add .env && git commit`: denied, "holds 1 secret file name(s) and 0 token match(es)".
+- `gh issue edit 1 --add-label approved`: denied before `gh` ran.
+- `git push origin HEAD` on `main`: denied, nothing pushed.
+
+**Known limits.**
+
+- A `cd` inside a subshell still applies to the rest of the line. Subshell scoping is not modelled.
+- Unextractable input passes. The deviations list gives the cases.
+- The hook is large, about 1,070 lines. The diff review should read it closely.
+
+### Addenda (settled at stage 1, built at the stage named)
 
 1. V1's hook ban on subprocesses (H1) is not carried. Hooks may start `git` with a fixed argv, no shell and a timeout. Stage 2, built (see the `skill_gate` addendum).
-2. V1's "never blocks" bar is amended. Hooks may ask: `skill_gate`'s autopilot ask is the first example. `secrets_guard` may deny reads of secret files. Asks in headless runs are denials. Stage 2 (asks) and stage 3 (deny) are built.
-3. The 500 ms p95 latency bar per hook stays: 20 direct runs, p95 under 500 ms, recorded per hook. Stages 2 and 3 measured (see the `skill_gate` and `secrets_guard` addenda); stage 4 to come.
+2. V1's "never blocks" bar is amended. Hooks may ask: `skill_gate`'s autopilot ask is the first example. `secrets_guard` may deny reads of secret files. Asks in headless runs are denials. Stage 2 (asks), stage 3 (deny) and stage 4 (asks on commits, pushes and labels) are built.
+3. The 500 ms p95 latency bar per hook stays: 20 direct runs, p95 under 500 ms, recorded per hook. Stages 2, 3 and 4 measured (see the addenda). Met at each stage.
 4. `secrets_guard` is a hook, not a `permissions.deny` rule. `cfg.py` deploys hooks, plugins and marketplaces only. A `Grep` over a directory that holds a `.env` is not covered. Stage 3 built and measured: the real-harness `Grep` passed and listed the `.env` file name (see the `secrets_guard` addendum). Open.
-5. `bash_guard` layers on OMC's own `git-guardrails.mjs`. OMC blocks pushes while ralph, autopilot, team or ultragoal is active, or when `OMC_GIT_GUARDRAILS=1`. The host profiles do not set that variable. `bash_guard` adds interactive asks and the default-branch rules. Stage 4.
+5. `bash_guard` layers on OMC's own `git-guardrails.mjs`. OMC blocks pushes while ralph, autopilot, team or ultragoal is active, or when `OMC_GIT_GUARDRAILS=1`. The host profiles do not set that variable. `bash_guard` adds interactive asks and the default-branch rules. Stage 4, built (see the `bash_guard` addendum).
 6. OMC's opt-in `code-simplifier` Stop hook is not enabled. It simplifies changed files at every Stop. The rule is a size gate at review. Stage 2, built: `skill_gate` prints the review size check.
-7. Issue #7 link: stage 4 records the PR numbers that carried each stage.
+7. Issue #7 link: the commits that carried each stage. Stage 2: `764407d`, `0b03e95`, `f3032e7`. Stage 3: `c768eba`, `f3b9138`. Stage 4 is uncommitted at the time of this addendum; its PR number is recorded when the PR opens.
+
+## Deviations from the approved spec, for the owner to accept
+
+The owner accepts or rejects each item at PR time. Items 4 to 11 are stage 4 deviations. Items 12 and 13 are not spec deviations; they are listed for the reviewer.
+
+1. **[Stage 2]** The fixup pattern has no trailing space, so it matches a superset of subjects. Harmless.
+2. **[Stage 3]** The `=` boundary for Bash tokens is an addition. It makes `--env-file=.env` ask.
+3. **[Stage 3]** The glob rule is narrowed: a glob whose basename opens with `*`, `?` or `[` is never matched against secret names. Wildcard-led patterns such as `*env` pass.
+4. **[Stage 4]** `bash_guard` reads untracked file contents in the broad scan (bounded, 1 MiB total, safe open). The broad scan covers `git add -A`, `git add .` or a directory, and an add plus commit in one command. `ls-files -mo` plus `git diff HEAD` never see a token in a new file.
+5. **[Stage 4]** Broad-scan names come from the untracked listing plus `git diff --name-only --diff-filter=d`. A deleted `.env` does not ask.
+6. **[Stage 4]** Shell keywords (`if then else do while until ! { time`) are skipped. `/usr/bin/git` counts as git.
+7. **[Stage 4]** A target that cannot be determined passes silently: `GIT_DIR=`, `GIT_WORK_TREE=`, `env -C`, `--git-dir`, `--work-tree`, and paths holding `$` or backticks.
+8. **[Stage 4]** `git branch -m` with no old name, while on the default branch, asks.
+9. **[Stage 4]** Unextractable input passes: a first line over 200 characters, an unreadable `-F`, a piped `-F -`, and `--fixup`, `--squash`, `-C`, `-c` and editor messages.
+10. **[Stage 4]** A `cd` inside a subshell still applies to the rest of the line. Known gap: subshell scoping is not modelled.
+11. **[Stage 4]** Rule 6 counts `gh api` only with `-f`, `-F`, `--field` or `--raw-field` key labels, or `labels[]`. `gh pr edit --add-label approved` is not covered.
+12. **[Not a spec deviation]** `tests/test_cfg.py` was edited outside the listed scope at stages 2-4, because it pinned the exact hook set.
+13. **[Not a spec deviation]** `bash_guard.py` is about 1,070 lines. It is a review surface that the diff review should read closely.
 
 ## Consequences
 
