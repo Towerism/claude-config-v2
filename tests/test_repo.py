@@ -246,6 +246,12 @@ def test_conditional_triggers_are_concrete():
     security = bullet_for("security-reviewer", bullets)[0].lower()
     assert all(w in security for w in ("auth", "input", "secret"))
     assert "300" in bullet_for("code-simplifier", bullets)[0]
+    assert "exceeds 300 changed lines" in bullet_for("code-reviewer", bullets)[0]
+    assert "does not count against the one-pass rule" in security
+    team = next(b for b in bullets if "`team`" in b)
+    assert "skip verifier" in team and "security-reviewer" in team and "code-reviewer" in team
+    bug = next(b for b in section("Variants by request type") if b.startswith("- Bug") and "debugger" in b)
+    assert "step 2 and Approval unchanged" in bug
 
 
 def test_step7_cancels_team_and_ralph_before_push():
@@ -274,6 +280,7 @@ def test_writer_owns_human_read_prose():
     writer = owner("`oh-my-claudecode:writer`")
     assert writer and "git-master" not in writer[0]
     assert all(w in writer[0] for w in ("docs", "comments", "issue"))
+    assert "after tests are green and before step 6, after any history cleanup and simplification" in writer[0]
     git = owner("`oh-my-claudecode:git-master`")
     assert git and "commit" in git[0] and "writer" not in git[0]
     pr = owner("`/oh-my-claudecode:pr`")
@@ -285,8 +292,9 @@ def test_writer_owns_human_read_prose():
     for skill in LIFECYCLE_SKILLS:
         text = (ROOT / "config" / "skills" / skill / "SKILL.md").read_text()
         line = next(l for l in text.splitlines() if "Prose for people" in l)
+        assert "Prose, by owner" in line, skill
         for token in ("oh-my-claudecode:writer", "oh-my-claudecode:git-master", "/oh-my-claudecode:pr"):
-            assert token in line, f"{skill}: {token}"
+            assert token not in line, f"{skill}: owners restated: {token}"
 
 
 def test_spikes_rule_is_stated():
@@ -297,7 +305,7 @@ def test_spikes_rule_is_stated():
 
 def test_self_review_rule_is_stated():
     line = next((l for l in global_text().splitlines() if l.startswith("Self-review:")), "")
-    for needle in ("before any review agent", "done", "why"):
+    for needle in ("before any review agent", "done", "why", "not per ralplan round", "Research variant"):
         assert needle in line, needle
 
 
