@@ -45,18 +45,57 @@ This replaces the earlier single `Prose:` line.
 
 ### Hook results
 
-- `skill_gate.py`: Addendum at stage 2 (real-harness run and p95 latency).
+- `skill_gate.py`: stage 2, shipped. Addendum below.
 - `secrets_guard.py`: Addendum at stage 3 (real-harness run and p95 latency).
 - `bash_guard.py`: Addendum at stage 4 (real-harness run and p95 latency).
 
+#### Addendum at stage 2: `skill_gate.py`
+
+**Shipped.** `config/hooks/skill_gate.py`, registered for `PreToolUse` (matcher `Skill`) and `UserPromptExpansion`, each entry with timeout 5. `merge_confirm.py` gives a squash flag its own ask reason. A short flag group holding `s` counts.
+
+**Why two events.** A typed slash command fires only `UserPromptExpansion` (field `command_name`). A model-invoked skill fires only `PreToolUse` (field `tool_input.skill`). Spiked 2026-10-24 with headless `claude -p` in a scratch project.
+
+**Behaviour.**
+
+- On review (`review`, `omc-review`, `oh-my-claudecode:review`, `oh-my-claudecode:omc-review`), the hook prints `additionalContext` for each check that applies:
+  - `code-simplifier`: the working tree diff against the merge-base with the default branch exceeds 300 changed lines.
+  - `git-master`: the branch has `fixup!`, `squash!` or `amend!` commits, or WIP commit subjects.
+  - `security-reviewer`: the diff touches one of six fixed categories: `auth`, `input`, `secrets`, `shell`, `network`, `deserialization`.
+- Several hits give one combined message. No hit prints nothing.
+- On `PreToolUse` only, a model-invoked `autopilot` asks. A typed `/autopilot` passes.
+
+**Hardening.** A spike showed that a plain `git diff HEAD` in a repo whose config sets `core.fsmonitor` or `diff.external` runs those programs. Marker files appeared. The hook runs git:
+
+- as `git --no-optional-locks -c core.fsmonitor=false -c core.hooksPath=/dev/null -c diff.external=`, with `--no-ext-diff` and `--no-textconv`;
+- with every `GIT_*` variable dropped;
+- by absolute path, on a sanitized `PATH`;
+- with output capped at 64 KiB and one 5-second deadline;
+- printing one fixed short code on stderr for an unexpected error.
+
+`test_hooks_do_not_run_repo_config` fails when the hardened flags are removed.
+
+**Real-harness run.** Headless `claude -p --model haiku --setting-sources project` in a scratch repo with a bare origin. The feature branch was about 400 lines over `main`, with a `fixup!` commit and a file named `auth_login.txt`. The real hook was registered.
+
+- Model-invoked review and typed `/review` both delivered: "Review pre-check: the diff is 402 changed lines (over 300): run oh-my-claudecode:code-simplifier first; the branch has fixup or WIP commits: run oh-my-claudecode:git-master to clean the history first; the changes touch auth: run oh-my-claudecode:security-reviewer."
+- Model-invoked `autopilot` was denied with the hook's reason. Headless, an ask becomes a denial.
+- Typed `/autopilot` ran with no ask.
+
+**Latency.** 20 direct runs of `skill_gate` on a review payload: median 52 ms, 95th percentile (p95) 66 ms, max 76 ms. Bar: p95 under 500 ms. Met.
+
+**Known limits.**
+
+- The fixup pattern has no trailing space, so it matches a superset of subjects. Harmless.
+- The "git outlives the deadline" case is enforced in code. Only a wide-diff test exercises it, because the hook sanitizes `PATH` and a fake `git` cannot be injected.
+- `ruff` is not installed on the owner's machine, so lint was not run. Issues #2 and #3 track the dev environment.
+
 ### Addenda to come (settled now, built at the stage named)
 
-1. V1's hook ban on subprocesses (H1) is not carried. Hooks may start `git` with a fixed argv, no shell and a timeout. Stage 2.
-2. V1's "never blocks" bar is amended. Hooks may ask. `secrets_guard` may deny reads of secret files. Asks in headless runs are denials. Stage 2 (asks), stage 3 (deny).
-3. The 500 ms p95 latency bar per hook stays: 20 direct runs, p95 under 500 ms, recorded per hook. Stages 2-4.
+1. V1's hook ban on subprocesses (H1) is not carried. Hooks may start `git` with a fixed argv, no shell and a timeout. Stage 2, built (see the `skill_gate` addendum).
+2. V1's "never blocks" bar is amended. Hooks may ask: `skill_gate`'s autopilot ask is the first example. `secrets_guard` may deny reads of secret files. Asks in headless runs are denials. Stage 2 (asks), built; stage 3 (deny), to come.
+3. The 500 ms p95 latency bar per hook stays: 20 direct runs, p95 under 500 ms, recorded per hook. Stage 2 measured (see the `skill_gate` addendum); stages 3-4 to come.
 4. `secrets_guard` is a hook, not a `permissions.deny` rule. `cfg.py` deploys hooks, plugins and marketplaces only. A `Grep` over a directory that holds a `.env` is not covered. Stage 3.
 5. `bash_guard` layers on OMC's own `git-guardrails.mjs`. OMC blocks pushes while ralph, autopilot, team or ultragoal is active, or when `OMC_GIT_GUARDRAILS=1`. The host profiles do not set that variable. `bash_guard` adds interactive asks and the default-branch rules. Stage 4.
-6. OMC's opt-in `code-simplifier` Stop hook is not enabled. It simplifies changed files at every Stop. The rule is a size gate at review. Stage 2.
+6. OMC's opt-in `code-simplifier` Stop hook is not enabled. It simplifies changed files at every Stop. The rule is a size gate at review. Stage 2, built: `skill_gate` prints the review size check.
 7. Issue #7 link: stage 4 records the PR numbers that carried each stage.
 
 ## Consequences
