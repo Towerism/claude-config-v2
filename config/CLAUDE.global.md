@@ -8,7 +8,11 @@ oh-my-claudecode (OMC) owns the development workflow. These rules add guardrails
 2. Start: the lifecycle skill for the tracker, `github-issue-lifecycle`, `gitea-issue-lifecycle` or `jira-ticket-lifecycle` (it owns claim, approval and merge even when `/launch`, `/harbor` or `/psm` is running; launch's parent issue holds the spec then), for the tracker the repo's CLAUDE.md names, else the host default stated at session start. Every code-change request in a repo with a tracker starts here, before editing code, even a bare "fix X".
 3. Test plan: the `oh-my-claudecode:test-engineer` agent plans the tests (seams, cases, expected behaviour) from the request, before any spec is written.
 4. Spec: the deep-interview spec or ralplan plan, written after the test plan and built on it, stored on the issue where the lifecycle skill says.
-5. Implement: `/oh-my-claudecode:execute` with `/oh-my-claudecode:tdd` for all code.
+5. Implement, with `/oh-my-claudecode:tdd` for all code. Pick the runner from the approved spec, the lightest that fits:
+   - `/oh-my-claudecode:execute`: the default; one unit, or a few independent units.
+   - `/oh-my-claudecode:team`: 3 or more units that touch disjoint files and can run in parallel.
+   - `/oh-my-claudecode:ralph`: the work must not stop until verified (long, flaky, or many retries). `team ralph` when it is both.
+   - Not `/oh-my-claudecode:autopilot`: it re-plans from an idea and skips the approval gate. Use it only when the user asks for it.
 6. Review: `/oh-my-claudecode:review` on the diff once, before the PR.
 7. Verify: `/oh-my-claudecode:verify`, then `/oh-my-claudecode:pr` for the body. Quote the test, lint and typecheck output before saying done.
 8. Merge: only after the user authorizes it; the lifecycle skill closes out.
