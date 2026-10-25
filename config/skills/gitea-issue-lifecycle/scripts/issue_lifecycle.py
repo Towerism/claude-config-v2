@@ -10,6 +10,7 @@ Subcommands:
   commit-check   validate a commit message (Conventional Commit ending in (#N))
   pr-body-check  validate a PR body (Closes line, Spec line, Review section)
   diff-check     scan `git diff <base>...HEAD` for spec IDs in code and committed spec files
+  declaration-check  validate the path declaration against the issue's comments
 
 Exit codes: 0 ok, 1 check failed, 2 usage error, 3 no spec markers, 4 malformed markers.
 Issue and PR text is only ever read from files and treated as data.
@@ -17,6 +18,7 @@ Issue and PR text is only ever read from files and treated as data.
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -296,6 +298,192 @@ def cmd_diff_check(base, repo_dir):
     return problems
 
 
+# ── path declaration ─────────────────────────────────────────────────────────
+
+DECL_START = "<!-- path-declaration v1 -->"
+DECL_END = "<!-- /path-declaration -->"
+ADVISORY_STEPS = (
+    "interview",
+    "analyst",
+    "docs-lookup",
+    "test-plan",
+    "history-cleanup",
+    "simplifier",
+    "qa",
+    "design",
+)
+REQUIRED_STEPS = (
+    "self-review",
+    "spec-review",
+    "review-notes",
+    "tdd",
+    "diff-review",
+    "security-gate",
+    "verify",
+)
+# Steps a variant requires on top of REQUIRED_STEPS.
+VARIANT_STEPS = {"feature": (), "bug": ("repro",), "docs": (), "ui": (), "hotfix": ()}
+DOCS_NA_STEPS = ("test-plan", "tdd")
+DOCS_FACT = "variant: docs"
+NO_REVIEW_FACT = "approval: no-review"
+NO_REVIEW_MODE = "no-review"
+STAMP_NAME = "path-declaration-ok"
+DECL_LINE_RE = re.compile(r"- (run|waived|n/a): ([^\s—]+)(?:\s+—\s*(.*))?")
+OPEN_QUOTES, CLOSE_QUOTES = '"“', '"”'
+FENCE_RE = re.compile(r"(```|~~~)")
+SEAMS_RE = re.compile(r"#{1,6}\s+seams\b", re.I)
+
+
+def declaration_lines(text):
+    """The lines inside the one declaration block, or None when there is no block."""
+    lines = [line.strip() for line in text.splitlines()]
+    starts = [i for i, line in enumerate(lines) if line == DECL_START]
+    ends = [i for i, line in enumerate(lines) if line == DECL_END]
+    if not starts and not ends:
+        return None
+    if len(starts) > 1 or len(ends) > 1:
+        raise MarkerError(EXIT_MALFORMED, "more than one path-declaration block")
+    if not ends:
+        raise MarkerError(EXIT_MALFORMED, "path-declaration block is not closed")
+    if not starts or ends[0] < starts[0]:
+        raise MarkerError(EXIT_MALFORMED, "closing marker without an opening marker")
+    return lines[starts[0] + 1 : ends[0]]
+
+
+def has_seams_heading(spec):
+    in_fence = False
+    for line in spec.splitlines():
+        line = line.strip()
+        if FENCE_RE.match(line):
+            in_fence = not in_fence
+        elif not in_fence and SEAMS_RE.match(line):
+            return True
+    return False
+
+
+def squash(text):
+    return " ".join(text.split())
+
+
+def check_waiver(step, rest, bodies):
+    quote, sep, url = rest.rpartition("—")
+    if not sep:
+        quote, url = rest, ""
+    quote, url = quote.strip(), url.strip()
+    if (
+        len(quote) < 2
+        or quote[0] not in OPEN_QUOTES
+        or quote[-1] not in CLOSE_QUOTES
+        or not quote[1:-1].strip()
+    ):
+        return [("waiver-needs-quote", f"{step}: the waiver needs the user's words in quotes")]
+    if url not in bodies:
+        return [("waiver-not-recorded", f"{step}: {url or 'no URL'} is not a comment on the issue")]
+    if squash(quote[1:-1]) not in squash(bodies[url]):
+        return [("waiver-not-recorded", f"{step}: the quote is not in the comment at {url}")]
+    return []
+
+
+def na_allowed(step, fact, variant, approval_mode):
+    if variant == "docs" and step in DOCS_NA_STEPS and fact == DOCS_FACT:
+        return True
+    if step == "spec-review":
+        return fact == NO_REVIEW_FACT and approval_mode == NO_REVIEW_MODE
+    if step in DOCS_NA_STEPS:
+        return False
+    return step == "security-gate" or step in ADVISORY_STEPS
+
+
+def check_declaration(text, comments, approval_mode, spec):
+    block = declaration_lines(text)
+    if block is None:
+        return [("missing-declaration", "no path-declaration block")]
+    bodies = {c.get("url"): c.get("body") or "" for c in comments}
+    problems, variants, entries = [], [], {}
+    for line in block:
+        if not line:
+            continue
+        if line.startswith("variant:"):
+            variants.append(line.split(":", 1)[1].strip())
+            continue
+        match = DECL_LINE_RE.fullmatch(line)
+        if not match:
+            problems.append(("unknown-step", f"cannot read the line {line!r}"))
+            continue
+        kind, step, rest = match.group(1), match.group(2), (match.group(3) or "").strip()
+        if step in entries:
+            problems.append(("unknown-step", f"{step} is declared more than once"))
+            continue
+        entries[step] = (kind, rest)
+
+    variant = variants[0] if len(variants) == 1 else None
+    if variant not in VARIANT_STEPS:
+        names = ", ".join(VARIANT_STEPS)
+        problems.append(("unknown-step", f"needs one variant line naming one of {names}"))
+    required = REQUIRED_STEPS + VARIANT_STEPS.get(variant, ())
+    for step, (kind, rest) in entries.items():
+        if step not in required and step not in ADVISORY_STEPS:
+            problems.append(("unknown-step", f"{step} is not a step of the {variant} variant"))
+        elif kind == "run":
+            if rest not in bodies:
+                detail = f"{step}: cite the issue comment that records it"
+                problems.append(("run-needs-evidence", detail))
+        elif kind == "waived":
+            if step in required:
+                problems.append(("required-waived", f"{step} is required and cannot be waived"))
+            else:
+                problems.extend(check_waiver(step, rest, bodies))
+        elif not rest:
+            problems.append(("na-needs-fact", f"{step}: n/a needs the fact that makes it so"))
+        elif not na_allowed(step, rest, variant, approval_mode):
+            code = "required-not-run" if step in required else "waiver-not-recorded"
+            problems.append((code, f"{step}: n/a with {rest!r} does not stand in for a run"))
+    for step in required:
+        if step not in entries:
+            problems.append(("required-not-run", f"{step} is required and not declared"))
+    for step in ADVISORY_STEPS:
+        if step not in entries:
+            problems.append(("waiver-not-recorded", f"{step} is skipped without a recorded answer"))
+    if entries.get("test-plan", ("",))[0] == "waived" and not has_seams_heading(spec):
+        problems.append(("seams-needed", "test-plan is waived, so the spec needs a Seams heading"))
+    return problems
+
+
+def write_stamp(issue, passed):
+    """Leave (or clear) the per-worktree stamp that lets the PR command through."""
+
+    def git(*args):
+        result = subprocess.run(["git", *args], capture_output=True, text=True)
+        if result.returncode:
+            raise UsageError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
+        return result.stdout.strip()
+
+    path = os.path.join(git("rev-parse", "--git-dir"), STAMP_NAME)
+    if passed:
+        write_text(path, f"{git('branch', '--show-current')}\n{issue}\n")
+    elif os.path.exists(path):
+        os.remove(path)
+
+
+def cmd_declaration_check(args):
+    if args.stamp and args.issue is None:
+        raise UsageError("--stamp needs --issue")
+    try:
+        comments = json.loads(read_text(args.comments))
+    except ValueError as exc:
+        raise UsageError(f"{args.comments} is not JSON: {exc}") from exc
+    if not isinstance(comments, list) or not all(isinstance(c, dict) for c in comments):
+        raise UsageError(f"{args.comments} must hold a list of {{url, body}} objects")
+    spec = read_text(args.spec)
+    text = ""
+    if args.declaration and os.path.exists(args.declaration):
+        text = read_text(args.declaration)
+    problems = check_declaration(text, comments, args.approval_mode.strip(), spec)
+    if args.stamp:
+        write_stamp(args.issue, not problems)
+    return report(problems, args.json)
+
+
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 EPILOG = """Examples:
@@ -305,6 +493,8 @@ EPILOG = """Examples:
   issue_lifecycle.py commit-check --message msg.txt --json
   issue_lifecycle.py pr-body-check --body pr.md --issue 42
   issue_lifecycle.py diff-check --base origin/main
+  issue_lifecycle.py declaration-check --declaration decl.md --comments comments.json \\
+      --approval-mode manual --spec spec.md --stamp --issue 42
 
 Exit codes: 0 ok, 1 check failed, 2 usage error, 3 no spec markers, 4 malformed markers."""
 
@@ -349,6 +539,13 @@ def build_parser():
     p = sub.add_parser("diff-check", parents=[common], help="scan the branch diff")
     p.add_argument("--base", required=True, help="base ref, e.g. origin/main")
     p.add_argument("--repo-dir", default=".", help="repository to scan")
+    p = sub.add_parser("declaration-check", parents=[common], help="validate the path declaration")
+    p.add_argument("--declaration", help="file holding the declaration comment")
+    p.add_argument("--comments", required=True, help="JSON list of the issue's {url, body}")
+    p.add_argument("--approval-mode", required=True, help="the issue's approval mode label value")
+    p.add_argument("--spec", required=True, help="spec file")
+    p.add_argument("--stamp", action="store_true", help="on pass, stamp this worktree for the PR")
+    p.add_argument("--issue", type=int, help="issue number written into the stamp")
     return parser
 
 
@@ -385,6 +582,8 @@ def run(argv):
     if args.cmd == "pr-body-check":
         body = read_text(args.body)
         return report(check_pr_body(body, args.issue, args.repo), args.json)
+    if args.cmd == "declaration-check":
+        return cmd_declaration_check(args)
     return report(cmd_diff_check(args.base, args.repo_dir), args.json)
 
 
