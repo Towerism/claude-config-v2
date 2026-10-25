@@ -16,6 +16,7 @@ V1 (`claude-config`) built its own pipeline from 24 skills, overlays and three h
 | `config/CLAUDE.global.md` | The guardrails, deployed into `~/.claude/CLAUDE.md` as a marked block beside OMC's own |
 | `config/skills/` | `github-issue-lifecycle`, `gitea-issue-lifecycle`, `jira-ticket-lifecycle` (each with a stdlib script for its checks and tracker steps), `fresh-session-handoff`, `linux-troubleshooting`. Prose rules come from OMC's `minimal-prose-discipline` and `agent-doc-discipline` |
 | `config/hooks/` | `merge_confirm.py` (every PR merge waits for your click), `host_default.py` (states the machine's default tracker), `skill_gate.py` (adds review context from git facts, asks before the model starts autopilot), `secrets_guard.py` (denies reads of `.env` and `deny-terms`, asks when a command names one), `bash_guard.py` (asks before a commit or push on the default branch, a commit subject or branch name off the convention, a commit holding a token or `.env`, or adding the `approved` label) |
+| | In a session whose first prompt starts `ralph` or `autopilot`, the guardrails and every hook stand aside so OMC runs its own way ([ADR-0004](docs/adr/0004-agent-pathways.md)) |
 | `hosts/` | `personal.json`, `work.json` |
 | `tools/cfg.py` | plan, deploy, status and rollback |
 | `tests/` | repo invariants, hooks, `cfg.py`, and the lifecycle scripts (`tests/skills/`, against a fake `gh` and `jira`) |

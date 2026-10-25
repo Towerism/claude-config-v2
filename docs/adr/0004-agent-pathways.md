@@ -277,6 +277,15 @@ Bar: p95 under 500 ms. Met.
 - The merge gate's broader false asks are tracked in issue #9.
 - The rendered-string question is tracked in issue #8.
 
+## Addendum: ralph and autopilot sessions run unguarded (#12)
+
+When the session's first prompt starts `ralph` or `autopilot` (`/ralph`, `/oh-my-claudecode:autopilot` or the bare word), OMC runs its own workflow with nothing from this repo in the way. A word in the middle of a prompt, or an invocation in a later prompt, does not count.
+
+- `CLAUDE.global.md` opens with a rule telling the model to ignore the whole block, including the host-default tracker line.
+- All five hooks print nothing in such a session. Each reads the first user message from `transcript_path` (first 256 KB, stdlib) and treats anything unreadable as "not bypassed". The check is one function copied into each hook, because a hook runs with `python3 -I` and cannot import a sibling; a test asserts the copies are identical.
+- This includes `secrets_guard`: in such a session `.env` and `deny-terms` reads are not denied. That follows the request for a complete bypass. OMC's own `git-guardrails` still blocks pushes while ralph or autopilot is active.
+- Limits: `host_default` on SessionStart runs before any prompt exists, so only the rule text covers it. Whether a subagent's hook payload carries the parent's `transcript_path` is unverified; if it carries the subagent's own, subagent tool calls stay guarded.
+
 ## Consequences
 
 - Every agent in `OMC_AGENTS` has a bullet. `test_every_omc_agent_has_a_pathway` fails when one loses it.
