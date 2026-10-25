@@ -64,9 +64,9 @@ Right after the claim, once per change, ask (AskUserQuestion) "Review the propos
 
 Post the user's answer to the question, and each wizard answer, verbatim as an issue comment (`POST repos/<o>/<r>/issues/N/comments`) right after it is given. A wizard selection counts as the user's words: the quote is the selected option plus any free text. Keep each comment's URL.
 
-Step ids. Advisory (may be waived): `interview`, `analyst`, `docs-lookup`, `test-plan`, `history-cleanup`, `simplifier`, `qa`, `design`. Required (never waived): `self-review`, `spec-review`, `review-notes`, `tdd`, `diff-review`, `security-gate`, `verify`, plus `repro` for variant bug. `security-gate` is `n/a` with the trigger fact when the diff touches none of auth, input parsing, secrets, shell, network or deserialization. `spec-review` is `n/a` only with fact `approval: no-review`. Variant docs marks `test-plan` and `tdd` `n/a` with fact `variant: docs`.
+Step ids. Advisory (may be waived): `interview`, `analyst`, `docs-lookup`, `test-plan`, `history-cleanup`, `simplifier`, `qa`, `design`. Required (never waived): `self-review`, `spec-review`, `review-notes`, `tdd`, `diff-review`, `security-gate`, `verify`, plus `repro` for variant bug. `security-gate` is `n/a` with a fact stating that the diff touches none of auth, input parsing, secrets, shell, network or deserialization. `spec-review` is `n/a` only with fact `approval: no-review`. Variant docs marks `test-plan` and `tdd` `n/a` with fact `variant: docs`.
 
-Keep the declaration as one issue comment; post it, then update it as steps run. List every advisory step on its own line (`run`, `waived` or `n/a`): a step left out fails the check:
+Keep the declaration as one issue comment. Post it, then update it as steps run. List every advisory step on its own line, marked `run`, `waived` or `n/a`. The check fails on any advisory step left out:
 ```
 <!-- path-declaration v1 -->
 variant: feature
@@ -75,7 +75,7 @@ variant: feature
 - n/a: <step-id> — <fact>
 <!-- /path-declaration -->
 ```
-A `run` line cites an issue comment that records the step (a review note, a self-review list). Under "No", every skipped advisory step is a `waived` line whose quote and URL are the "No" answer. A later wish to waive re-opens the wizard: replace the line and cite the new comment. A spec returned to draft re-opens the declaration. A waiver covers one issue. The check runs at approval (step 5) and at PR time (step 7).
+A `run` line cites an issue comment that records the step, such as a review note or a self-review list. Under "No", each skipped advisory step is a `waived` line whose quote and URL come from the "No" answer. If the user later asks to waive a step, reopen the wizard: replace the line and cite the new comment. A spec returned to draft reopens the declaration. A waiver covers one issue. The check runs at approval (step 5) and at PR time (step 7).
 
 ### 3. Settle the approval mode
 

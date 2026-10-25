@@ -20,8 +20,8 @@ directory after the `cd` steps, else the payload's cwd. It asks when:
    The content is the index, the work tree for -a or for the paths `git commit <paths>` names, the
    added lines of a tracked file `git add` names, and the whole of an untracked one.
 6. `gh issue edit`, `gh issue create` or `gh api` adds the label `approved`.
-7. `gh pr create` runs on a branch whose git dir (per work tree) holds no `path-declaration-ok` file
-   with the branch name on its first line; a detached HEAD passes.
+7. `gh pr create` runs on a branch without a `path-declaration-ok` file in its work tree's git dir
+   that names the branch on the first line. A detached HEAD passes.
 
 Anything it cannot determine passes; past the deadline, the asks already found still print. Every
 decision is "ask" with fixed reason strings; the only
@@ -113,7 +113,7 @@ BRANCH_REASON = "The new branch name does not match feature|fix|hotfix|docs|chor
 SECRET_REASON = "The commit content holds {files} secret file name(s) and {tokens} token match(es){kinds} (global rule: never commit tokens or .env)"
 LABEL_REASON = "Adding the approved label needs your confirmation (global rule: set no approval marker yourself)"
 STAMP_REASON = "No path declaration is stamped for this branch; declare the paths before opening the pull request (global rule)"
-# Written in the git dir (per work tree) by the path-declaration step; its first line is the branch.
+# Written by the path-declaration check into the work tree's git dir. The first line is the branch.
 STAMP_NAME = "path-declaration-ok"
 
 EXPANSION = "\0"  # stands in a word for $VAR, $(...) or `...`; a command holding a real NUL is ignored

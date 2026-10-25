@@ -590,7 +590,7 @@ def check_declaration(text, comments, approval_mode, spec):
 
 
 def write_stamp(key, passed):
-    """Leave (or clear) the per-worktree stamp that lets the PR command through."""
+    """Write the per-worktree stamp that lets the PR command through, or remove it on failure."""
     git = git_runner(".")
     path = os.path.join(git("rev-parse", "--git-dir").strip(), STAMP_NAME)
     if passed:

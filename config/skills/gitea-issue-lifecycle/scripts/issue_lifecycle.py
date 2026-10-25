@@ -450,7 +450,7 @@ def check_declaration(text, comments, approval_mode, spec):
 
 
 def write_stamp(issue, passed):
-    """Leave (or clear) the per-worktree stamp that lets the PR command through."""
+    """Write the per-worktree stamp that lets the PR command through, or remove it on failure."""
 
     def git(*args):
         result = subprocess.run(["git", *args], capture_output=True, text=True)

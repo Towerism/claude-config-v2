@@ -62,7 +62,7 @@ def check(env, case, text=None, *extra, cwd=None):
 def assert_verdict(result, case):
     assert result.returncode == case["exit"], result.stdout + result.stderr
     if case["exit"] == 4:
-        # Like every error of this script under --json, the error alone, and no verdict.
+        # Under --json, a malformed declaration prints only the error, with no verdict.
         assert json.loads(result.stdout) == {"error": result.stderr.strip()}
         assert result.stderr.strip()
     else:
@@ -164,7 +164,7 @@ class TestVariants:
 
 
 class TestSpecTextRule:
-    """The PR body's spec-copy rule never reaches the declaration or the ticket's comments."""
+    """A scenario-like waiver quote still passes; the PR body's spec-copy rule does not apply."""
 
     @pytest.mark.parametrize(
         "words", ["Given the change is one line, skip it", "When in doubt, no"]

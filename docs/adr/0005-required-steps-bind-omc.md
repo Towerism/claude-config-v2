@@ -14,7 +14,7 @@ OMC's operating principles say "Choose the lightest-weight path that preserves q
 4. **Record.** The user's answers are posted verbatim as issue comments. The declaration is one issue comment between `<!-- path-declaration v1 -->` markers with `run`, `waived` and `n/a` lines.
 5. **Check.** `declaration-check` in each lifecycle script runs before `approved` is set and again at PR time, where a pass leaves a stamp keyed by issue and branch.
 6. **Hook.** `bash_guard.py` asks on `gh pr create` without the stamp. It asks rather than denies because every `bash_guard` decision is an ask. A `ralph` or `autopilot` session (#12) is bypassed and never reaches any of this.
-7. **Self-review.** The "otherwise say why not" exit applies to advisory steps only.
+7. **Self-review.** The "otherwise say why not" exit in the self-review rule applies to advisory steps only.
 
 ## Departure
 
@@ -22,4 +22,4 @@ ADR-0001 says OMC owns the workflow and this repo adds only gaps. ADR-0004 adds 
 
 ## Limit
 
-The check verifies that every cited URL is a comment on the issue and that a waiver's quote appears in the cited comment. It cannot prove that a step ran. A model that writes the comments itself, including a fake user answer, is not caught. The hook is an ask, so it is advisory like the other hooks (ADR-0004, known limits); branch protection and the user's review of the declaration at approval are the controls that hold.
+The check verifies that every cited URL is a comment on the issue and that a waiver's quote appears in the cited comment. It cannot prove that a step ran. A model that writes the comments itself, including a fake user answer, goes undetected. The hook only asks, like the other hooks (ADR-0004, known limits). Branch protection and the user's review of the declaration at approval are the controls that hold.

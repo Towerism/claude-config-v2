@@ -1,9 +1,9 @@
 """Shared fixture table for the `declaration-check` subcommand of every lifecycle script.
 
 Each case is plain data: a declaration template, the issue's comments, the approval mode, the
-spec text and the expected verdict. A template's `{runs}` stands for a `run` line, citing
-RUN_URL, for every step of the variant that the template does not name itself and the case
-does not list in `drop`. The tests fill it in with `render()` from the step sets each script
+spec text and the expected verdict. A template's `{runs}` expands to a `run` line citing
+RUN_URL for each step of the variant that the template does not name and the case does not
+list in `drop`. The tests fill it in with `render()` from the step sets each script
 defines, so the table never restates those sets. The helpers below it are shared by the tests.
 """
 
@@ -286,7 +286,7 @@ ALL += SEAMS + VARIANTS
 
 
 def script_constant(script, name):
-    """A module-level constant of a script, read without importing it."""
+    """Read a module-level constant from a script without importing the script."""
     for node in ast.parse(script.read_text()).body:
         if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", None) == name:
             return ast.literal_eval(node.value)
