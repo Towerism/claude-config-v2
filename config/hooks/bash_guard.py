@@ -20,8 +20,9 @@ directory after the `cd` steps, else the payload's cwd. It asks when:
    The content is the index, the work tree for -a or for the paths `git commit <paths>` names, the
    added lines of a tracked file `git add` names, and the whole of an untracked one.
 6. `gh issue edit`, `gh issue create` or `gh api` adds the label `approved`.
-7. `gh pr create` runs on a branch without a `path-declaration-ok` file in its work tree's git dir
-   that names the branch on the first line. A detached HEAD passes.
+7. `gh pr create` (or `gh pr new`, after any `-R`/`--repo`) runs on a branch without a
+   `path-declaration-ok` file in its work tree's git dir that names the branch on line 1 and HEAD
+   on line 3. A detached HEAD passes.
 
 Anything it cannot determine passes; past the deadline, the asks already found still print. Every
 decision is "ask" with fixed reason strings; the only
@@ -113,7 +114,7 @@ BRANCH_REASON = "The new branch name does not match feature|fix|hotfix|docs|chor
 SECRET_REASON = "The commit content holds {files} secret file name(s) and {tokens} token match(es){kinds} (global rule: never commit tokens or .env)"
 LABEL_REASON = "Adding the approved label needs your confirmation (global rule: set no approval marker yourself)"
 STAMP_REASON = "No path declaration is stamped for this branch; declare the paths before opening the pull request (global rule)"
-# Written by the path-declaration check into the work tree's git dir. The first line is the branch.
+# Written by the path-declaration check into the work tree's git dir: branch, issue, HEAD.
 STAMP_NAME = "path-declaration-ok"
 
 EXPANSION = "\0"  # stands in a word for $VAR, $(...) or `...`; a command holding a real NUL is ignored
@@ -670,6 +671,20 @@ def is_approved(value: str) -> bool:
     return "approved" in (part.strip() for part in value.split(","))
 
 
+def gh_args(args: list[Word]) -> list[Word]:
+    """A gh command's words after its leading `-R`/`--repo` flags, which name the repo and nothing else."""
+    i = 0
+    while i < len(args):
+        text = args[i].text
+        if text in ("-R", "--repo"):
+            i += 2
+        elif text.startswith("--repo=") or (text.startswith("-R") and len(text) > 2):
+            i += 1
+        else:
+            break
+    return args[i:]
+
+
 def adds_approved(args: list[Word]) -> bool:
     """Rule 6: whether a gh command adds the approved label. The approval marker is the user's to set."""
     texts = [w.text for w in args]
@@ -791,27 +806,30 @@ class Guard:
             elif name == "git":
                 self.git_command(seg, words, cwd)
             elif name == "gh":
-                if adds_approved(words[1:]):
+                args = gh_args(words[1:])
+                if adds_approved(args):
                     self.ask(LABEL_REASON)
-                if [w.text for w in words[1:3]] == ["pr", "create"]:
+                if [w.text for w in args[:2]] in (["pr", "create"], ["pr", "new"]):
                     self.pull_request(cwd)
         return self.verdict()
 
     # rule 7: a pull request needs the path-declaration stamp
 
     def pull_request(self, cwd: str | None) -> None:
-        """Asks when the git dir of the command's directory holds no stamp naming the current branch.
-        A detached HEAD or anything git cannot tell passes."""
+        """Asks unless the git dir of the command's directory holds a stamp naming the current branch
+        on line 1 and HEAD on line 3. A detached HEAD, an unborn branch or anything git cannot tell passes."""
         top = self.top(cwd)
         branch = self.branch(top) if top else None
         if not branch:
             return
+        head = (self.git(top, "rev-parse", "--verify", "--quiet", "HEAD") or "").strip()
         out = (self.git(top, "rev-parse", "--git-dir") or "").rstrip("\n")
         git_dir = join_path(top, out) if out else None
-        if git_dir is None:
+        if not head or git_dir is None:
             return
-        data = read_file(os.path.join(git_dir, STAMP_NAME), first_line=True)
-        if data is None or data.decode("utf-8", errors="replace").rstrip("\r") != branch:
+        data = read_file(os.path.join(git_dir, STAMP_NAME))
+        lines = data.decode("utf-8", errors="replace").splitlines() if data is not None else []
+        if len(lines) < 3 or lines[0] != branch or lines[2].strip() != head:
             self.ask(STAMP_REASON)
 
     def verdict(self) -> str | None:
