@@ -1966,7 +1966,7 @@ def parser_nodes(source, names=PARSER_NODES):
     return found
 
 
-# The wrappers both hooks carry around the parser. walk is left out: secrets_guard's also checks `<` inputs and xargs -a.
+# The wrappers both hooks carry around the parser. walk is not listed: secrets_guard's walk also checks `<` inputs and `xargs -a`.
 WRAPPER_NODES = (
     "SHELLS", "PREFIXES", "skip_options", "unjudged_skipped", "resolve", "PRINTF_ESCAPE", "PRINTF_CHARACTERS",
     "shell_texts",

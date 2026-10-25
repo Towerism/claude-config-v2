@@ -19,10 +19,10 @@ alternatives or brace groups denies.
 
 Bash parses the command as bash_guard.py does (a copy of its parser; a test keeps them equal) and
 asks only when a secret path is an operand of a listed reader at command position. A secret path
-names a secret file, with or without a directory or a `--flag=` prefix. An unquoted glob word
-counts too when its basename starts with the literal text `.env` or `deny-terms` (`.env*`,
-`.envrc*`), or opens with a literal character and matches one of `.env`, `.env.local`,
-`.env.production` or `deny-terms` (`.en?`, `.e*`, `deny-t*`). The readers:
+names a secret file, with or without a directory or a `--flag=` prefix. An unquoted glob word also
+counts when its basename starts with `.env` or `deny-terms` (`.env*`, `.envrc*`), or opens with a
+literal character and matches one of `.env`, `.env.local`, `.env.production` or `deny-terms` (`.en?`,
+`.e*`, `deny-t*`). The readers:
 
 - viewers: cat, tac, bat, less, more, head, tail, nl, od, xxd, strings, base64;
 - filters, with the secret as a file and not the pattern: grep, rg, sed, awk, cut, sort, diff, jq
@@ -41,8 +41,9 @@ time -p, timeout N, nice -n N, stdbuf, watch and xargs are skipped; the file of 
 `--arg-file` is read, so a secret there asks. The text that `bash|sh|zsh|dash|ksh -c`, `eval` and
 `env -S` run, a heredoc fed to a shell (`bash <<E`, `cat <<E | bash`), and the echo or printf text
 before a bare shell (printf's `\\n` and `\\t` decoded) are parsed again. Other commands (echo,
-printf, git commit -m, python3 -c, git log --grep), comments and heredoc bodies stay silent. It is a reminder, not a security boundary: an unlisted reader gets past it, and so do an
-output redirection, `python3 x.py .env`, `git show HEAD:.env` and `cat $(echo .env)`. Nesting past
+printf, git commit -m, python3 -c, git log --grep), comments and heredoc bodies stay silent.
+It is a reminder, not a security boundary: an unlisted reader gets past it, and so do an output
+redirection, `python3 x.py .env`, `git show HEAD:.env` and `cat $(echo .env)`. Nesting past
 MAX_DEPTH, re-parses included, is unparsed and passes.
 
 Nothing named by the input is opened, only resolved. Each Bash parse is one left-to-right pass, so
@@ -403,8 +404,7 @@ def command_words(seg: Segment) -> list[Word]:
 
 # ── wrappers around the copied parser ────────────────────────────────────────
 
-# The same in both guard hooks: test_hook_wrapper_copies_are_the_same_in_both_hooks compares them.
-
+# Identical in merge_confirm.py; test_hook_wrapper_copies_are_the_same_in_both_hooks compares them.
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
 # Prefix commands, each with its short and long options that take a value; the command follows them.
 PREFIXES = {
@@ -481,8 +481,8 @@ def unjudged_skipped(words: list[Word]) -> tuple[list[Word], str | None]:
 
 
 def resolve(words: list[Word], skipped: list[list[Word]] | None = None) -> tuple[list[Word], str | None]:
-    """The words from the command name on, past every prefix, or ([], text) when env -S gives text to parse.
-    Each prefix command skipped, with its options, is added to skipped when it is given."""
+    """The words from the command name on, past every prefix; ([], text) when env -S gives text to parse.
+    When skipped is given, each prefix command skipped is appended to it with its options."""
     for _ in range(MAX_DEPTH):
         words, text = unjudged_skipped(words)
         if text is not None:
@@ -506,15 +506,15 @@ def resolve(words: list[Word], skipped: list[list[Word]] | None = None) -> tuple
     raise Unparsed
 
 
-# The printf escapes decoded before its text is parsed again.
+# Escapes that shell_texts decodes in printf text before parsing it.
 PRINTF_ESCAPE = re.compile(r"\\([nt\\])")
 PRINTF_CHARACTERS = {"n": "\n", "t": "\t", "\\": "\\"}
 
 
 def shell_texts(words: list[Word], seg: Segment, previous: list[Word], previous_heredocs: list[str]) -> list[str]:
-    """What a bash, sh or zsh command runs: its -c string; with no script, its heredocs, the heredocs
-    of the command before it, and the text of the echo or printf before it (the parser keeps no
-    separator, so `echo x; bash` counts too)."""
+    """What a bash, sh, zsh, dash or ksh command runs: its -c string. With no script, its heredocs,
+    the heredocs of the command before it, and the text of the echo or printf before it. The parser
+    keeps no separator, so `echo x; bash` counts too."""
     with_c = False
     i = 1
     while i < len(words):
@@ -575,7 +575,7 @@ def walk(text: str, depth: int, visit) -> bool:
     for seg in parser.segments:
         skipped: list[list[Word]] = []
         words, script = resolve(seg.words, skipped)
-        # xargs -a reads its arguments from a file.
+        # xargs -a reads its arguments from a file, so a secret there asks.
         if any(os.path.basename(p[0].text) == "xargs" and flag_reads(p[1:], "-a", "--arg-file") for p in skipped):
             return True
         if script is not None:
@@ -604,8 +604,8 @@ FILE_READERS = {
     "cut", "sort", "diff", "cp", "mv", "scp", "rsync", "ln", "tee", "wc", "hexdump", "tar", "zip",
     "source", ".",
 }
-# Flags whose value names files to leave out, not a file to read; --exclude for any other reader.
-# rsync -x and tar -x mean something else, so only diff and zip get -x.
+# Flags whose value names files to leave out, not files to read. --exclude applies to every reader
+# in FILE_READERS; -x only to diff and zip, since rsync -x and tar -x mean something else.
 EXCLUDES = {"diff": {"-x", "--exclude"}, "zip": {"-x", "--exclude"}}
 GREP_FLAGS = (
     {"-e", "--regexp"},

@@ -6,9 +6,9 @@ VAR=value words and the wrappers `env`, `command`, `builtin`, sudo, doas, nohup,
 time -p, timeout N, nice -n N, stdbuf, watch and xargs. It asks for:
 
 - `gh [flags] pr [flags] merge`;
-- `gh api` or `tea api` (tea is the Gitea CLI) with a `/merge` path in an operand, the endpoint,
-  not in a flag value such as `-f body=...` or `-H`; or with `mergePullRequest` or
-  `enablePullRequestAutoMerge` among any of its words or in its heredoc body.
+- `gh api` or `tea api` (tea is the Gitea CLI) with a `/merge` operand (the endpoint), not a flag
+  value such as `-f body=...`; or with `mergePullRequest` or `enablePullRequestAutoMerge` in any of
+  its words or its heredoc body.
 
 The text that `bash|sh|zsh|dash|ksh -c`, `eval` and `env -S` run is parsed again, and so are a
 heredoc fed to a shell (`bash <<E`, `cat <<E | bash`) and the echo or printf text before a bare
@@ -309,8 +309,7 @@ def command_words(seg: Segment) -> list[Word]:
 
 # ── wrappers around the copied parser ────────────────────────────────────────
 
-# The same in both guard hooks: test_hook_wrapper_copies_are_the_same_in_both_hooks compares them.
-
+# Identical in secrets_guard.py; test_hook_wrapper_copies_are_the_same_in_both_hooks compares them.
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
 # Prefix commands, each with its short and long options that take a value; the command follows them.
 PREFIXES = {
@@ -387,8 +386,8 @@ def unjudged_skipped(words: list[Word]) -> tuple[list[Word], str | None]:
 
 
 def resolve(words: list[Word], skipped: list[list[Word]] | None = None) -> tuple[list[Word], str | None]:
-    """The words from the command name on, past every prefix, or ([], text) when env -S gives text to parse.
-    Each prefix command skipped, with its options, is added to skipped when it is given."""
+    """The words from the command name on, past every prefix; ([], text) when env -S gives text to parse.
+    When skipped is given, each prefix command skipped is appended to it with its options."""
     for _ in range(MAX_DEPTH):
         words, text = unjudged_skipped(words)
         if text is not None:
@@ -412,15 +411,15 @@ def resolve(words: list[Word], skipped: list[list[Word]] | None = None) -> tuple
     raise Unparsed
 
 
-# The printf escapes decoded before its text is parsed again.
+# Escapes that shell_texts decodes in printf text before parsing it.
 PRINTF_ESCAPE = re.compile(r"\\([nt\\])")
 PRINTF_CHARACTERS = {"n": "\n", "t": "\t", "\\": "\\"}
 
 
 def shell_texts(words: list[Word], seg: Segment, previous: list[Word], previous_heredocs: list[str]) -> list[str]:
-    """What a bash, sh or zsh command runs: its -c string; with no script, its heredocs, the heredocs
-    of the command before it, and the text of the echo or printf before it (the parser keeps no
-    separator, so `echo x; bash` counts too)."""
+    """What a bash, sh, zsh, dash or ksh command runs: its -c string. With no script, its heredocs,
+    the heredocs of the command before it, and the text of the echo or printf before it. The parser
+    keeps no separator, so `echo x; bash` counts too."""
     with_c = False
     i = 1
     while i < len(words):
