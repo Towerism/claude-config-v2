@@ -1952,7 +1952,7 @@ PARSER_NODES = (
 )
 
 
-def parser_nodes(source):
+def parser_nodes(source, names=PARSER_NODES):
     found = {}
     for node in ast.parse(source).body:
         if isinstance(node, (ast.ClassDef, ast.FunctionDef)):
@@ -1961,9 +1961,26 @@ def parser_nodes(source):
             name = node.targets[0].id
         else:
             continue
-        if name in PARSER_NODES:
+        if name in names:
             found[name] = ast.dump(node)
     return found
+
+
+# The wrappers both hooks carry around the parser. walk is left out: secrets_guard's also checks `<` inputs and xargs -a.
+WRAPPER_NODES = (
+    "SHELLS", "PREFIXES", "skip_options", "unjudged_skipped", "resolve", "PRINTF_ESCAPE", "PRINTF_CHARACTERS",
+    "shell_texts",
+)
+
+
+def test_hook_wrapper_copies_are_the_same_in_both_hooks():
+    merge = parser_nodes((HOOKS / "merge_confirm.py").read_text(), WRAPPER_NODES)
+    source = (HOOKS / "secrets_guard.py").read_text()
+    assert set(merge) == set(WRAPPER_NODES)
+    assert parser_nodes(source, WRAPPER_NODES) == merge
+    for old, new in (('"nohup": (set(), set())', '"nohup": ({"-x"}, set())'), ("previous_heredocs", "previous_docs")):
+        mutated = source.replace(old, new, 1)
+        assert mutated != source and parser_nodes(mutated, WRAPPER_NODES) != merge, old
 
 
 @pytest.mark.parametrize("name", ["merge_confirm.py", "secrets_guard.py"])

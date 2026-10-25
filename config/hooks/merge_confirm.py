@@ -309,6 +309,8 @@ def command_words(seg: Segment) -> list[Word]:
 
 # ── wrappers around the copied parser ────────────────────────────────────────
 
+# The same in both guard hooks: test_hook_wrapper_copies_are_the_same_in_both_hooks compares them.
+
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
 # Prefix commands, each with its short and long options that take a value; the command follows them.
 PREFIXES = {
