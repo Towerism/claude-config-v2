@@ -120,3 +120,14 @@ def test_large_body_is_handled(tmp_path):
     big = "x" * 70_000
     path = write(tmp_path, "b.md", make_body(original=big, spec="# Spec"))
     assert run("extract", "--body", path).stdout == "# Spec\n"
+
+
+@pytest.mark.parametrize(
+    ("spec", "inner"),
+    [("A\nB\n", "A\nB"), ("A\nB", "A\nB"), ("A\nB\n\n", "A\nB\n"), ("A\r\nB\r\n", "A\nB")],
+)
+def test_replace_drops_at_most_one_trailing_newline_of_the_spec(tmp_path, spec, inner):
+    out = tmp_path / "out.md"
+    path = write(tmp_path, "b.md", ORIGINAL)
+    run("replace", "--body", path, "--spec", write(tmp_path, "s.md", spec), "--out", out)
+    assert out.read_text() == f"{ORIGINAL}\n\n{START}\n{inner}\n{END}\n"

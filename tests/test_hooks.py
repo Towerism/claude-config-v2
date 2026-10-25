@@ -1680,3 +1680,95 @@ def test_the_bypass_check_is_the_same_in_every_hook():
     copies = {name: segments(HOOKS / name) for name in BYPASS_HOOKS}
     assert all(set(c) == {"function", "pattern"} for c in copies.values()), copies.keys()
     assert len({tuple(sorted(c.items())) for c in copies.values()}) == 1
+
+
+# Exact output on malformed input, on an error and past the deadline (#3)
+
+EVENT_ONLY = {
+    "merge_confirm.py": {"hook_event_name": "PreToolUse", "tool_name": "Bash"},
+    "bash_guard.py": {"hook_event_name": "PreToolUse", "tool_name": "Bash"},
+    "skill_gate.py": {"hook_event_name": "PreToolUse", "tool_name": "Skill"},
+    "secrets_guard.py": {"hook_event_name": "PreToolUse", "tool_name": "Read"},
+    "host_default.py": {"hook_event_name": "SessionStart"},
+}
+HOST_CONTEXT = (
+    b'{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "Host profile: work. '
+    b"Default issue tracker: jira. Use the jira-ticket-lifecycle skill unless the repo's CLAUDE.md names "
+    b'another tracker; the repo\'s choice wins."}}\n'
+)
+MALFORMED = [b"{}", b'{"tool_input": {}}', b'{"tool_name": 1}', b"null", b"", b"{", b"\xff\xfe"]
+
+
+def hook_result(name, stdin, machine):
+    """Exit code, stdout and stderr of a hook fed `stdin`; host_default runs as deployed in `machine`."""
+    home, env, _ = machine
+    script = home / "hooks" / name if name == "host_default.py" else HOOKS / name
+    done = subprocess.run(
+        [sys.executable, "-I", str(script)],
+        input=stdin, capture_output=True, env={"PATH": "/usr/bin:/bin", **env}, timeout=10, check=False,
+    )
+    return done.returncode, done.stdout, done.stderr
+
+
+@pytest.mark.parametrize("stdin", MALFORMED)
+@pytest.mark.parametrize("name", BYPASS_HOOKS)
+def test_malformed_input_exits_0_with_no_output(name, stdin, machine):
+    assert hook_result(name, stdin, machine) == (0, b"", b"")
+
+
+def test_host_default_on_a_list_payload_exits_0_with_no_output(machine):
+    assert hook_result("host_default.py", b"[]", machine) == (0, b"", b"")
+
+
+@pytest.mark.parametrize("name", BYPASS_HOOKS)
+def test_an_event_without_tool_input_gives_the_usual_output(name, machine):
+    expected = HOST_CONTEXT if name == "host_default.py" else b""
+    assert hook_result(name, json.dumps(EVENT_ONLY[name]).encode(), machine) == (0, expected, b"")
+
+
+# Runs a hook's main() as its __main__ block does, after `patch` (source run with the module
+# bound to `hook`) replaces one of its functions.
+DRIVER = """
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("hook", sys.argv[1])
+hook = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(hook)
+exec(sys.argv[2])
+try:
+    hook.main()
+finally:
+    sys.exit(0)
+"""
+RAISE = "def boom(*args, **kwargs):\n    raise RuntimeError\n"
+
+
+def driven(name, patch, payload):
+    done = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", DRIVER, str(HOOKS / name), patch],
+        input=json.dumps(payload).encode(), capture_output=True, env={"PATH": "/usr/bin:/bin"},
+        timeout=20, check=False,
+    )
+    return done.returncode, done.stdout, done.stderr
+
+
+@pytest.mark.parametrize("name,patch,payload,stderr", [
+    ("bash_guard.py", RAISE + "hook.evaluate = boom", bash("git status"), b"bash_guard: error\n"),
+    ("secrets_guard.py", RAISE + "hook.emit = boom", bash("cat .env"), b"secrets_guard: error\n"),
+    (
+        "skill_gate.py", RAISE + "hook.emit = boom",
+        {"hook_event_name": "PreToolUse", "tool_name": "Skill", "tool_input": {"skill": "autopilot"}},
+        b"skill_gate: error\n",
+    ),
+])
+def test_an_error_in_the_last_step_writes_only_the_fixed_code(name, patch, payload, stderr):
+    assert driven(name, patch, payload) == (0, b"", stderr)
+
+
+def test_secrets_guard_past_its_deadline_writes_only_the_fixed_code():
+    patch = "import time\nhook.DEADLINE_SECONDS = 1\nhook.command_names_secret = lambda command: time.sleep(5)\n"
+    assert driven("secrets_guard.py", patch, bash("cat .env")) == (0, b"", b"secrets_guard: error\n")
+
+
+def test_bash_guard_past_its_deadline_writes_nothing():
+    patch = "def late(payload):\n    raise hook.Timeout\nhook.evaluate = late\n"
+    assert driven("bash_guard.py", patch, bash("git status")) == (0, b"", b"")
