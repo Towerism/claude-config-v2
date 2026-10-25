@@ -52,4 +52,4 @@ make lint     # ruff check
 
 On Debian and Ubuntu, `make setup` needs the `python3-venv` package. `requirements-dev.txt` mirrors the `dev` group in `pyproject.toml`; a test keeps them equal.
 
-CI is not set up yet; run the tests before every push.
+`.github/workflows/ci.yml` runs `make lint` and `make test` on every pull request.

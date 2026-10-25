@@ -443,3 +443,21 @@ def test_only_hooks_suppress_every_exception():
     for path in others:
         tree = ast.parse((ROOT / path).read_text())
         assert not any(suppresses_exception(node) for node in ast.walk(tree)), path
+
+
+CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+
+
+def test_ci_workflow_runs_lint_and_tests_on_pull_requests():
+    """A pull request fails when `make lint` or `make test` fails (#24). Read as text: no YAML dependency."""
+    text = CI_WORKFLOW.read_text()
+    assert re.search(r"^on:\s*\n\s+pull_request:", text, re.MULTILINE)
+    assert not re.search(r"^\s+push:", text, re.MULTILINE)
+    assert re.search(r"^\s+- run: make lint$", text, re.MULTILINE)
+    assert re.search(r"^\s+- run: make test$", text, re.MULTILINE)
+    assert re.search(r"^permissions:\s*\n\s+contents: read\s*$", text, re.MULTILINE)
+    assert text.count("permissions:") == 1
+    assert re.search(r"^\s+timeout-minutes: \d+$", text, re.MULTILINE)
+    floor = re.search(r'requires-python = ">=([\d.]+)"', (ROOT / "pyproject.toml").read_text())[1]
+    setup = re.search(r"uses: actions/setup-python@\S+.*\n\s+with:\s*\n\s+python-version: \"([\d.]+)\"", text)
+    assert setup and setup[1] == floor
