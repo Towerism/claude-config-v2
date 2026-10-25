@@ -8,6 +8,7 @@ import sys
 import pytest
 
 from tests.conftest import ROOT
+from tests.skills.declaration_cases import script_constant
 
 
 def hook_trackers():
@@ -323,3 +324,96 @@ def test_adr_records_the_pathway_departure():
     assert "Status" in text and "#7" in text and "pathway" in text.lower()
     for agent in OMC_AGENTS:
         assert re.search(rf"\b{re.escape(agent)}\b", text), agent
+
+
+def test_precedence_over_omc_is_stated_before_the_workflow():
+    head = global_text().split("### Workflow, in order")[0]
+    assert "override" in head and "lightest-weight path" in head
+    assert "only the user can waive" in head.lower()
+    assert "untagged" in head and "required" in head
+
+
+GITHUB_SCRIPT = (
+    ROOT / "config" / "skills" / "github-issue-lifecycle" / "scripts" / "issue_lifecycle.py"
+)
+
+
+def test_advisory_tags_match_the_scripts_advisory_set():
+    tagged = re.findall(r"\(advisory: ([a-z-]+)\)", global_text())
+    assert len(tagged) == len(set(tagged))
+    assert set(tagged) == set(script_constant(GITHUB_SCRIPT, "ADVISORY_STEPS"))
+    assert not set(tagged) & set(script_constant(GITHUB_SCRIPT, "REQUIRED_STEPS"))
+
+
+def test_path_declaration_follows_step_2_and_asks_a_plain_question():
+    text = global_text()
+    start = text.index("2. Start:")
+    end = text.index("3. Test plan:")
+    block = text[start:end]
+    assert "Path declaration" in block
+    for needle in ("Review the proposed pipeline?", "yes/no", "lists no skipped steps", "wizard",
+                   "waived", "never skipped", "spec approval"):
+        assert needle in block, needle
+
+
+def test_self_review_does_not_let_required_steps_be_skipped():
+    line = next(l for l in global_text().splitlines() if l.startswith("Self-review:"))
+    assert "otherwise say why not" not in line
+    assert "required" in line and "advisory" in line
+    assert "only when the user waived it" in line and "adds no value" not in line
+
+
+LIFECYCLE_SKILLS = ("github-issue-lifecycle", "gitea-issue-lifecycle", "jira-ticket-lifecycle")
+
+
+@pytest.mark.parametrize("skill", LIFECYCLE_SKILLS)
+def test_lifecycle_skill_declares_the_path_after_the_claim_and_checks_it_twice(skill):
+    text = (ROOT / "config" / "skills" / skill / "SKILL.md").read_text()
+    claim = text.index("### 2. Claim it")
+    declare = text.index("Path declaration")
+    approval = text.index("### 5. Approval and labels")
+    pr = text.index("### 7. Open the PR")
+    settle = text.index("### 3. Settle the approval mode")
+    assert claim < declare < settle
+    section = text[declare:settle]
+    for needle in ("Review the proposed pipeline?", "plain yes or no", "lists no skipped steps",
+                   "verbatim", "<!-- path-declaration v1 -->", "<!-- /path-declaration -->",
+                   "- run: ", "- waived: ", "- n/a: ", "variant:"):
+        assert needle in section, needle
+    checks = [m.start() for m in re.finditer("declaration-check", text)]
+    assert not any(declare < c < approval for c in checks), "check belongs to approval and PR time"
+    assert any(approval < c < pr for c in checks), "check before approved is set"
+    assert any(c > pr for c in checks), "check at PR time"
+    assert "--stamp" in text[pr:] and "--approval-mode" in text and "--spec" in text
+
+
+@pytest.mark.parametrize("skill", LIFECYCLE_SKILLS)
+def test_lifecycle_skill_checks_the_declaration_against_your_own_comments(skill):
+    text = (ROOT / "config" / "skills" / skill / "SKILL.md").read_text()
+    calls = [l for l in text.splitlines() if "declaration-check --" in l]
+    assert calls
+    for line in calls:
+        assert '--author "$me"' in line, line
+    assert "{url, body, author}" in text
+    assert "authenticated login" in text
+    section = text[text.index("### 2a. Path declaration"):text.index("### 3. Settle")]
+    assert "`Path declaration answer: <question asked>`" in section
+    conditional = script_constant(GITHUB_SCRIPT, "CONDITIONAL_STEPS")
+    line = next(l for l in section.splitlines() if l.startswith("Step ids."))
+    sentence = line[line.index("Conditional advisory steps"):]
+    sentence = sentence[:sentence.index(".") + 1]
+    assert set(re.findall(r"`([a-z-]+)`", sentence)) == set(conditional)
+
+
+def test_adr_records_that_required_steps_bind_omc():
+    adrs = sorted((ROOT / "docs" / "adr").glob("0005-*.md"))
+    assert len(adrs) == 1
+    text = adrs[0].read_text()
+    assert "**Status:** Proposed (issue #14), pending the owner's acceptance." in text
+    assert "branch, issue and HEAD" in text
+    limit = text[text.index("## Limit"):]
+    for needle in ("gh pr new", "--repo", "tea api", "gh api", "unverifiable"):
+        assert needle in limit, needle
+    assert "ADR-0001" in text and "ADR-0004" in text
+    assert "lightest-weight path" in text and "bash_guard" in text
+    assert "writes the comments itself" in text

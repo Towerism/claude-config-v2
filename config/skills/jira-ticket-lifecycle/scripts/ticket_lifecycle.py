@@ -7,6 +7,7 @@ Text checks, which never touch Jira:
   commit-check   validate a commit message (Conventional Commit ending in (KEY-N))
   pr-body-check  validate a PR body (Ticket line, Spec line, Review section)
   diff-check     scan `git diff <base>...HEAD` for requirement IDs in code and stray spec files
+  declaration-check  validate the path declaration against the ticket's comments
 
 Jira and GitHub steps, through the `jira` and `gh` CLIs and four Jira REST calls:
   auth, view, search, create, claim, set-mode, label-actor, sync-spec, pull-spec, comment,
@@ -434,6 +435,218 @@ def diff_check(base, repo_dir):
         if not has_subject(git("ls-tree", "HEAD", "--", folder)):
             problems.append(("spec-file", f"{path} is a spec file away from its subject"))
     return problems
+
+
+# ── path declaration (the same rules as the GitHub lifecycle skill's script) ──
+
+DECL_START = "<!-- path-declaration v1 -->"
+DECL_END = "<!-- /path-declaration -->"
+ADVISORY_STEPS = (
+    "interview",
+    "analyst",
+    "docs-lookup",
+    "test-plan",
+    "history-cleanup",
+    "simplifier",
+    "qa",
+    "design",
+)
+# Advisory steps that hinge on a fact, so `n/a` with that fact stands; the rest need a waiver.
+CONDITIONAL_STEPS = ("history-cleanup", "simplifier", "qa", "design", "docs-lookup")
+REQUIRED_STEPS = (
+    "self-review",
+    "spec-review",
+    "review-notes",
+    "tdd",
+    "diff-review",
+    "security-gate",
+    "verify",
+)
+# Steps a variant requires on top of REQUIRED_STEPS.
+VARIANT_STEPS = {"feature": (), "bug": ("repro",), "docs": (), "ui": (), "hotfix": ()}
+DOCS_NA_STEPS = ("test-plan", "tdd")
+DOCS_FACT = "variant: docs"
+NO_REVIEW_FACT = "approval: no-review"
+NO_REVIEW_MODE = "no-review"
+STAMP_NAME = "path-declaration-ok"
+# The first line of every comment a waiver cites; the user's words follow it.
+ANSWER_HEAD = "Path declaration answer"
+DECL_LINE_RE = re.compile(r"- (run|waived|n/a): ([^\s—]+)(?:\s+—\s*(.*))?")
+OPEN_QUOTES, CLOSE_QUOTES = '"“', '"”'
+FENCE_RE = re.compile(r"(```|~~~)")
+SEAMS_RE = re.compile(r"#{1,6}\s+seams\b", re.I)
+
+
+def declaration_lines(text):
+    """The lines inside the one declaration block, or None when there is no block."""
+    lines = [line.strip() for line in text.splitlines()]
+    starts = [i for i, line in enumerate(lines) if line == DECL_START]
+    ends = [i for i, line in enumerate(lines) if line == DECL_END]
+    if not starts and not ends:
+        return None
+    if len(starts) > 1 or len(ends) > 1:
+        raise MarkerError(EXIT_MALFORMED, "more than one path-declaration block")
+    if not ends:
+        raise MarkerError(EXIT_MALFORMED, "path-declaration block is not closed")
+    if not starts or ends[0] < starts[0]:
+        raise MarkerError(EXIT_MALFORMED, "closing marker without an opening marker")
+    return lines[starts[0] + 1 : ends[0]]
+
+
+def has_seams_heading(spec):
+    in_fence = False
+    for line in spec.splitlines():
+        line = line.strip()
+        if FENCE_RE.match(line):
+            in_fence = not in_fence
+        elif not in_fence and SEAMS_RE.match(line):
+            return True
+    return False
+
+
+def squash(text):
+    return " ".join(text.split())
+
+
+def check_waiver(step, rest, bodies):
+    quote, sep, url = rest.rpartition("—")
+    if not sep:
+        quote, url = rest, ""
+    quote, url = quote.strip(), url.strip()
+    if (
+        len(quote) < 2
+        or quote[0] not in OPEN_QUOTES
+        or quote[-1] not in CLOSE_QUOTES
+        or not quote[1:-1].strip()
+    ):
+        return [("waiver-needs-quote", f"{step}: the waiver needs the user's words in quotes")]
+    if url not in bodies:
+        detail = f"{step}: {url or 'no URL'} is not your comment on the ticket"
+        return [("waiver-not-recorded", detail)]
+    head, _, answer = bodies[url].partition("\n")
+    if not head.startswith(ANSWER_HEAD):
+        detail = f"{step}: the comment at {url} does not start with {ANSWER_HEAD!r}"
+        return [("waiver-not-recorded", detail)]
+    words = squash(quote[1:-1])
+    if len(words) < 2 or words not in squash(answer):
+        return [("waiver-not-recorded", f"{step}: the quote is not in the answer at {url}")]
+    return []
+
+
+def na_allowed(step, fact, variant, approval_mode):
+    if variant == "docs" and step in DOCS_NA_STEPS and fact == DOCS_FACT:
+        return True
+    if step == "spec-review":
+        return fact == NO_REVIEW_FACT and approval_mode == NO_REVIEW_MODE
+    if step in DOCS_NA_STEPS:
+        return False
+    return step == "security-gate" or step in CONDITIONAL_STEPS
+
+
+def check_declaration(text, comments, approval_mode, spec, author):
+    block = declaration_lines(text)
+    if block is None:
+        return [("missing-declaration", "no path-declaration block")]
+    # Only comments by `author` count as evidence; a comment without a usable URL is dropped.
+    bodies = {
+        c["url"]: c.get("body") or ""
+        for c in comments
+        if isinstance(c.get("url"), str) and c["url"] and c.get("author") == author
+    }
+    problems, variants, entries = [], [], {}
+    for line in block:
+        if not line:
+            continue
+        if line.startswith("variant:"):
+            variants.append(line.split(":", 1)[1].strip())
+            continue
+        match = DECL_LINE_RE.fullmatch(line)
+        if not match:
+            problems.append(("unknown-step", f"cannot read the line {line!r}"))
+            continue
+        kind, step, rest = match.groups("")
+        if step in entries:
+            problems.append(("unknown-step", f"{step} is declared more than once"))
+            continue
+        entries[step] = (kind, rest.strip())
+
+    variant = variants[0] if len(variants) == 1 else None
+    if variant not in VARIANT_STEPS:
+        names = ", ".join(VARIANT_STEPS)
+        problems.append(("unknown-step", f"needs one variant line naming one of {names}"))
+    required = REQUIRED_STEPS + VARIANT_STEPS.get(variant, ())
+    for step, (kind, rest) in entries.items():
+        if step not in required and step not in ADVISORY_STEPS:
+            problems.append(("unknown-step", f"{step} is not a step of the {variant} variant"))
+        elif kind == "run":
+            if rest not in bodies:
+                detail = f"{step}: cite your ticket comment that records it"
+                problems.append(("run-needs-evidence", detail))
+        elif kind == "waived":
+            if step in required:
+                problems.append(("required-waived", f"{step} is required and cannot be waived"))
+            else:
+                problems.extend(check_waiver(step, rest, bodies))
+        elif not rest:
+            problems.append(("na-needs-fact", f"{step}: n/a needs the fact that makes it so"))
+        elif not na_allowed(step, rest, variant, approval_mode):
+            code = "required-not-run" if step in required else "waiver-not-recorded"
+            problems.append((code, f"{step}: n/a with {rest!r} does not stand in for a run"))
+    for step in required:
+        if step not in entries:
+            problems.append(("required-not-run", f"{step} is required and not declared"))
+    for step in ADVISORY_STEPS:
+        if step not in entries:
+            problems.append(("waiver-not-recorded", f"{step} is skipped without a recorded answer"))
+    if entries.get("test-plan", ("",))[0] == "waived" and not has_seams_heading(spec):
+        problems.append(("seams-needed", "test-plan is waived, so the spec needs a Seams heading"))
+    return problems
+
+
+def write_stamp(key, passed):
+    """Write the per-worktree stamp that lets the PR command through, or remove it on failure."""
+    git = git_runner(".")
+    path = os.path.join(git("rev-parse", "--git-dir").strip(), STAMP_NAME)
+    if passed:
+        branch, head = git("branch", "--show-current").strip(), git("rev-parse", "HEAD").strip()
+        write_atomic(path, f"{branch}\n{key}\n{head}\n")
+    elif os.path.lexists(path):
+        os.remove(path)
+
+
+def cmd_declaration_check(args):
+    """Run the check; any outcome but a pass revokes an earlier stamp."""
+    code = EXIT_USAGE
+    try:
+        code = declaration_check(args)
+        return code
+    finally:
+        if args.stamp and code != EXIT_OK:
+            try:
+                write_stamp(None, False)
+            except UsageError:
+                pass  # no git dir to find, so no stamp to remove
+
+
+def declaration_check(args):
+    if args.stamp and args.key is None:
+        raise UsageError("--stamp needs --key")
+    key = check_key(args.key) if args.key is not None else None
+    try:
+        comments = json.loads(read_text(args.comments))
+    except ValueError as exc:
+        raise UsageError(f"{args.comments} is not JSON: {exc}") from exc
+    if not isinstance(comments, list) or not all(isinstance(c, dict) for c in comments):
+        raise UsageError(f"{args.comments} must hold a list of {{url, body, author}} objects")
+    spec = read_text(args.spec)
+    text = ""
+    if args.declaration and os.path.exists(args.declaration):
+        text = read_text(args.declaration)
+    mode = args.approval_mode.strip()
+    problems = check_declaration(text, comments, mode, spec, args.author.strip())
+    if args.stamp:
+        write_stamp(key, not problems)
+    return report(problems, args.json)
 
 
 # ── reporting ────────────────────────────────────────────────────────────────
@@ -1362,6 +1575,8 @@ EPILOG = """Examples (every free-text input is a file written with the Write too
   ticket_lifecycle.py commit-check --message msg.txt --key PAY-142
   ticket_lifecycle.py pr-body-check --body pr.md --key PAY-142
   ticket_lifecycle.py diff-check --base origin/main
+  ticket_lifecycle.py declaration-check --declaration decl.md --comments comments.json \\
+      --author jdoe --approval-mode manual --spec spec.md --stamp --key PAY-142
 
 Exit codes: 0 ok, 1 a check or step failed, 2 usage error, 3 no spec markers, 4 malformed
 markers, 5 auth missing or REST origin refused, 6 settings missing or invalid."""
@@ -1401,6 +1616,17 @@ def build_parser():
     p = add("diff-check", "scan the branch diff")
     p.add_argument("--base", required=True, help="base ref, such as origin/main")
     p.add_argument("--repo-dir", default=".", help="repository to scan")
+    p = add("declaration-check", "validate the path declaration")
+    p.add_argument("--declaration", help="file holding the declaration comment")
+    p.add_argument(
+        "--comments", required=True, help="JSON list of the ticket's {url, body, author}"
+    )
+    p.add_argument("--author", required=True, help="your Jira login; only its comments count")
+    p.add_argument("--approval-mode", required=True, help="the ticket's approval mode label value")
+    p.add_argument("--spec", required=True, help="spec file")
+    p.add_argument("--stamp", action="store_true", help="on pass, stamp this worktree for the PR")
+    p.add_argument("--key", help="ticket key written into the stamp, such as PAY-142")
+
     def step(name, help_text, key=True, repo=False):
         p = add(name, help_text)
         p.add_argument("--out", help="also write the result JSON to this file")
@@ -1539,6 +1765,8 @@ def run(argv):
         return report(check_commit(message, args.key and check_key(args.key)), args.json)
     if args.cmd == "diff-check":
         return report(diff_check(args.base, args.repo_dir), args.json)
+    if args.cmd == "declaration-check":
+        return cmd_declaration_check(args)
     cfg = load_settings()
     if args.cmd not in ("settings", "pr-body-check"):
         return run_step(args, cfg)

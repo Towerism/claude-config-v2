@@ -4,6 +4,7 @@ import ast
 import io
 import json
 import os
+import pathlib
 import signal
 import stat
 import subprocess
@@ -1201,6 +1202,7 @@ def test_a_symlink_added_by_path_is_not_followed(repo, tmp_path):
     "gh issue create --title t --label approved", "gh issue create -t t -l approved", "gh issue create --label=approved",
     "gh api repos/o/r/issues/1/labels -f 'labels[]=approved'", "gh api -X POST repos/o/r/issues/1/labels -f labels=approved",
     "cd /tmp && gh issue edit 1 --remove-label draft --add-label approved",
+    "gh -R o/r issue edit 1 --add-label approved", "gh --repo=o/r issue edit 1 --add-label approved",
 ])
 def test_adding_the_approved_label_asks(tmp_path, command):
     assert asks(command, tmp_path, LABEL)
@@ -1214,6 +1216,118 @@ def test_adding_the_approved_label_asks(tmp_path, command):
 ])
 def test_other_label_commands_pass(tmp_path, command):
     assert guarded(command, tmp_path) is None
+
+
+# rule 7: a pull request needs the path-declaration stamp
+
+
+PATH_DECLARATION = "path declaration"
+PR_CREATE = "gh pr create --title t --body b"
+
+
+def stamp(work, text):
+    """Write the path-declaration stamp in the git dir of `work` (a work tree or linked worktree)."""
+    out = subprocess.run(["git", "-C", str(work), "rev-parse", "--absolute-git-dir"], check=True, capture_output=True, text=True, env=GIT_ENV)
+    (pathlib.Path(out.stdout.strip()) / "path-declaration-ok").write_text(text)
+
+
+def head(work):
+    out = subprocess.run(["git", "-C", str(work), "rev-parse", "HEAD"], check=True, capture_output=True, text=True, env=GIT_ENV)
+    return out.stdout.strip()
+
+
+def current_stamp(work, branch, issue="1"):
+    """The stamp the declaration check writes: branch, issue and HEAD."""
+    stamp(work, f"{branch}\n{issue}\n{head(work)}\n")
+
+
+def test_a_pull_request_without_a_stamp_asks(repo):
+    assert asks(PR_CREATE, repo, PATH_DECLARATION)
+
+
+def test_a_pull_request_with_a_stamp_for_this_branch_and_head_passes(repo):
+    current_stamp(repo, "feature/1-x")
+    assert guarded(PR_CREATE, repo) is None
+    stamp(repo, f"feature/1-x\r\n1\r\n{head(repo)}\r\n")
+    assert guarded(PR_CREATE, repo) is None
+
+
+def test_a_pull_request_with_a_stamp_for_another_branch_asks(repo):
+    stamp(repo, f"feature/2-y\n1\n{head(repo)}\n")
+    assert asks(PR_CREATE, repo, PATH_DECLARATION)
+    stamp(repo, "")
+    assert asks(PR_CREATE, repo, PATH_DECLARATION)
+
+
+def test_a_pull_request_with_a_stamp_without_a_head_asks(repo):
+    stamp(repo, "feature/1-x\n")
+    assert asks(PR_CREATE, repo, PATH_DECLARATION)
+    stamp(repo, "feature/1-x\n1\n")
+    assert asks(PR_CREATE, repo, PATH_DECLARATION)
+
+
+def test_a_pull_request_with_a_stale_head_asks(repo):
+    current_stamp(repo, "feature/1-x")
+    commit(repo, "feat: more (#1)")
+    assert asks(PR_CREATE, repo, PATH_DECLARATION)
+    current_stamp(repo, "feature/1-x")
+    assert guarded(PR_CREATE, repo) is None
+
+
+def test_a_pull_request_stamp_follows_the_command_directory(repo, tmp_path):
+    git(repo, "worktree", "add", "-q", "-b", "feature/7-x", str(tmp_path / "wt"))
+    current_stamp(repo, "feature/1-x")
+    assert asks(f"cd {tmp_path / 'wt'} && {PR_CREATE}", repo, PATH_DECLARATION)  # the stamp is per worktree
+    current_stamp(tmp_path / "wt", "feature/7-x")
+    assert guarded(f"cd {tmp_path / 'wt'} && {PR_CREATE}", repo) is None
+    assert guarded(f"cd ../wt && {PR_CREATE}", repo) is None
+    assert guarded(PR_CREATE, repo) is None  # the main work tree keeps its own stamp
+
+
+def test_a_pull_request_passes_when_git_state_is_undeterminable(repo, tmp_path):
+    unborn = tmp_path / "unborn"
+    unborn.mkdir()
+    git(unborn, "init", "-q", "-b", "feature/9-x")
+    assert guarded(PR_CREATE, unborn) is None  # no HEAD commit to compare
+    git(repo, "checkout", "-q", "--detach")
+    assert guarded(PR_CREATE, repo) is None  # detached HEAD
+    assert guarded(PR_CREATE, tmp_path) is None  # not a repository
+    assert guarded(f"cd \"$X\" && {PR_CREATE}", repo) is None
+    assert guarded(PR_CREATE) is None  # no cwd
+
+
+def test_a_pull_request_passes_without_git(repo, tmp_path, monkeypatch):
+    hook = hook_module("bash_guard.py")
+    payload = bash(PR_CREATE) | {"cwd": str(repo)}
+    assert PATH_DECLARATION in hook.evaluate(payload)
+    monkeypatch.setattr(hook, "SAFE_PATH", str(tmp_path / "empty"))
+    assert hook.evaluate(payload) is None
+
+
+def test_pull_request_words_outside_command_position_pass(repo):
+    for command in ("echo gh pr create", "echo 'gh pr create --title t'", "git log --grep 'gh pr create'", "gh pr view 1", "gh pr list",
+                    "gh -R o/r pr view 1", "gh --repo=o/r pr list"):
+        assert guarded(command, repo) is None, command
+    assert asks(f"echo hi; {PR_CREATE}", repo, PATH_DECLARATION)
+
+
+@pytest.mark.parametrize("command", [
+    "gh -R o/r pr create --title t",
+    "gh --repo o/r pr create --title t",
+    "gh --repo=o/r pr create --title t",
+    "gh pr new --title t",
+    "gh -R o/r pr new",
+])
+def test_a_pull_request_behind_repo_flags_or_the_new_alias_asks(repo, command):
+    assert asks(command, repo, PATH_DECLARATION)
+    current_stamp(repo, "feature/1-x")
+    assert guarded(command, repo) is None
+
+
+def test_the_stamp_check_stays_silent_when_the_session_is_bypassed(repo, tmp_path):
+    payload = bash(PR_CREATE) | {"cwd": str(repo)}
+    assert run("bash_guard.py", payload) != ""
+    assert run("bash_guard.py", payload | {"transcript_path": session(tmp_path, "/oh-my-claudecode:ralph fix it")}) == ""
 
 
 # robustness and hardening

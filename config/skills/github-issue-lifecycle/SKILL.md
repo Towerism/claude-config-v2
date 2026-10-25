@@ -61,6 +61,27 @@ gh issue edit 42 --add-assignee @me --add-label "in progress"
 ```
 Label creation fails harmlessly when a label exists, so the block is safe to rerun. If the token has the `project` scope, also set the issue's Project Status to In Progress; otherwise say you skipped it and carry on.
 
+### 2a. Path declaration
+
+Right after the claim, once per change, ask (AskUserQuestion) "Review the proposed pipeline?" as a plain yes or no. The question lists no skipped steps. A hotfix gets the same question and no pre-waived steps.
+- **Yes:** open the wizard. Show the proposed path: the steps that will run and the advisory steps you would skip, each with a reason. The user confirms or changes each skip.
+- **No:** you may skip the advisory steps you judge fit. The "No" answer is the recorded waiver for each.
+
+Post the user's answer to the question, and each wizard answer, as an issue comment (`gh issue comment 42 --body-file …`) right after it is given: the first line `Path declaration answer: <question asked>`, then the answer verbatim. A wizard selection counts as the user's words: the quote is the selected option plus any free text, and it must appear below the first line. Keep each comment's URL.
+
+Step ids. Advisory (may be waived): `interview`, `analyst`, `docs-lookup`, `test-plan`, `history-cleanup`, `simplifier`, `qa`, `design`. Required (never waived): `self-review`, `spec-review`, `review-notes`, `tdd`, `diff-review`, `security-gate`, `verify`, plus `repro` for variant bug. `security-gate` is `n/a` with a fact stating that the diff touches none of auth, input parsing, secrets, shell, network or deserialization. `spec-review` is `n/a` only with fact `approval: no-review`. Variant docs marks `test-plan` and `tdd` `n/a` with fact `variant: docs`. Conditional advisory steps (`docs-lookup`, `history-cleanup`, `simplifier`, `qa`, `design`) may be `n/a` with the fact that makes them so. `interview`, `analyst` and `test-plan` are never `n/a` apart from that docs case: run them or record a waiver.
+
+Keep the declaration as one issue comment. Post it, then update it as steps run. List every advisory step on its own line, marked `run`, `waived` or `n/a`. The check fails on any advisory step left out:
+```
+<!-- path-declaration v1 -->
+variant: feature
+- run: <step-id> — <comment URL>
+- waived: <step-id> — "<quote>" — <comment URL of the verbatim answer>
+- n/a: <step-id> — <fact>
+<!-- /path-declaration -->
+```
+A `run` line cites an issue comment that records the step, such as a review note or a self-review list. Under "No", each skipped advisory step is a `waived` line whose quote and URL come from the "No" answer. If the user later asks to waive a step, reopen the wizard: replace the line and cite the new comment. A spec returned to draft reopens the declaration. A waiver covers one issue. The check runs at approval (step 5) and at PR time (step 7).
+
 ### 3. Settle the approval mode
 
 Settle it before any spec is written, because it decides whether the review pass runs and who approves. Take the first that applies:
@@ -115,6 +136,15 @@ Posting or reposting a spec always sets `draft` and removes `approved`; the two 
 
 Every review pass, on the spec or the PR diff, gets its review note posted as an issue comment listing each finding and how it was handled. One pass per spec and one per diff; never re-run it after fixes.
 
+Before `approved` is set, in every mode, show the declaration in the approval prompt and run the check. Fetch the issue's comments as `{url, body, author}`, the declaration comment and the spec to files first. Only comments by the authenticated login (`gh api user -q .login`) count: the declaration is the latest of yours holding the marker, and the check ignores everyone else's comments:
+```bash
+me=$(gh api user -q .login)
+gh api --paginate --slurp "repos/{owner}/{repo}/issues/42/comments" | jq '[.[][] | {url: .html_url, body: .body, author: .user.login}]' > "$tmp/comments.json"
+jq -r --arg me "$me" '[.[] | select(.author == $me and (.body | contains("<!-- path-declaration v1 -->")))] | last | .body' "$tmp/comments.json" > "$tmp/declaration.md"
+python3 -I <skill-dir>/scripts/issue_lifecycle.py declaration-check --declaration "$tmp/declaration.md" --comments "$tmp/comments.json" --author "$me" --approval-mode manual --spec "$tmp/spec.md"
+```
+Use the mode from the `approval: *` label (`manual`, `adversarial` or `no-review`). Exit 1 lists the problems: fix the declaration and rerun; don't set `approved` until it passes.
+
 Implementation starts only when `approved` is on the issue **and the most recent `approved` labeled event's actor is the user's login** (same check as step 3). An `approved` added by any other account is reported and treated as `draft`. If the spec must change later, change the spec in the issue body first; that returns it to `draft` and back through the mode's approval path.
 
 ### 6. Branch, worktree, commits
@@ -143,6 +173,7 @@ python3 -I <skill-dir>/scripts/issue_lifecycle.py diff-check --base origin/<defa
 Draft the body with `/oh-my-claudecode:pr`, shaped by [assets/pr-body-template.md](assets/pr-body-template.md). Write it to a file with: `Closes #42` alone on its line (`Closes owner/repo#42` across repos, one keyword per issue), `Spec: #42`, a map from each acceptance criterion to the test that covers it, and a `## Review` section with the PR-diff review note. Then:
 ```bash
 python3 -I <skill-dir>/scripts/issue_lifecycle.py pr-body-check --body "$tmp/pr.md" --issue 42
+python3 -I <skill-dir>/scripts/issue_lifecycle.py declaration-check --declaration "$tmp/declaration.md" --comments "$tmp/comments.json" --author "$me" --approval-mode manual --spec "$tmp/spec.md" --stamp --issue 42   # refetch the files first; a pass leaves the stamp the PR hook wants, valid until the next commit
 gh pr create --base <default> --title "feat(roster): add CSV export (#42)" --body-file "$tmp/pr.md"   # add --label hotfix for hotfixes
 gh pr view --json closingIssuesReferences --jq '[.closingIssuesReferences[].number]'
 ```
