@@ -171,7 +171,7 @@ def test_workflow_plans_the_tests_before_the_spec():
 
 def test_nothing_personal_is_committed():
     for path in ROOT.rglob("*"):
-        if path.is_file() and ".git" not in path.parts and ".venv" not in path.parts and path.suffix in {".md", ".json", ".py", ".toml"}:
+        if path.is_file() and ".git" not in path.parts and ".venv" not in path.parts and (path.suffix in {".md", ".json", ".py", ".toml", ".txt"} or path.name == "Makefile"):
             if path.name == "test_repo.py":
                 continue
             assert not re.search(r"/home/\w|mfracker", path.read_text()), path
