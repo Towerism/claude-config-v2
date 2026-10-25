@@ -1329,7 +1329,10 @@ def cmd_pr_body(res, gh, cfg, key, pr, body_file, replace, repo_dir):
             f"the PR is {info.get('state')}; ask the user before changing anything",
         )
     current = info.get("body") or ""
-    last = open(last_path, encoding="utf-8").read() if os.path.exists(last_path) else None
+    last = None
+    if os.path.exists(last_path):
+        with open(last_path, encoding="utf-8") as f:
+            last = f.read()
     if same(current, new):
         write_atomic(last_path, new)
         return res.step("body", "skipped", "the PR already has this body")
