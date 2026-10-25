@@ -72,7 +72,6 @@ DENY_REASON = "Secret files (.env, deny-terms) are off limits: do not read, sear
 ASK_REASON = "This command names a secret file (.env or deny-terms). Confirm you want it touched."
 
 
-
 def names_secret(name: str) -> bool:
     """Whether a bare file name is a secret file."""
     if name == "deny-terms" or name == ".env":
@@ -453,17 +452,16 @@ def unjudged_skipped(words: list[Word]) -> tuple[list[Word], str | None]:
             i += 1
             while i < len(words) and words[i].text.startswith("-"):
                 flag = words[i].text
-                rest = [w.text for w in words[i + 1:]]
                 if flag in ("-C", "--chdir"):
                     i += 2
                 elif flag.startswith("--chdir="):
                     i += 1
                 elif flag in ("-S", "--split-string"):
-                    return [], " ".join(rest)
+                    return [], " ".join(w.text for w in words[i + 1:])
                 elif flag.startswith("--split-string="):
-                    return [], " ".join([flag.partition("=")[2], *rest])
+                    return [], " ".join([flag.partition("=")[2], *(w.text for w in words[i + 1:])])
                 elif flag.startswith("-S"):
-                    return [], " ".join([flag[2:], *rest])
+                    return [], " ".join([flag[2:], *(w.text for w in words[i + 1:])])
                 else:
                     kept.append(words[i])
                     i += 1
