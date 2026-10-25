@@ -550,11 +550,11 @@ def check_declaration(text, comments, approval_mode, spec):
         if not match:
             problems.append(("unknown-step", f"cannot read the line {line!r}"))
             continue
-        kind, step, rest = match.group(1), match.group(2), (match.group(3) or "").strip()
+        kind, step, rest = match.groups("")
         if step in entries:
             problems.append(("unknown-step", f"{step} is declared more than once"))
             continue
-        entries[step] = (kind, rest)
+        entries[step] = (kind, rest.strip())
 
     variant = variants[0] if len(variants) == 1 else None
     if variant not in VARIANT_STEPS:

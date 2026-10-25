@@ -806,8 +806,8 @@ class Guard:
         branch = self.branch(top) if top else None
         if not branch:
             return
-        out = self.git(top, "rev-parse", "--git-dir")
-        git_dir = join_path(top, out.rstrip("\n")) if out and out.rstrip("\n") else None
+        out = (self.git(top, "rev-parse", "--git-dir") or "").rstrip("\n")
+        git_dir = join_path(top, out) if out else None
         if git_dir is None:
             return
         data = read_file(os.path.join(git_dir, STAMP_NAME), first_line=True)

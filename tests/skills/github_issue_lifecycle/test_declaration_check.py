@@ -1,6 +1,5 @@
 """declaration-check: the path declaration verdicts from the shared fixture table, and the stamp."""
 
-import ast
 import json
 import os
 import subprocess
@@ -8,20 +7,12 @@ import subprocess
 import pytest
 
 from tests.skills import declaration_cases as dc
+from tests.skills.declaration_cases import codes, ids
 from tests.skills.github_issue_lifecycle.conftest import GIT_ENV, SCRIPT, run, write
 
-
-def script_constant(name):
-    """A constant of the script, read without importing it."""
-    for node in ast.parse(SCRIPT.read_text()).body:
-        if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", None) == name:
-            return ast.literal_eval(node.value)
-    raise AssertionError(f"issue_lifecycle.py has no {name}")
-
-
-REQUIRED = script_constant("REQUIRED_STEPS")
-ADVISORY = script_constant("ADVISORY_STEPS")
-VARIANT_STEPS = script_constant("VARIANT_STEPS")
+REQUIRED = dc.script_constant(SCRIPT, "REQUIRED_STEPS")
+ADVISORY = dc.script_constant(SCRIPT, "ADVISORY_STEPS")
+VARIANT_STEPS = dc.script_constant(SCRIPT, "VARIANT_STEPS")
 
 
 def steps(variant):
@@ -50,10 +41,6 @@ def check(tmp_path, case, text=None, *extra, cwd=None):
     )
 
 
-def codes(result):
-    return sorted({p["code"] for p in json.loads(result.stdout)["problems"]})
-
-
 def assert_verdict(result, case):
     assert result.returncode == case["exit"], result.stdout + result.stderr
     if case["exit"] == 4:
@@ -61,10 +48,6 @@ def assert_verdict(result, case):
         assert result.stderr.strip()
     else:
         assert codes(result) == case["codes"]
-
-
-def ids(cases):
-    return [c["name"] for c in cases]
 
 
 def verdict_test(cases):
@@ -98,24 +81,12 @@ class TestValid:
 class TestMissing:
     test_fails = verdict_test(dc.MISSING)
 
-    def test_no_declaration_flag(self, tmp_path):
+    @pytest.mark.parametrize("flag", [False, True], ids=["no flag", "absent file"])
+    def test_no_declaration_file(self, tmp_path, flag):
+        declaration = ["--declaration", tmp_path / "nope.md"] if flag else []
         r = run(
             "declaration-check",
-            "--comments",
-            write(tmp_path, "c.json", "[]"),
-            "--approval-mode",
-            "manual",
-            "--spec",
-            write(tmp_path, "s.md", dc.SPEC),
-            "--json",
-        )
-        assert (r.returncode, codes(r)) == (1, ["missing-declaration"])
-
-    def test_absent_declaration_file(self, tmp_path):
-        r = run(
-            "declaration-check",
-            "--declaration",
-            tmp_path / "nope.md",
+            *declaration,
             "--comments",
             write(tmp_path, "c.json", "[]"),
             "--approval-mode",

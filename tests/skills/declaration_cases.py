@@ -4,9 +4,11 @@ Each case is plain data: a declaration template, the issue's comments, the appro
 spec text and the expected verdict. A template's `{runs}` stands for a `run` line, citing
 RUN_URL, for every step of the variant that the template does not name itself and the case
 does not list in `drop`. The tests fill it in with `render()` from the step sets each script
-defines, so the table never restates those sets.
+defines, so the table never restates those sets. The helpers below it are shared by the tests.
 """
 
+import ast
+import json
 import re
 
 START = "<!-- path-declaration v1 -->"
@@ -281,3 +283,19 @@ VARIANTS = [
 
 ALL = VALID + MISSING + REQUIRED + QUOTES + EVIDENCE + UNKNOWN + MALFORMED + NOT_APPLICABLE
 ALL += SEAMS + VARIANTS
+
+
+def script_constant(script, name):
+    """A module-level constant of a script, read without importing it."""
+    for node in ast.parse(script.read_text()).body:
+        if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", None) == name:
+            return ast.literal_eval(node.value)
+    raise AssertionError(f"{script.name} has no {name}")
+
+
+def codes(result):
+    return sorted({p["code"] for p in json.loads(result.stdout)["problems"]})
+
+
+def ids(cases):
+    return [c["name"] for c in cases]

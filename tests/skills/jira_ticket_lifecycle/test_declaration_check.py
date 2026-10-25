@@ -1,7 +1,6 @@
 """declaration-check: the path declaration verdicts from the shared fixture table, the stamp
 keyed by ticket, and the rules this script shares with the GitHub lifecycle script."""
 
-import ast
 import json
 import subprocess
 
@@ -9,6 +8,7 @@ import pytest
 
 from tests.conftest import ROOT
 from tests.skills import declaration_cases as dc
+from tests.skills.declaration_cases import codes, ids
 from tests.skills.jira_ticket_lifecycle.conftest import GIT_ENV, SCRIPT
 
 GITHUB_SCRIPT = (
@@ -28,17 +28,9 @@ SHARED = (
 )
 
 
-def script_constant(name, script=SCRIPT):
-    """A constant of a script, read without importing it."""
-    for node in ast.parse(script.read_text()).body:
-        if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", None) == name:
-            return ast.literal_eval(node.value)
-    raise AssertionError(f"{script.name} has no {name}")
-
-
-REQUIRED = script_constant("REQUIRED_STEPS")
-ADVISORY = script_constant("ADVISORY_STEPS")
-VARIANT_STEPS = script_constant("VARIANT_STEPS")
+REQUIRED = dc.script_constant(SCRIPT, "REQUIRED_STEPS")
+ADVISORY = dc.script_constant(SCRIPT, "ADVISORY_STEPS")
+VARIANT_STEPS = dc.script_constant(SCRIPT, "VARIANT_STEPS")
 
 
 def steps(variant):
@@ -67,10 +59,6 @@ def check(env, case, text=None, *extra, cwd=None):
     )
 
 
-def codes(result):
-    return sorted({p["code"] for p in json.loads(result.stdout)["problems"]})
-
-
 def assert_verdict(result, case):
     assert result.returncode == case["exit"], result.stdout + result.stderr
     if case["exit"] == 4:
@@ -79,10 +67,6 @@ def assert_verdict(result, case):
         assert result.stderr.strip()
     else:
         assert codes(result) == case["codes"]
-
-
-def ids(cases):
-    return [c["name"] for c in cases]
 
 
 def verdict_test(cases):
@@ -119,24 +103,12 @@ class TestValid:
 class TestMissing:
     test_fails = verdict_test(dc.MISSING)
 
-    def test_no_declaration_flag(self, env):
+    @pytest.mark.parametrize("flag", [False, True], ids=["no flag", "absent file"])
+    def test_no_declaration_file(self, env, flag):
+        declaration = ["--declaration", env.tmp / "nope.md"] if flag else []
         r = env.run(
             "declaration-check",
-            "--comments",
-            env.file("c.json", "[]"),
-            "--approval-mode",
-            "manual",
-            "--spec",
-            env.file("s.md", dc.SPEC),
-            "--json",
-        )
-        assert (r.returncode, codes(r)) == (1, ["missing-declaration"])
-
-    def test_absent_declaration_file(self, env):
-        r = env.run(
-            "declaration-check",
-            "--declaration",
-            env.tmp / "nope.md",
+            *declaration,
             "--comments",
             env.file("c.json", "[]"),
             "--approval-mode",
@@ -253,7 +225,7 @@ class TestStamp:
 
 @pytest.mark.parametrize("name", SHARED)
 def test_the_step_rules_match_the_github_script(name):
-    ours, theirs = script_constant(name), script_constant(name, GITHUB_SCRIPT)
+    ours, theirs = dc.script_constant(SCRIPT, name), dc.script_constant(GITHUB_SCRIPT, name)
     if isinstance(ours, tuple):
         assert set(ours) == set(theirs)
     else:
