@@ -20,6 +20,8 @@ directory after the `cd` steps, else the payload's cwd. It asks when:
    The content is the index, the work tree for -a or for the paths `git commit <paths>` names, the
    added lines of a tracked file `git add` names, and the whole of an untracked one.
 6. `gh issue edit`, `gh issue create` or `gh api` adds the label `approved`.
+7. `gh pr create` runs on a branch whose git dir (per work tree) holds no `path-declaration-ok` file
+   with the branch name on its first line; a detached HEAD passes.
 
 Anything it cannot determine passes; past the deadline, the asks already found still print. Every
 decision is "ask" with fixed reason strings; the only
@@ -110,6 +112,9 @@ SUBJECT_REASON = "The commit subject is not a Conventional Commit ending in the 
 BRANCH_REASON = "The new branch name does not match feature|fix|hotfix|docs|chore/{issue}-{slug} (global rule)"
 SECRET_REASON = "The commit content holds {files} secret file name(s) and {tokens} token match(es){kinds} (global rule: never commit tokens or .env)"
 LABEL_REASON = "Adding the approved label needs your confirmation (global rule: set no approval marker yourself)"
+STAMP_REASON = "No path declaration is stamped for this branch; declare the paths before opening the pull request (global rule)"
+# Written in the git dir (per work tree) by the path-declaration step; its first line is the branch.
+STAMP_NAME = "path-declaration-ok"
 
 EXPANSION = "\0"  # stands in a word for $VAR, $(...) or `...`; a command holding a real NUL is ignored
 # A run of ordinary characters; quotes, $, backslashes and globs are handled one at a time.
@@ -785,9 +790,29 @@ class Guard:
                 cwd = self.cd(cwd, [w.text for w in words[1:]])
             elif name == "git":
                 self.git_command(seg, words, cwd)
-            elif name == "gh" and adds_approved(words[1:]):
-                self.ask(LABEL_REASON)
+            elif name == "gh":
+                if adds_approved(words[1:]):
+                    self.ask(LABEL_REASON)
+                if [w.text for w in words[1:3]] == ["pr", "create"]:
+                    self.pull_request(cwd)
         return self.verdict()
+
+    # rule 7: a pull request needs the path-declaration stamp
+
+    def pull_request(self, cwd: str | None) -> None:
+        """Asks when the git dir of the command's directory holds no stamp naming the current branch.
+        A detached HEAD or anything git cannot tell passes."""
+        top = self.top(cwd)
+        branch = self.branch(top) if top else None
+        if not branch:
+            return
+        out = self.git(top, "rev-parse", "--git-dir")
+        git_dir = join_path(top, out.rstrip("\n")) if out and out.rstrip("\n") else None
+        if git_dir is None:
+            return
+        data = read_file(os.path.join(git_dir, STAMP_NAME), first_line=True)
+        if data is None or data.decode("utf-8", errors="replace").rstrip("\r") != branch:
+            self.ask(STAMP_REASON)
 
     def verdict(self) -> str | None:
         """The reasons found so far, the secret reason last; also used when the deadline cuts the walk short."""

@@ -4,6 +4,7 @@ import ast
 import io
 import json
 import os
+import pathlib
 import signal
 import stat
 import subprocess
@@ -1214,6 +1215,73 @@ def test_adding_the_approved_label_asks(tmp_path, command):
 ])
 def test_other_label_commands_pass(tmp_path, command):
     assert guarded(command, tmp_path) is None
+
+
+# rule 7: a pull request needs the path-declaration stamp
+
+
+PATH_DECLARATION = "path declaration"
+PR_CREATE = "gh pr create --title t --body b"
+
+
+def stamp(work, text):
+    """Write the path-declaration stamp in the git dir of `work` (a work tree or linked worktree)."""
+    out = subprocess.run(["git", "-C", str(work), "rev-parse", "--absolute-git-dir"], check=True, capture_output=True, text=True, env=GIT_ENV)
+    (pathlib.Path(out.stdout.strip()) / "path-declaration-ok").write_text(text)
+
+
+def test_a_pull_request_without_a_stamp_asks(repo):
+    assert asks(PR_CREATE, repo, PATH_DECLARATION)
+
+
+def test_a_pull_request_with_a_stamp_for_this_branch_passes(repo):
+    stamp(repo, "feature/1-x\n")
+    assert guarded(PR_CREATE, repo) is None
+
+
+def test_a_pull_request_with_a_stamp_for_another_branch_asks(repo):
+    stamp(repo, "feature/2-y\n")
+    assert asks(PR_CREATE, repo, PATH_DECLARATION)
+    stamp(repo, "")
+    assert asks(PR_CREATE, repo, PATH_DECLARATION)
+
+
+def test_a_pull_request_stamp_follows_the_command_directory(repo, tmp_path):
+    git(repo, "worktree", "add", "-q", "-b", "feature/7-x", str(tmp_path / "wt"))
+    stamp(repo, "feature/1-x\n")
+    assert asks(f"cd {tmp_path / 'wt'} && {PR_CREATE}", repo, PATH_DECLARATION)  # the stamp is per worktree
+    stamp(tmp_path / "wt", "feature/7-x\n")
+    assert guarded(f"cd {tmp_path / 'wt'} && {PR_CREATE}", repo) is None
+    assert guarded(f"cd ../wt && {PR_CREATE}", repo) is None
+    assert guarded(PR_CREATE, repo) is None  # the main work tree keeps its own stamp
+
+
+def test_a_pull_request_passes_when_git_state_is_undeterminable(repo, tmp_path):
+    git(repo, "checkout", "-q", "--detach")
+    assert guarded(PR_CREATE, repo) is None  # detached HEAD
+    assert guarded(PR_CREATE, tmp_path) is None  # not a repository
+    assert guarded(f"cd \"$X\" && {PR_CREATE}", repo) is None
+    assert guarded(PR_CREATE) is None  # no cwd
+
+
+def test_a_pull_request_passes_without_git(repo, tmp_path, monkeypatch):
+    hook = hook_module("bash_guard.py")
+    payload = bash(PR_CREATE) | {"cwd": str(repo)}
+    assert PATH_DECLARATION in hook.evaluate(payload)
+    monkeypatch.setattr(hook, "SAFE_PATH", str(tmp_path / "empty"))
+    assert hook.evaluate(payload) is None
+
+
+def test_pull_request_words_outside_command_position_pass(repo):
+    for command in ("echo gh pr create", "echo 'gh pr create --title t'", "git log --grep 'gh pr create'", "gh pr view 1", "gh pr list"):
+        assert guarded(command, repo) is None, command
+    assert asks(f"echo hi; {PR_CREATE}", repo, PATH_DECLARATION)
+
+
+def test_the_stamp_check_stays_silent_when_the_session_is_bypassed(repo, tmp_path):
+    payload = bash(PR_CREATE) | {"cwd": str(repo)}
+    assert run("bash_guard.py", payload) != ""
+    assert run("bash_guard.py", payload | {"transcript_path": session(tmp_path, "/oh-my-claudecode:ralph fix it")}) == ""
 
 
 # robustness and hardening
