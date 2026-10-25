@@ -1,4 +1,2 @@
-
-
 def test_probe_fails():
-    assert False
+    assert sum([1]) == 2
