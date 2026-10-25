@@ -360,6 +360,7 @@ def test_self_review_does_not_let_required_steps_be_skipped():
     line = next(l for l in global_text().splitlines() if l.startswith("Self-review:"))
     assert "otherwise say why not" not in line
     assert "required" in line and "advisory" in line
+    assert "only when the user waived it" in line and "adds no value" not in line
 
 
 LIFECYCLE_SKILLS = ("github-issue-lifecycle", "gitea-issue-lifecycle", "jira-ticket-lifecycle")
@@ -386,11 +387,33 @@ def test_lifecycle_skill_declares_the_path_after_the_claim_and_checks_it_twice(s
     assert "--stamp" in text[pr:] and "--approval-mode" in text and "--spec" in text
 
 
+@pytest.mark.parametrize("skill", LIFECYCLE_SKILLS)
+def test_lifecycle_skill_checks_the_declaration_against_your_own_comments(skill):
+    text = (ROOT / "config" / "skills" / skill / "SKILL.md").read_text()
+    calls = [l for l in text.splitlines() if "declaration-check --" in l]
+    assert calls
+    for line in calls:
+        assert '--author "$me"' in line, line
+    assert "{url, body, author}" in text
+    assert "authenticated login" in text
+    section = text[text.index("### 2a. Path declaration"):text.index("### 3. Settle")]
+    assert "`Path declaration answer: <question asked>`" in section
+    conditional = script_constant(GITHUB_SCRIPT, "CONDITIONAL_STEPS")
+    line = next(l for l in section.splitlines() if l.startswith("Step ids."))
+    sentence = line[line.index("Conditional advisory steps"):]
+    sentence = sentence[:sentence.index(".") + 1]
+    assert set(re.findall(r"`([a-z-]+)`", sentence)) == set(conditional)
+
+
 def test_adr_records_that_required_steps_bind_omc():
     adrs = sorted((ROOT / "docs" / "adr").glob("0005-*.md"))
     assert len(adrs) == 1
     text = adrs[0].read_text()
-    assert "Status" in text and "pending the user" in text
+    assert "**Status:** Proposed (issue #14), pending the owner's acceptance." in text
+    assert "branch, issue and HEAD" in text
+    limit = text[text.index("## Limit"):]
+    for needle in ("gh pr new", "--repo", "tea api", "gh api", "unverifiable"):
+        assert needle in limit, needle
     assert "ADR-0001" in text and "ADR-0004" in text
     assert "lightest-weight path" in text and "bash_guard" in text
     assert "writes the comments itself" in text

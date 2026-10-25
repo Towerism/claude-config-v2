@@ -68,9 +68,9 @@ Right after the claim, once per change, ask (AskUserQuestion) "Review the propos
 - **Yes:** open the wizard. Show the proposed path: the steps that will run and the advisory steps you would skip, each with a reason. The user confirms or changes each skip.
 - **No:** you may skip the advisory steps you judge fit. The "No" answer is the recorded waiver for each.
 
-Post the user's answer to the question, and each wizard answer, verbatim as a ticket comment (`comment --key <key> --body-file <file>`) right after it is given. A wizard selection counts as the user's words: the quote is the selected option plus any free text. Keep each comment's URL.
+Post the user's answer to the question, and each wizard answer, as a ticket comment (`comment --key <key> --body-file <file>`) right after it is given: the first line `Path declaration answer: <question asked>`, then the answer verbatim. A wizard selection counts as the user's words: the quote is the selected option plus any free text, and it must appear below the first line. Keep each comment's URL.
 
-Step ids. Advisory (may be waived): `interview`, `analyst`, `docs-lookup`, `test-plan`, `history-cleanup`, `simplifier`, `qa`, `design`. Required (never waived): `self-review`, `spec-review`, `review-notes`, `tdd`, `diff-review`, `security-gate`, `verify`, plus `repro` for variant bug. `security-gate` is `n/a` with a fact stating that the diff touches none of auth, input parsing, secrets, shell, network or deserialization. `spec-review` is `n/a` only with fact `approval: no-review`. Variant docs marks `test-plan` and `tdd` `n/a` with fact `variant: docs`.
+Step ids. Advisory (may be waived): `interview`, `analyst`, `docs-lookup`, `test-plan`, `history-cleanup`, `simplifier`, `qa`, `design`. Required (never waived): `self-review`, `spec-review`, `review-notes`, `tdd`, `diff-review`, `security-gate`, `verify`, plus `repro` for variant bug. `security-gate` is `n/a` with a fact stating that the diff touches none of auth, input parsing, secrets, shell, network or deserialization. `spec-review` is `n/a` only with fact `approval: no-review`. Variant docs marks `test-plan` and `tdd` `n/a` with fact `variant: docs`. Conditional advisory steps (`docs-lookup`, `history-cleanup`, `simplifier`, `qa`, `design`) may be `n/a` with the fact that makes them so. `interview`, `analyst` and `test-plan` are never `n/a` apart from that docs case: run them or record a waiver.
 
 Keep the declaration as one ticket comment. Post it, then update it as steps run. List every advisory step on its own line, marked `run`, `waived` or `n/a`. The check fails on any advisory step left out:
 ```
@@ -113,9 +113,9 @@ Publishing a spec sets the draft label and removes the approved one. Then, by mo
 
 Every review pass, on the spec or the PR diff, gets its review note posted as a ticket comment listing each finding and how it was handled. One pass per spec and one per diff; never re-run it after fixes.
 
-Before the approve step, in every mode, show the declaration in the approval prompt and run the check. Read the ticket with `view --key <key>`, write its comments to `$tmp/comments.json` as a JSON list of `{url, body}` (url `<site>/browse/<key>?focusedCommentId=<id>`), the latest comment holding `<!-- path-declaration v1 -->` to `$tmp/declaration.md`, and the working-copy spec to `$tmp/spec.md`; then:
+Before the approve step, in every mode, show the declaration in the approval prompt and run the check. Only comments by the authenticated login (what `jira me` prints, held in `$me`) count. Read the ticket with `view --key <key>`, write its comments to `$tmp/comments.json` as a JSON list of `{url, body, author}` (url `<site>/browse/<key>?focusedCommentId=<id>`, author the commenter's login in the same form as `$me`), the latest comment by `$me` holding `<!-- path-declaration v1 -->` to `$tmp/declaration.md`, and the working-copy spec to `$tmp/spec.md`; then:
 ```bash
-python3 -I <skill-dir>/scripts/ticket_lifecycle.py declaration-check --declaration "$tmp/declaration.md" --comments "$tmp/comments.json" --approval-mode manual --spec "$tmp/spec.md"
+python3 -I <skill-dir>/scripts/ticket_lifecycle.py declaration-check --declaration "$tmp/declaration.md" --comments "$tmp/comments.json" --author "$me" --approval-mode manual --spec "$tmp/spec.md"
 ```
 Use the mode from the approval label (`manual`, `adversarial` or `no-review`). Exit 1 lists the problems: fix the declaration (post a new declaration comment; the latest counts) and rerun; don't approve until it passes.
 
@@ -140,7 +140,7 @@ Requirement IDs (FR-, AC-, EC-…) stay out of code, test names and comments unl
 Draft the body with `/oh-my-claudecode:pr`, shaped by [assets/pr-body-template.md](assets/pr-body-template.md): the first line `Ticket: <site>/browse/KEY-N`, a `Spec: KEY-N` line, a map from each acceptance criterion to the test or check that covers it (`not verified` with the reason, never a false pass), and a `## Review` section with the PR-diff review note. Then:
 ```bash
 python3 -I <skill-dir>/scripts/ticket_lifecycle.py pr-body-check --body "$tmp/pr.md" --key PAY-142
-python3 -I <skill-dir>/scripts/ticket_lifecycle.py declaration-check --declaration "$tmp/declaration.md" --comments "$tmp/comments.json" --approval-mode manual --spec "$tmp/spec.md" --stamp --key PAY-142   # refetch the files first; a pass leaves the stamp. The PR hook gates only `gh pr create`, so run the check anyway
+python3 -I <skill-dir>/scripts/ticket_lifecycle.py declaration-check --declaration "$tmp/declaration.md" --comments "$tmp/comments.json" --author "$me" --approval-mode manual --spec "$tmp/spec.md" --stamp --key PAY-142   # refetch the files first; a pass leaves the stamp, valid until the next commit. The PR hook gates only `gh pr create`, so run the check anyway
 gh pr create --draft --base <default> --title "feat(export): add CSV export (PAY-142)" --body-file "$tmp/pr.md"
 python3 -I <skill-dir>/scripts/ticket_lifecycle.py pr-body --key PAY-142 --pr <n> --body "$tmp/pr.md"
 python3 -I <skill-dir>/scripts/ticket_lifecycle.py link-pr --key PAY-142 --pr-url <url gh printed>

@@ -40,7 +40,7 @@ The script makes exactly these four calls, only to the configured `site` over HT
 | `pr-body`, `review`, `merge-check` | `gh pr view N --json …` | No such PR. |
 | `pr-body` | `gh pr edit N --body-file <file>` | |
 | `review` | `gh pr ready N` | |
-| You, steps 5 and 7 | `declaration-check` over files you write from `view --key` (step 2a); `--stamp` at step 7 | Exit 1 lists problems. |
+| You, steps 5 and 7 | `declaration-check --author "$me"` (`$me` from `jira me`) over files you write from `view --key` (step 2a); `--stamp` at step 7 | Exit 1 lists problems. |
 | You, step 7 | `gh pr create --draft --base <default> --title … --body-file …` | |
 | You, step 8 | `gh pr merge N --merge --delete-branch` (or `--rebase`) | The confirmation prompt is declined: the merge waits on the user. |
 | You | `gh repo view --json defaultBranchRef` | |

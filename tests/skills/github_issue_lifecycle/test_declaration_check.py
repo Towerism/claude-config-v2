@@ -13,6 +13,7 @@ from tests.skills.github_issue_lifecycle.conftest import GIT_ENV, SCRIPT, run, w
 REQUIRED = dc.script_constant(SCRIPT, "REQUIRED_STEPS")
 ADVISORY = dc.script_constant(SCRIPT, "ADVISORY_STEPS")
 VARIANT_STEPS = dc.script_constant(SCRIPT, "VARIANT_STEPS")
+CONDITIONAL = dc.script_constant(SCRIPT, "CONDITIONAL_STEPS")
 
 
 def steps(variant):
@@ -31,6 +32,8 @@ def check(tmp_path, case, text=None, *extra, cwd=None):
         write(tmp_path, "declaration.md", text),
         "--comments",
         write(tmp_path, "comments.json", json.dumps(case["comments"])),
+        "--author",
+        case["author"],
         "--approval-mode",
         case["approval_mode"],
         "--spec",
@@ -69,6 +72,8 @@ class TestValid:
             write(tmp_path, "d.md", declaration_text(case)),
             "--comments",
             write(tmp_path, "c.json", json.dumps(case["comments"])),
+            "--author",
+            dc.ME,
             "--approval-mode",
             "manual",
             "--spec",
@@ -76,6 +81,22 @@ class TestValid:
         ]
         r = run(*args)
         assert (r.returncode, r.stdout.strip()) == (0, "OK")
+
+    def test_author_is_required(self, tmp_path):
+        case = dc.VALID[0]
+        r = run(
+            "declaration-check",
+            "--declaration",
+            write(tmp_path, "d.md", declaration_text(case)),
+            "--comments",
+            write(tmp_path, "c.json", json.dumps(case["comments"])),
+            "--approval-mode",
+            "manual",
+            "--spec",
+            write(tmp_path, "s.md", case["spec"]),
+        )
+        assert r.returncode == 2
+        assert "--author" in r.stderr
 
 
 class TestMissing:
@@ -89,6 +110,8 @@ class TestMissing:
             *declaration,
             "--comments",
             write(tmp_path, "c.json", "[]"),
+            "--author",
+            dc.ME,
             "--approval-mode",
             "manual",
             "--spec",
@@ -129,6 +152,26 @@ class TestNotApplicable:
     test_verdicts = verdict_test(dc.NOT_APPLICABLE)
 
 
+class TestAuthor:
+    test_verdicts = verdict_test(dc.AUTHOR)
+
+
+class TestWaiverShape:
+    test_verdicts = verdict_test(dc.WAIVER_SHAPE)
+
+
+class TestConditional:
+    test_verdicts = verdict_test(dc.CONDITIONAL)
+
+    def test_conditional_steps_are_advisory_and_exclude_the_judgement_calls(self):
+        assert set(CONDITIONAL) < set(ADVISORY)
+        assert not {"interview", "analyst", "test-plan"} & set(CONDITIONAL)
+
+
+class TestUrls:
+    test_verdicts = verdict_test(dc.URLS)
+
+
 class TestSeams:
     test_verdicts = verdict_test(dc.SEAMS)
 
@@ -146,16 +189,39 @@ class TestStamp:
         repo = tmp_path / "repo"
         repo.mkdir()
         env = {**os.environ, **GIT_ENV}
-        for args in (["init", "-q", "-b", "main"], ["switch", "-q", "-c", "feature/42-export"]):
+        for args in (
+            ["init", "-q", "-b", "main"],
+            ["commit", "-q", "--allow-empty", "-m", "chore: base (#1)"],
+            ["switch", "-q", "-c", "feature/42-export"],
+        ):
             subprocess.run(["git", *args], cwd=repo, env=env, check=True, capture_output=True)
         return repo
 
-    def test_pass_writes_branch_and_issue(self, tmp_path):
+    def head(self, repo):
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+        )
+        return out.stdout.strip()
+
+    def test_pass_writes_branch_issue_and_head(self, tmp_path):
         repo = self.repo(tmp_path)
         r = check(tmp_path, dc.VALID[0], None, "--stamp", "--issue", 42, cwd=repo)
         assert r.returncode == 0, r.stdout + r.stderr
         stamp = repo / ".git" / "path-declaration-ok"
-        assert stamp.read_text().splitlines() == ["feature/42-export", "42"]
+        assert stamp.read_text().splitlines() == ["feature/42-export", "42", self.head(repo)]
+
+    def test_stamp_replaces_a_symlink_instead_of_following_it(self, tmp_path):
+        repo = self.repo(tmp_path)
+        outside = tmp_path / "outside.txt"
+        outside.write_text("keep\n")
+        stamp = repo / ".git" / "path-declaration-ok"
+        stamp.symlink_to(outside)
+        r = check(tmp_path, dc.VALID[0], None, "--stamp", "--issue", 42, cwd=repo)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert outside.read_text() == "keep\n"
+        assert not stamp.is_symlink()
+        assert stamp.read_text().splitlines()[0] == "feature/42-export"
+        assert [p.name for p in (repo / ".git").iterdir() if p.name.startswith("tmp")] == []
 
     def test_fail_writes_no_stamp_and_clears_an_old_one(self, tmp_path):
         repo = self.repo(tmp_path)

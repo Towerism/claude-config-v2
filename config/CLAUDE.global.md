@@ -32,7 +32,7 @@ Prose, by owner (all apply `oh-my-claudecode:minimal-prose-discipline`):
 
 Spikes: answer a simple question by running a throwaway script, command or headless `claude -p --setting-sources project` run in a scratch directory (`mktemp -d`; `$CLAUDE_JOB_DIR/tmp` in a background job), never in the repo or against the user's real config, accounts or tracker (`claude -p` still uses their login: keep the prompt and tools minimal). Bound it (timeout, cheapest model). Put the result in the spec. What a spike cannot settle (a user decision, access you lack) stays an open question.
 
-Self-review: before any review agent runs (once before the spec review and once before step 6, not per ralplan round), list every item of this workflow that applies and say for each whether it was done and, if not, why. Go back and do a skipped item. A required item is never left skipped; an advisory one may be, when waived or when doing it adds no value (say why). Post the list on the issue; with no issue (the Research variant), put it in the reply.
+Self-review: before any review agent runs (once before the spec review and once before step 6, not per ralplan round), list every item of this workflow that applies and say for each whether it was done and, if not, why. Go back and do a skipped item. A required item is never left skipped; an advisory one may stay undone only when the user waived it, never on your judgement alone (cite the waiver). Post the list on the issue; with no issue (the Research variant), put it in the reply.
 
 ### Agents by condition
 

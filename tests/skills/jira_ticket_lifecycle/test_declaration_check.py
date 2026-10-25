@@ -16,6 +16,7 @@ GITHUB_SCRIPT = (
 )
 SHARED = (
     "ADVISORY_STEPS",
+    "CONDITIONAL_STEPS",
     "REQUIRED_STEPS",
     "VARIANT_STEPS",
     "DOCS_NA_STEPS",
@@ -49,6 +50,8 @@ def check(env, case, text=None, *extra, cwd=None):
         env.file("declaration.md", text),
         "--comments",
         env.file("comments.json", json.dumps(case["comments"])),
+        "--author",
+        case["author"],
         "--approval-mode",
         case["approval_mode"],
         "--spec",
@@ -88,12 +91,30 @@ class TestValid:
             env.file("d.md", declaration_text(case)),
             "--comments",
             env.file("c.json", json.dumps(case["comments"])),
+            "--author",
+            dc.ME,
             "--approval-mode",
             "manual",
             "--spec",
             env.file("s.md", case["spec"]),
         )
         assert (r.returncode, r.stdout.strip()) == (0, "OK")
+
+    def test_author_is_required(self, env):
+        case = dc.VALID[0]
+        r = env.run(
+            "declaration-check",
+            "--declaration",
+            env.file("d.md", declaration_text(case)),
+            "--comments",
+            env.file("c.json", json.dumps(case["comments"])),
+            "--approval-mode",
+            "manual",
+            "--spec",
+            env.file("s.md", case["spec"]),
+        )
+        assert r.returncode == 2
+        assert "--author" in r.stderr
 
     def test_needs_no_jira_settings(self, env):
         (env.config / "claude-config" / "local.json").unlink()
@@ -111,6 +132,8 @@ class TestMissing:
             *declaration,
             "--comments",
             env.file("c.json", "[]"),
+            "--author",
+            dc.ME,
             "--approval-mode",
             "manual",
             "--spec",
@@ -151,6 +174,22 @@ class TestNotApplicable:
     test_verdicts = verdict_test(dc.NOT_APPLICABLE)
 
 
+class TestAuthor:
+    test_verdicts = verdict_test(dc.AUTHOR)
+
+
+class TestWaiverShape:
+    test_verdicts = verdict_test(dc.WAIVER_SHAPE)
+
+
+class TestConditional:
+    test_verdicts = verdict_test(dc.CONDITIONAL)
+
+
+class TestUrls:
+    test_verdicts = verdict_test(dc.URLS)
+
+
 class TestSeams:
     test_verdicts = verdict_test(dc.SEAMS)
 
@@ -171,7 +210,8 @@ class TestSpecTextRule:
     )
     def test_a_quote_that_reads_like_a_scenario_passes(self, env, words):
         url = dc.WIZARD_URL
-        comments = [*dc.COMMENTS[:2], {"url": url, "body": f"Skip the analyst pass?\n\n{words}"}]
+        body = f"Path declaration answer: Skip the analyst pass?\n\n{words}"
+        comments = [*dc.COMMENTS[:2], {"url": url, "body": body, "author": dc.ME}]
         case = dc.case(
             "scenario quote",
             dc.block("feature", f'- waived: analyst — "{words}" — {url}'),
@@ -183,21 +223,44 @@ class TestSpecTextRule:
 
 class TestStamp:
     def repo(self, env):
-        subprocess.run(
-            ["git", "switch", "-q", "-c", "feature/PAY-142-export"],
-            cwd=env.repo,
-            env={**env.environ(), **GIT_ENV},
-            check=True,
-            capture_output=True,
-        )
+        for args in (
+            ["commit", "-q", "--allow-empty", "-m", "chore: base (PAY-1)"],
+            ["switch", "-q", "-c", "feature/PAY-142-export"],
+        ):
+            subprocess.run(
+                ["git", *args],
+                cwd=env.repo,
+                env={**env.environ(), **GIT_ENV},
+                check=True,
+                capture_output=True,
+            )
         return env.repo
 
-    def test_pass_writes_branch_and_key(self, env):
+    def head(self, repo):
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+        )
+        return out.stdout.strip()
+
+    def test_pass_writes_branch_key_and_head(self, env):
         repo = self.repo(env)
         r = check(env, dc.VALID[0], None, "--stamp", "--key", "PAY-142", cwd=repo)
         assert r.returncode == 0, r.stdout + r.stderr
         stamp = repo / ".git" / "path-declaration-ok"
-        assert stamp.read_text().splitlines() == ["feature/PAY-142-export", "PAY-142"]
+        lines = stamp.read_text().splitlines()
+        assert lines == ["feature/PAY-142-export", "PAY-142", self.head(repo)]
+
+    def test_stamp_replaces_a_symlink_instead_of_following_it(self, env):
+        repo = self.repo(env)
+        outside = env.tmp / "outside.txt"
+        outside.write_text("keep\n")
+        stamp = repo / ".git" / "path-declaration-ok"
+        stamp.symlink_to(outside)
+        r = check(env, dc.VALID[0], None, "--stamp", "--key", "PAY-142", cwd=repo)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert outside.read_text() == "keep\n"
+        assert not stamp.is_symlink()
+        assert stamp.read_text().splitlines()[0] == "feature/PAY-142-export"
 
     def test_fail_writes_no_stamp_and_clears_an_old_one(self, env):
         repo = self.repo(env)

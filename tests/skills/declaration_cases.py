@@ -19,12 +19,39 @@ NO_URL = "https://tracker.example/issues/42#comment-101"
 WIZARD_URL = "https://tracker.example/issues/42#comment-102"
 OTHER_URL = "https://tracker.example/issues/42#comment-103"
 FOREIGN_URL = "https://tracker.example/issues/7#comment-900"
+STRANGER_URL = "https://tracker.example/issues/42#comment-104"
+UNSTRUCTURED_URL = "https://tracker.example/issues/42#comment-105"
+HEAD_ONLY_URL = "https://tracker.example/issues/42#comment-106"
+LOWER_HEAD_URL = "https://tracker.example/issues/42#comment-107"
+ONE_CHAR_URL = "https://tracker.example/issues/42#comment-108"
+
+# The login passed as --author: the account the comments must come from.
+ME = "octo-me"
+STRANGER = "someone-else"
 
 COMMENTS = [
-    {"url": RUN_URL, "body": "Ran the step; notes below."},
-    {"url": NO_URL, "body": "Review the proposed pipeline?\n\nNo"},
-    {"url": WIZARD_URL, "body": "Skip the analyst pass: yes, skip it. The change is one line."},
-    {"url": OTHER_URL, "body": "Unrelated discussion."},
+    {"url": RUN_URL, "body": "Ran the step; notes below.", "author": ME},
+    {
+        "url": NO_URL,
+        "body": "Path declaration answer: Review the proposed pipeline?\n\nNo",
+        "author": ME,
+    },
+    {
+        "url": WIZARD_URL,
+        "body": "Path declaration answer: Skip the analyst pass?\n"
+        "yes, skip it. The change is one line.",
+        "author": ME,
+    },
+    {"url": OTHER_URL, "body": "Unrelated discussion.", "author": ME},
+    {
+        "url": STRANGER_URL,
+        "body": "Path declaration answer: Skip the analyst pass?\nyes, skip it.",
+        "author": STRANGER,
+    },
+    {"url": UNSTRUCTURED_URL, "body": "Skip the analyst pass: yes, skip it.", "author": ME},
+    {"url": HEAD_ONLY_URL, "body": "Path declaration answer: yes, skip it", "author": ME},
+    {"url": LOWER_HEAD_URL, "body": "path declaration answer: Skip?\nyes, skip it", "author": ME},
+    {"url": ONE_CHAR_URL, "body": "Path declaration answer: Skip it?\nN", "author": ME},
 ]
 
 SPEC = "## Goal\nExport the roster.\n"
@@ -52,6 +79,7 @@ def case(name, declaration, exit=1, codes=(), variant="feature", **extra):
         "declaration": declaration,
         "variant": variant,
         "comments": COMMENTS,
+        "author": ME,
         "approval_mode": "manual",
         "spec": SPEC,
         "drop": (),
@@ -281,8 +309,99 @@ VARIANTS = [
     case("hotfix", block("hotfix"), variant="hotfix", exit=0),
 ]
 
+AUTHOR = [
+    case(
+        "run cites another login's comment",
+        block("feature", f"- run: verify — {STRANGER_URL}"),
+        codes=["run-needs-evidence"],
+    ),
+    case(
+        "waiver cites another login's comment",
+        block("feature", f'- waived: analyst — "yes, skip it" — {STRANGER_URL}'),
+        codes=["waiver-not-recorded"],
+    ),
+    case(
+        "checked against another login",
+        block("feature"),
+        author=STRANGER,
+        codes=["run-needs-evidence"],
+    ),
+    case(
+        "comment without an author",
+        block("feature"),
+        comments=[{"url": RUN_URL, "body": "Ran the step; notes below."}],
+        codes=["run-needs-evidence"],
+    ),
+]
+
+WAIVER_SHAPE = [
+    case(
+        "waiver comment without the answer line",
+        block("feature", f'- waived: analyst — "yes, skip it" — {UNSTRUCTURED_URL}'),
+        codes=["waiver-not-recorded"],
+    ),
+    case(
+        "quote only in the answer line",
+        block("feature", f'- waived: analyst — "yes, skip it" — {HEAD_ONLY_URL}'),
+        codes=["waiver-not-recorded"],
+    ),
+    case(
+        "answer line in lower case",
+        block("feature", f'- waived: analyst — "yes, skip it" — {LOWER_HEAD_URL}'),
+        codes=["waiver-not-recorded"],
+    ),
+    case(
+        "one-character quote",
+        block("feature", f'- waived: analyst — "N" — {ONE_CHAR_URL}'),
+        codes=["waiver-not-recorded"],
+    ),
+]
+
+CONDITIONAL = [
+    case(
+        "interview n/a",
+        block("feature", "- n/a: interview — the request is clear"),
+        codes=["waiver-not-recorded"],
+    ),
+    case(
+        "analyst n/a",
+        block("feature", "- n/a: analyst — small change"),
+        codes=["waiver-not-recorded"],
+    ),
+    case(
+        "docs-lookup n/a with a fact",
+        block("feature", "- n/a: docs-lookup — the change uses no SDK or API"),
+        exit=0,
+    ),
+    case(
+        "history-cleanup n/a with a fact",
+        block("feature", "- n/a: history-cleanup — no fixup or WIP commits"),
+        exit=0,
+    ),
+]
+
+URLS = [
+    case(
+        "an empty comment URL is no evidence",
+        block("feature", "- run: verify"),
+        comments=[*COMMENTS, {"url": "", "body": "Ran it.", "author": ME}],
+        codes=["run-needs-evidence"],
+    ),
+    case(
+        "comments with a non-string URL are dropped",
+        block("feature"),
+        comments=[
+            *COMMENTS,
+            {"url": ["x"], "body": "Ran it.", "author": ME},
+            {"url": 7, "body": "Ran it.", "author": ME},
+            {"body": "Ran it.", "author": ME},
+        ],
+        exit=0,
+    ),
+]
+
 ALL = VALID + MISSING + REQUIRED + QUOTES + EVIDENCE + UNKNOWN + MALFORMED + NOT_APPLICABLE
-ALL += SEAMS + VARIANTS
+ALL += SEAMS + VARIANTS + AUTHOR + WAIVER_SHAPE + CONDITIONAL + URLS
 
 
 def script_constant(script, name):
