@@ -14,11 +14,42 @@ oh-my-claudecode (OMC) owns the development workflow. These rules add guardrails
    - `/oh-my-claudecode:ralph`: the work must not stop until verified (long, flaky, or many retries). `team ralph` when it is both.
    - Not `/oh-my-claudecode:autopilot`: it re-plans from an idea and skips the approval gate. Use it only when the user asks for it.
 6. Review: `/oh-my-claudecode:review` on the diff once, before the PR.
-7. Verify: `/oh-my-claudecode:verify`, then `/oh-my-claudecode:pr` for the body. Quote the test, lint and typecheck output before saying done.
+7. Verify: `/oh-my-claudecode:verify`, then `/oh-my-claudecode:pr` for the body. Quote the test, lint and typecheck output before saying done. When step 5 used `team` or `ralph`, run `/oh-my-claudecode:cancel` before pushing: OMC blocks every push while those modes are active.
 8. Merge: only after the user authorizes it; the lifecycle skill closes out.
 
-Prose: apply `oh-my-claudecode:minimal-prose-discipline` to commit messages, issue and PR text, code comments and error messages, and `oh-my-claudecode:agent-doc-discipline` to documents agents consume.
-Text a person reads later (commits, issues, PRs, READMEs, ADRs) is for a cold reader: state the point first, name the issue, file or command instead of "as discussed", and cut AI-tell filler.
+Prose, by owner (all apply `oh-my-claudecode:minimal-prose-discipline`):
+- `oh-my-claudecode:writer`: docs a person reads, code comments, issue titles and text. After tests are green and before step 6, it rewrites the diff's comments.
+- `oh-my-claudecode:git-master`: commit messages, with the issue reference the commit rules need.
+- `/oh-my-claudecode:pr`: the PR body and title.
+- Error strings stay with the code author; chat replies stay with the main loop under `minimal-prose-discipline`.
+- `oh-my-claudecode:agent-doc-discipline` is only for documents agents consume (specs, skill files, agent-read tickets).
+- Text a person reads later is for a cold reader: state the point first, name the issue, file or command instead of "as discussed", and cut AI-tell filler.
+
+Spikes: answer a simple question by running a throwaway script, command or headless `claude -p --setting-sources project` run in a scratch directory (`mktemp -d`; `$CLAUDE_JOB_DIR/tmp` in a background job), never in the repo or against the user's real config, accounts or tracker (`claude -p` still uses their login: keep the prompt and tools minimal). Bound it (timeout, cheapest model). Put the result in the spec. What a spike cannot settle (a user decision, access you lack) stays an open question.
+
+Self-review: before any review agent runs (a spec review or the diff review), list every item of this workflow that applies and say for each whether it was done and, if not, why. Go back and do a skipped item when it still adds value and is not disruptive; otherwise say why not. Post the list on the issue.
+
+### Agents by condition
+
+- Step 1, after `deep-interview` and before the test plan: `oh-my-claudecode:analyst` turns the decided scope into acceptance criteria and catches gaps.
+- Before the spec, when it relies on an SDK or API not yet verified: `oh-my-claudecode:document-specialist`.
+- Before step 6, if the branch has fixup or WIP commits, or commits mixing unrelated changes: `oh-my-claudecode:git-master` cleans history first, so verify runs on the final commits.
+- Before step 6, after any history cleanup, when the diff exceeds 300 changed lines: `oh-my-claudecode:code-simplifier`.
+- Step 6: `review` runs two passes (standards, intent); when the diff is large enough for two, run them as `oh-my-claudecode:code-reviewer` sub-agents; a small diff stays one pass, run by `oh-my-claudecode:code-reviewer`.
+- Step 6, when the diff touches auth, input parsing, secrets, shell, network or deserialization: `oh-my-claudecode:security-reviewer` runs once as a gate outside the review. A CRITICAL blocks and the user decides; it is not a review pass and is not re-run after fixes.
+- Step 7, after review: `oh-my-claudecode:verifier` runs `verify`, never the author.
+- Step 7, when the change is a CLI or interactive tool: `oh-my-claudecode:qa-tester` drives it before verify.
+- When the runner is `team`, these agents are not spawned a second time.
+
+### Variants by request type
+
+Pick by request: Bug, UI, Docs or Research. Anything not stated here follows the numbered steps.
+
+- Bug (a "fix X" or a failing test), after step 2 and on the issue branch: `oh-my-claudecode:debugger` reproduces it with a failing test and makes no fix. Then steps 3-8.
+- Bug, when the cause is unclear: `oh-my-claudecode:tracer` investigates before the fix is planned.
+- UI, after step 2: `oh-my-claudecode:designer` drafts the interface before the test plan, as a spec artifact stored on the issue, not shipped code. Then steps 3-8.
+- Docs only: `oh-my-claudecode:writer` writes the change, after the spec is approved. Steps 2 and 4-8 and Approval apply; step 3 and TDD are skipped.
+- Research, when the request is a question with no code change: `oh-my-claudecode:scientist` for data analysis, with `/oh-my-claudecode:research`. Findings only: no issue (step 2 skipped), no PR.
 
 ### Approval
 

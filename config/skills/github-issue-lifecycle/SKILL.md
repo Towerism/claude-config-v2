@@ -22,7 +22,7 @@ The helper script does every text check and body edit deterministically. Run it 
   base=${CLAUDE_JOB_DIR:+$CLAUDE_JOB_DIR/tmp}; tmp=$(mktemp -d "${base:-${TMPDIR:-/tmp}}/issue-XXXXXX")
   ```
 - **Merging is not yours to decide.** See "Merge and close out".
-- **Prose for people.** Load `oh-my-claudecode:minimal-prose-discipline` with the Skill tool before the first commit, issue, comment or PR text in a session, unless it's already loaded. Someone reading that text months from now, with none of today's context, should understand it: state the point first, and name the issue, file or command instead of "as discussed".
+- **Prose for people.** Load `oh-my-claudecode:minimal-prose-discipline` with the Skill tool before the first commit, issue, comment or PR text in a session, unless it's already loaded. Owners: `oh-my-claudecode:writer` drafts issue text and comments, `oh-my-claudecode:git-master` writes commit messages, `/oh-my-claudecode:pr` writes the PR body. Someone reading that text months from now, with none of today's context, should understand it: state the point first, and name the issue, file or command instead of "as discussed".
 
 ## Usage
 

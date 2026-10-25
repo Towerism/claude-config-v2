@@ -24,7 +24,7 @@ Git conventions (commit format, branch names, rebasing, hotfix, rollback) are in
 - **Text goes in a file.** Write each JSON request body with the Write tool and pass it as `-d @<file>`; never put a title, body or comment on a command line. The one exception is search words (step 1), reduced to letters, digits and single spaces first.
 - **Temp files** go in a fresh directory per run, never in the working tree: `base=${CLAUDE_JOB_DIR:+$CLAUDE_JOB_DIR/tmp}; mktemp -d "${base:-${TMPDIR:-/tmp}}/issue-XXXXXX"`. Shell variables don't persist between Bash calls, so run it once, note the printed path, and write that path out in full in every later command and in every Write call. Where the commands below show `$tmp`, that path goes in its place.
 - **Merging is not yours to decide.** See step 8.
-- **Prose for people.** Load `oh-my-claudecode:minimal-prose-discipline` with the Skill tool before the first commit, issue, comment or PR text in a session, unless it's already loaded. Someone reading that text months from now, with none of today's context, should understand it: state the point first, and name the issue, file or command instead of "as discussed".
+- **Prose for people.** Load `oh-my-claudecode:minimal-prose-discipline` with the Skill tool before the first commit, issue, comment or PR text in a session, unless it's already loaded. Owners: `oh-my-claudecode:writer` drafts issue text and comments, `oh-my-claudecode:git-master` writes commit messages, `/oh-my-claudecode:pr` writes the PR body. Someone reading that text months from now, with none of today's context, should understand it: state the point first, and name the issue, file or command instead of "as discussed".
 
 ## Usage
 
