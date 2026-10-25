@@ -82,6 +82,55 @@ def test_merge_confirm_is_linear_on_dash_heavy_commands():
     run("merge_confirm.py", bash("gh pr " + "-a " * 20000))
 
 
+@pytest.mark.parametrize("command", [
+    "sudo gh pr merge 5", "sudo -u root -E -n gh pr merge 5", "doas gh pr merge 5", "nohup gh pr merge 5",
+    "exec gh pr merge 5", "time -p gh pr merge 5", "timeout 5 gh pr merge 5", "nice -n 5 gh pr merge 5",
+    "stdbuf -oL gh pr merge 5", "/usr/bin/gh pr merge 5", "GIT_DIR=x gh pr merge 5", "env -C x gh pr merge 5",
+    "env -S 'gh pr merge 5'", "bash -lc 'gh pr merge 5'", "sh -ec 'gh pr merge 5'", "/bin/bash -c 'gh pr merge 5'",
+    "zsh -c 'gh pr merge 5'", "bash -c 'bash -c \"gh pr merge 5\"'", "echo 'gh pr merge 5' | bash",
+    "bash -s <<'EOF'\ngh pr merge 5\nEOF", "sudo bash -c 'gh pr merge 5'", "`gh pr merge 5`",
+    "echo 5 | xargs -n 1 gh pr merge", "eval eval 'gh pr merge 5'",
+    "gh api graphql -f query=\"$(cat <<'EOF'\nmutation { mergePullRequest(input: {}) { clientMutationId } }\nEOF\n)\"",
+    "echo gh pr merge 5; bash",  # accepted false ask: the parser keeps no separator, so `;` counts as `|`
+])
+def test_merges_behind_prefixes_and_shell_runners_ask(command):
+    out = json.loads(run("merge_confirm.py", bash(command)))
+    assert out["hookSpecificOutput"]["permissionDecision"] == "ask"
+
+
+@pytest.mark.parametrize("command", [
+    "bash -c 'echo \"gh pr merge 5\"'", "sh -c 'grep \"gh pr merge\" notes.md'", "bash merge.sh gh pr merge 5",
+    "printf 'gh pr merge 5'", "xargs echo gh pr merge 5", "sudo echo gh pr merge 5", "command -v gh pr merge",
+    'bash -c "$CMD"',
+    "tea pulls merge 5",  # known gap: tea's own merge command never asked, and a new rule is out of scope
+    "cat <<EOF\n$(gh pr merge 5)\nEOF",  # accepted miss: a heredoc body is data unless a shell reads it
+    "echo " + "$(" * 40 + "gh pr merge 5" + ")" * 40,  # nesting past MAX_DEPTH is unparsed and passes
+    "eval " * 40 + "gh pr merge 5",  # so is a re-parse chain past MAX_DEPTH
+])
+def test_merge_confirm_ignores_text_no_shell_runs(command):
+    assert run("merge_confirm.py", bash(command)) == ""
+
+
+@pytest.mark.parametrize("command", [
+    'bash -c "gh pr merge 5 --squash"', "sudo gh pr merge 5 -s", "echo 'gh pr merge 5 -s' | sh",
+])
+def test_squash_through_prefixes_and_shell_runners_gets_the_squash_reason(command):
+    text = reason(command)
+    assert "squash" in text.lower() and text != PLAIN_REASON
+
+
+@pytest.mark.parametrize("command", [
+    "bash -c '" * 20000 + "gh pr merge 5",
+    "eval " * 20000 + "gh pr merge 5",
+    "$(" * 20000 + "gh pr merge 5",
+    "gh pr view 5;" * 100000,
+], ids=["bash-c-nesting", "eval-eval", "substitution-nesting", "long"])
+def test_merge_confirm_stays_linear_on_nested_and_long_commands(command):
+    start = time.monotonic()
+    run("merge_confirm.py", bash(command))
+    assert time.monotonic() - start < 5
+
+
 @pytest.fixture
 def machine(tmp_path):
     home = tmp_path / "claude"
@@ -1439,7 +1488,7 @@ def test_every_hook_entry_outlasts_the_hooks_own_deadline():
         for group in groups:
             for hook in group["hooks"]:
                 assert hook["timeout"] == 10, hook["command"]
-    for name in ("bash_guard.py", "skill_gate.py", "secrets_guard.py"):
+    for name in ("bash_guard.py", "skill_gate.py", "secrets_guard.py", "merge_confirm.py"):
         assert hook_module(name).DEADLINE_SECONDS == 5, name
 
 
@@ -1797,3 +1846,40 @@ def test_secrets_guard_past_its_deadline_writes_only_the_fixed_code():
 def test_bash_guard_past_its_deadline_writes_nothing():
     patch = "def late(payload):\n    raise hook.Timeout\nhook.evaluate = late\n"
     assert driven("bash_guard.py", patch, bash("git status")) == (0, b"", b"")
+
+
+def test_merge_confirm_past_its_deadline_writes_nothing():
+    patch = "import time\nhook.DEADLINE_SECONDS = 1\nhook.merges_a_pr = lambda command: time.sleep(5)\n"
+    assert driven("merge_confirm.py", patch, bash("gh pr merge 5")) == (0, b"", b"")
+
+
+# The hooks' copies of bash_guard's shell parser; a hook may wrap or subclass them, never edit them.
+PARSER_NODES = (
+    "Word", "Segment", "Parser", "command_words", "Unparsed",
+    "PLAIN", "EXPANSION", "ASSIGNMENT", "RESERVED", "REPO_VARIABLES", "MAX_DEPTH",
+)
+
+
+def parser_nodes(source):
+    found = {}
+    for node in ast.parse(source).body:
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef)):
+            name = node.name
+        elif isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name):
+            name = node.targets[0].id
+        else:
+            continue
+        if name in PARSER_NODES:
+            found[name] = ast.dump(node)
+    return found
+
+
+@pytest.mark.parametrize("name", ["merge_confirm.py"])
+def test_hook_parser_copies_equal_bash_guards(name):
+    original = parser_nodes((HOOKS / "bash_guard.py").read_text())
+    source = (HOOKS / name).read_text()
+    assert set(original) == set(PARSER_NODES)
+    assert parser_nodes(source) == original
+    for old, new in (("MAX_DEPTH = 32", "MAX_DEPTH = 33"), ("self.i += 2", "self.i += 3")):
+        mutated = source.replace(old, new, 1)
+        assert mutated != source and parser_nodes(mutated) != original, old
