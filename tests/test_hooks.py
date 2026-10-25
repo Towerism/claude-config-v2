@@ -730,6 +730,13 @@ def test_bash_reading_a_secret_file_asks(fake_home, command):
     assert decision(guard(bash(command), fake_home)) == "ask"
 
 
+def test_the_bash_ask_reason_names_the_reader_rule(fake_home):
+    out = json.loads(guard(bash("cat .env"), fake_home))["hookSpecificOutput"]
+    assert out["permissionDecisionReason"] == (
+        "A listed reader in this command takes a secret file (.env or deny-terms). Confirm you want it read."
+    )
+
+
 @pytest.mark.parametrize("command", [
     "printf '%s' .env", "git log --grep deny-terms", "git log .env", "grep .env README.md", "rg deny-terms docs",
     "jq .env x.json", "sed s/.env/x/ notes", "awk /.env/ notes", "cat <<EOF\n.env\nEOF", "cat <<E\ncat .env\nE", "bash -c 'echo .env'",

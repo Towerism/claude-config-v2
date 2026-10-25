@@ -73,7 +73,7 @@ MAX_ALTERNATIVES = 16
 MAX_BRACE_GROUPS = 16
 
 DENY_REASON = "Secret files (.env, deny-terms) are off limits: do not read, search or list them."
-ASK_REASON = "This command names a secret file (.env or deny-terms). Confirm you want it touched."
+ASK_REASON = "A listed reader in this command takes a secret file (.env or deny-terms). Confirm you want it read."
 
 
 def names_secret(name: str) -> bool:
