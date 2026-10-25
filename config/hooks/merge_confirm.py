@@ -165,10 +165,12 @@ def session_bypassed(payload: dict) -> bool:
 
 
 def main() -> None:
-    try:
+    parsed = False
+    with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
         payload = json.loads(sys.stdin.buffer.read().decode("utf-8"))
         command = payload["tool_input"]["command"]
-    except Exception:
+        parsed = True
+    if not parsed:
         return
     if session_bypassed(payload):
         return
