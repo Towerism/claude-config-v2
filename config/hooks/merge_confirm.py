@@ -18,6 +18,9 @@ import sys
 
 REASON = "Merging needs your confirmation (global rule: merge only with your authorization)"
 
+SQUASH_REASON = "Squash merges are against the global rule (merge commit or rebase, never squash); merging also needs your authorization"
+SQUASH_FLAG = re.compile(r"--squash|-[A-Za-z]*s[A-Za-z]*")
+
 GH_END = re.compile(r"\bgh$")  # a word ending in a standalone "gh": gh, "gh, x&&gh
 MERGE_WORD = re.compile(r"merge\b")
 GH_API = re.compile(r"\b(?:gh|tea)\s+api\b")  # tea is the Gitea CLI
@@ -47,14 +50,26 @@ def _step(state: State, word: str) -> set[State]:
 
 def merges_a_pr(command: str) -> bool:
     """Whether the command merges a pull request through `gh`."""
+    return _pr_merge_args(command) is not None or _calls_merge_api(command)
+
+
+def squashes(command: str) -> bool:
+    """Whether the `gh pr merge` in the command passes `--squash` or a short flag group holding `s`."""
+    args = _pr_merge_args(command)
+    return args is not None and any(SQUASH_FLAG.fullmatch(word) for word in args)
+
+
+def _pr_merge_args(command: str) -> list[str] | None:
+    """The words after the `merge` of a `gh [flags] pr [flags] merge`; None when there is none."""
     states: set[State] = set()
-    for word in command.split():
+    words = command.split()
+    for i, word in enumerate(words):
         if MERGE_WORD.match(word) and any(phase == AFTER_PR for phase, _ in states):
-            return True
+            return words[i + 1 :]
         states = {s for state in states for s in _step(state, word)}
         if GH_END.search(word):
             states.add((BEFORE_PR, START))
-    return _calls_merge_api(command)
+    return None
 
 
 def _calls_merge_api(command: str) -> bool:
@@ -86,7 +101,7 @@ def main() -> None:
                     "hookSpecificOutput": {
                         "hookEventName": "PreToolUse",
                         "permissionDecision": "ask",
-                        "permissionDecisionReason": REASON,
+                        "permissionDecisionReason": SQUASH_REASON if squashes(command) else REASON,
                     }
                 }
             )

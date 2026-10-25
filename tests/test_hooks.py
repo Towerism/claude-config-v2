@@ -124,6 +124,37 @@ def test_other_events_and_bad_input_print_nothing(machine):
     assert start(home, env) is None
 
 
+# merge_confirm: the squash reason
+
+PLAIN_REASON = "Merging needs your confirmation (global rule: merge only with your authorization)"
+
+
+def reason(command):
+    return json.loads(run("merge_confirm.py", bash(command)))["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize("command", [
+    "gh pr merge 42 --squash",
+    "gh pr merge 42 -s",
+    "gh pr merge -s 42 --delete-branch",
+    "gh -R o/r pr merge 42 -ds",
+])
+def test_squash_merge_gets_the_squash_reason(command):
+    text = reason(command)
+    assert "squash" in text.lower() and "against" in text and text != PLAIN_REASON
+
+
+@pytest.mark.parametrize("command", [
+    "gh pr merge 42 --merge",
+    "gh pr merge 42 --rebase --delete-branch",
+    "gh pr merge 42 --subject sq",
+    "git merge --squash x && gh pr merge 42",
+    "gh api repos/o/r/pulls/3/merge -X PUT -f merge_method=merge",
+])
+def test_plain_merge_keeps_the_usual_reason(command):
+    assert reason(command) == PLAIN_REASON
+
+
 # skill_gate
 
 GIT_ENV = {
