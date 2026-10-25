@@ -43,6 +43,7 @@ def bash(command):
     "gh api graphql -f query='mutation { mergePullRequest(input: {}) { clientMutationId } }'",
     "gh pr merge 5",
     "gh api -X PUT repos/o/r/pulls/3/merge",
+    "gh api --paginate -XPUT -H 'Accept: x' repos/o/r/pulls/3/merge -f body=/x",
     "tea api repos/o/r/pulls/3/merge",
     "gh api graphql <<'EOF'\nmutation { mergePullRequest(input: {}) { clientMutationId } }\nEOF",
     'bash -c "gh pr merge 5"',
@@ -68,6 +69,11 @@ def test_merge_confirm_ignores_commands_that_only_mention_a_merge(command):
 
 @pytest.mark.parametrize("command", [
     "gh pr view 42", "git merge main", "gh pr create --title merge", "ls",
+    # Only the endpoint operand of gh api or tea api counts as a /merge path, not a flag value.
+    'gh api repos/o/r/issues/5/comments -f body="see /merge docs"',
+    "gh api repos/o/r/issues/5/comments -F 'body=/merge'", "gh api repos/o/r/issues/5/comments --raw-field=body=/merge",
+    "gh api repos/o/r/issues -H 'X-Note: /merge' --input ./merge/body.json",
+    "tea api repos/o/r/issues/5/comments -d 'see /merge'",
 ])
 def test_other_commands_pass_silently(command):
     assert run("merge_confirm.py", bash(command)) == ""

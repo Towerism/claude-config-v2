@@ -6,8 +6,9 @@ VAR=value words and the wrappers `env`, `command`, sudo, doas, nohup, exec, time
 nice -n N, stdbuf and xargs. It asks for:
 
 - `gh [flags] pr [flags] merge`;
-- `gh api` or `tea api` (tea is the Gitea CLI) with a `/merge` path word, or with
-  `mergePullRequest` or `enablePullRequestAutoMerge` among its words or in its heredoc body.
+- `gh api` or `tea api` (tea is the Gitea CLI) with a `/merge` path in an operand, the endpoint,
+  not in a flag value such as `-f body=...` or `-H`; or with `mergePullRequest` or
+  `enablePullRequestAutoMerge` among any of its words or in its heredoc body.
 
 The text that `bash|sh|zsh -c`, `eval` and `env -S` run is parsed again, and so are a heredoc fed to
 a shell (`bash <<E`, `cat <<E | bash`) and the echo or printf text before a bare shell
@@ -43,6 +44,12 @@ API_MERGE = re.compile(r"/merge\b")
 # GraphQL mutations that merge now or queue a merge (auto-merge).
 MERGE_MUTATION = re.compile(r"\b(?:mergePullRequest|enablePullRequestAutoMerge)\b")
 FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
+# gh api and tea api flags that take the next word as their value; that value is not the endpoint.
+API_VALUE_FLAGS = {
+    "-X", "--method", "-H", "--header", "-f", "-F", "--field", "--raw-field", "--input", "-q", "--jq",
+    "-t", "--template", "-p", "--preview", "--hostname", "--cache", "-d", "--data", "--body", "-o",
+    "--output", "-l", "--login", "-r", "--repo",
+}
 
 # bash_guard.py's shell parser, copied unchanged: test_hook_parser_copies_equal_bash_guards compares them.
 
@@ -481,15 +488,34 @@ def pr_merge_args(words: list[Word]) -> list[Word] | None:
     return None if i is None else words[i:]
 
 
+def api_operands(words: list[Word]) -> list[str] | None:
+    """The operands after `api` of a `gh api` or `tea api` call, its endpoint among them; flags and
+    the values of API_VALUE_FLAGS are left out. None for any other command."""
+    if os.path.basename(words[0].text) not in ("gh", "tea"):
+        return None
+    i = subcommand(words, 1, "api")
+    if i is None:
+        return None
+    operands = []
+    while i < len(words):
+        text = words[i].text
+        i += 1
+        if text in API_VALUE_FLAGS:
+            i += 1
+        elif not (len(text) > 1 and text.startswith("-")):
+            operands.append(text)
+    return operands
+
+
 def calls_merge_api(words: list[Word], seg: Segment) -> bool:
-    """Whether a `gh api` or `tea api` call merges: a /merge path word, or a merge mutation in its words
-    or heredoc, or in the words or heredoc of a $(...) or backtick among its words."""
-    if os.path.basename(words[0].text) not in ("gh", "tea") or subcommand(words, 1, "api") is None:
+    """Whether a `gh api` or `tea api` call merges: a /merge path operand, or a merge mutation in its
+    words or heredoc, or in the words or heredoc of a $(...) or backtick among its words."""
+    operands = api_operands(words)
+    if operands is None:
         return False
-    texts = [w.text for w in words]
-    if any(API_MERGE.search(t) for t in texts):
+    if any(API_MERGE.search(t) for t in operands):
         return True
-    bodies = texts + seg.heredocs
+    bodies = [w.text for w in words] + seg.heredocs
     for word in words:
         for inner in word.subs:
             for sub in inner:
@@ -542,8 +568,8 @@ def squashes(command: str | list[list[Word]]) -> bool:
         args = pr_merge_args(words)
         if args is not None and any(SQUASH_FLAG.fullmatch(w.text) for w in args):
             return True
-        texts = [w.text for w in words]
-        if any(API_MERGE.search(t) for t in texts) and sends_squash_method(texts):
+        operands = api_operands(words) or []
+        if any(API_MERGE.search(t) for t in operands) and sends_squash_method([w.text for w in words]):
             return True
     return False
 
