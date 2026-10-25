@@ -289,6 +289,16 @@ When the session's first prompt starts `ralph` or `autopilot` (`/ralph`, `/oh-my
 - Limits: `host_default` on a fresh SessionStart (`source: startup`) runs before any prompt exists, so only the rule text covers it. A trigger past the first 256 KB of the transcript is missed by the hooks while the model still applies the rule.
 - Accepted: the check trusts the transcript file, which the model could edit, and the bypass lasts the whole session, also after `/cancel`. The hooks are already advisory (see Known limits); branch protection is the control that holds.
 
+## Addendum: the Bash asks parse the command (#9)
+
+`merge_confirm` and the Bash ask of `secrets_guard` scanned the raw command, so a command that only mentioned a merge or a secret file asked: `echo "gh pr merge 5"`, `git commit -m "docs: ignore .env files"`, `grep -n ".env" README.md`, a comment. Each false ask teaches people to click through the real one.
+
+- **Shared parser.** Each hook carries a verbatim copy of `bash_guard.py`'s parser (`Word`, `Segment`, `Parser`, `command_words` and the constants they use), because each hook is deployed alone and runs with `python3 -I`. `test_hook_parser_copies_equal_bash_guards` compares the copies by `ast` and fails on a one-character change. Hook-side wrappers skip the prefixes `sudo`, `doas`, `nohup`, `exec`, `time -p`, `timeout N`, `nice -n N`, `stdbuf`, `xargs`, `GIT_DIR=` and `env -C`, and parse again the text that `bash|sh|zsh -c`, `eval` and `env -S` run, a heredoc fed to a shell and echo or printf text before a bare shell. `bash_guard.py` is unchanged.
+- **`merge_confirm` asks at command position.** It asks for `gh [flags] pr [flags] merge`, and for `gh api` or `tea api` with a `/merge` path word or a merge mutation in its words or heredoc. Quoted text, heredoc bodies and comments of any other command never ask. The squash reason reads the parsed words. A 5-second deadline was added; past it the hook prints nothing.
+- **`secrets_guard` Bash asks on the reader allowlist.** This replaces "a command token holds a secret name" (stage 3 addendum). It asks only when a secret path is an operand of a listed reader at command position: viewers, filters (the file, not the pattern), movers, archivers and dumpers, `git diff`, `git log -p` and `git show`, `source` and `.`, an input `<`, `docker --env-file`, and the file forms of `curl`, `wget` and `dd`. A `Parser` subclass keeps the `<` target that the copy drops. `X=.env cmd` now passes.
+- **Silent on what the parser cannot model.** Nesting past `MAX_DEPTH` (32), with each re-parse counted, passes in both hooks, as in `bash_guard`.
+- **Accepted misses, pinned by tests:** output redirections, `cd`, `ls`, `rm`, `vim`, `python3 x.py .env`, `git show HEAD:.env`, `echo .env | xargs cat`, `find -exec cat`, `cat $(echo .env)`, quoted `cat '.en?'`, and a `$(gh pr merge)` inside a heredoc body. `tea pulls merge` still does not ask. An unlisted reader gets past `secrets_guard`; both hooks stay reminders, not a security boundary.
+
 ## Consequences
 
 - Every agent in `OMC_AGENTS` has a bullet. `test_every_omc_agent_has_a_pathway` fails when one loses it.
