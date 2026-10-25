@@ -1,7 +1,8 @@
 """PreToolUse(Bash) hook: every PR merge waits for the user's click.
 
-Prints a permissionDecision of "ask" for `gh … pr … merge`, `gh api …/merge`, `tea api …/merge`
-and a GraphQL `mergePullRequest` sent with `gh api`; prints nothing otherwise.
+Prints a permissionDecision of "ask" for `gh … pr … merge`, `gh api …/merge`, `tea api …/merge`,
+and for a GraphQL `mergePullRequest` or `enablePullRequestAutoMerge` sent with `gh api`. A squash
+merge gets its own reason, because the global rule forbids squash. Prints nothing otherwise.
 Always exits 0 and never denies. It is a reminder that catches the usual spellings,
 not a security boundary: quoting tricks, aliases and `curl` get past it. The control that
 holds is branch protection on the remote.
@@ -19,12 +20,15 @@ import sys
 REASON = "Merging needs your confirmation (global rule: merge only with your authorization)"
 
 SQUASH_REASON = "Squash merges are against the global rule (merge commit or rebase, never squash); merging also needs your authorization"
+# gh pr merge's --squash, or a short flag group that holds s.
 SQUASH_FLAG = re.compile(r"--squash|-[A-Za-z]*s[A-Za-z]*")
 
-GH_END = re.compile(r"\bgh$")  # a word ending in a standalone "gh": gh, "gh, x&&gh
+# A word that ends in `gh` as a command: `gh`, `"gh`, or `x&&gh`.
+GH_END = re.compile(r"\bgh$")
 MERGE_WORD = re.compile(r"merge\b")
 GH_API = re.compile(r"\b(?:gh|tea)\s+api\b")  # tea is the Gitea CLI
 API_MERGE = re.compile(r"/merge\b")
+# GraphQL mutations that merge now or queue a merge (auto-merge).
 MERGE_MUTATION = re.compile(r"\b(?:mergePullRequest|enablePullRequestAutoMerge)\b")
 
 # Where a scan of `gh [flags] pr [flags] merge` stands after a word: before or
@@ -68,7 +72,7 @@ def _pr_merge_args(command: str) -> list[str] | None:
             return words[i + 1 :]
         states = {s for state in states for s in _step(state, word)}
         if GH_END.search(word):
-            states.add((BEFORE_PR, START))
+            states.add((BEFORE_PR, START))  # a new gh command starts a new scan
     return None
 
 
@@ -76,7 +80,7 @@ def _calls_merge_api(command: str) -> bool:
     """`gh api` followed by a /merge path on the same line, or by mergePullRequest anywhere."""
     first = GH_API.search(command)
     if first and MERGE_MUTATION.search(command, first.end()):
-        return True  # a GraphQL query often spans several lines
+        return True  # a GraphQL body often spans lines, so the mutation may sit on any line after gh api
     scanned_to = -1
     for m in GH_API.finditer(command):
         if m.end() <= scanned_to:

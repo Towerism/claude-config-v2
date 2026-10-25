@@ -1,13 +1,16 @@
-"""Skill gate: review context from git facts, and an ask before the model starts autopilot.
+"""Skill gate: review pre-check from git facts, and an ask before the model starts autopilot.
 
 Events: PreToolUse (tool_name Skill, name in tool_input.skill) and UserPromptExpansion
-(name in command_name). On `review` it prints agent context naming code-simplifier (diff over
-300 lines), git-master (fixup or WIP commits) and security-reviewer (a category hit), using
-integers and fixed names only. On PreToolUse only, `autopilot` prints an "ask"; the user-typed
-/autopilot arrives as UserPromptExpansion and passes. Always exits 0.
+(name in command_name). On a review skill it prints context naming the agent to run first:
+code-simplifier (diff over 300 changed lines), git-master (fixup or WIP commits) and
+security-reviewer (a secret-prone category in the diff). It uses integers and fixed names only.
+On PreToolUse, `autopilot` prints an "ask": the model must not start autopilot unprompted. A
+typed /autopilot arrives as UserPromptExpansion and passes. Always exits 0.
 
-Git runs hardened: no repo config that executes code, no external diff or textconv, no GIT_*
-variables, git found once by absolute path, output capped at 64 KiB, one 5-second deadline.
+Git runs hardened. A diff in a repo with core.fsmonitor or diff.external set runs those
+programs (a spike left marker files). The flags override that config, GIT_* variables are
+dropped, git is found once on a fixed PATH, output is capped at 64 KiB, and one 5-second
+deadline covers every git call.
 """
 
 import json
@@ -22,8 +25,9 @@ import time
 DEADLINE_SECONDS = 5
 CAP = 64 * 1024
 LARGE_DIFF = 300
-SAFE_PATH = "/usr/local/bin:/usr/bin:/bin"
+SAFE_PATH = "/usr/local/bin:/usr/bin:/bin"  # git is looked up here, never on the caller's PATH
 
+# Skill names are short tokens; anything else is ignored before git runs.
 NAME = re.compile(r"[a-z0-9-]+(:[a-z0-9-]+)?")
 REVIEW = {"review", "omc-review", "oh-my-claudecode:review", "oh-my-claudecode:omc-review"}
 AUTOPILOT = {"autopilot", "oh-my-claudecode:autopilot"}
@@ -40,9 +44,11 @@ CATEGORIES = {
     "deserialization": re.compile(r"\b(pickle|marshal|yaml\.load|ObjectInputStream)"),
 }
 
+# Override repo config that would run programs (see the module docstring).
 GIT_FLAGS = [
     "--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "diff.external=",
 ]
+# A repo's diff driver or textconv filter is a program; keep diffs to built-in output.
 DIFF_FLAGS = ["--no-ext-diff", "--no-textconv"]
 
 
@@ -81,6 +87,7 @@ class Git:
             proc.kill()
             proc.wait()
             proc.stdout.close()
+        # -9 is our own kill in `finally`, sent after git closed stdout: the output is complete.
         if size < CAP and proc.returncode not in (0, -9):
             return None
         return b"".join(chunks).decode("utf-8", errors="replace")
@@ -107,12 +114,14 @@ def changed_lines(numstat: str) -> int:
 
 
 def security_hits(paths: str, diff: str) -> list[str]:
+    """The categories hit by changed paths or added lines; removed lines do not count."""
     added = [line[1:] for line in diff.splitlines() if line.startswith("+") and not line.startswith("+++")]
     haystack = paths.splitlines() + added
     return [name for name, pattern in CATEGORIES.items() if any(pattern.search(text) for text in haystack)]
 
 
 def review_context(cwd: str) -> str | None:
+    """The review pre-check for the branch against its merge-base with the default branch, or None."""
     git = Git(cwd)
     ref = default_ref(git)
     if ref is None:
@@ -127,7 +136,7 @@ def review_context(cwd: str) -> str | None:
     if lines > LARGE_DIFF:
         parts.append(f"the diff is {lines} changed lines (over {LARGE_DIFF}): run oh-my-claudecode:code-simplifier first")
     subjects = git.run("log", "--format=%s", f"{base}..HEAD") or ""
-    if any(FIXUP.match(s) or WIP.match(s) for s in subjects.splitlines()):
+    if any(FIXUP.match(s) or WIP.match(s) for s in subjects.splitlines()):  # history cleanup first
         parts.append("the branch has fixup or WIP commits: run oh-my-claudecode:git-master to clean the history first")
     paths = git.run("diff", "--name-only", *DIFF_FLAGS, base) or ""
     patch = git.run("diff", "-U0", *DIFF_FLAGS, base) or ""
@@ -163,6 +172,7 @@ def main() -> None:
     try:
         if name in AUTOPILOT and event == "PreToolUse":
             emit(event, permissionDecision="ask", permissionDecisionReason=AUTOPILOT_REASON)
+        # A NUL byte would make subprocess raise; such a cwd is skipped, not reported.
         elif name in REVIEW and isinstance(cwd, str) and "\0" not in cwd:
             text = review_context(cwd)
             if text:

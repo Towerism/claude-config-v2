@@ -20,7 +20,9 @@ directory after the `cd` steps, else the payload's cwd. It asks when:
 
 Anything it cannot determine passes. Every decision is "ask" with fixed reason strings; the only
 values added are counts and fixed pattern names. Not a security boundary: aliases, eval and
-scripts get past it; branch protection on the remote is the control that holds.
+scripts get past it; branch protection on the remote is the control that holds. OMC's
+git-guardrails hook covers only active OMC modes; this hook covers interactive sessions
+(ADR-0004).
 
 Hardening: git runs by absolute path with a fixed argv, no repo config that executes code, no
 external diff or textconv, no GIT_* variables, output capped at 64 KiB. A file a command names is
@@ -41,18 +43,23 @@ import time
 
 DEADLINE_SECONDS = 5
 CAP = 64 * 1024
+# Total bytes of untracked files read per command; past it, their contents are not scanned.
 UNTRACKED_BUDGET = 1024 * 1024
+# Nesting limit for $(...) and `...`; deeper input is unparsed and passes.
 MAX_DEPTH = 32
+# Longer first lines pass unchecked (see first_subject).
 SUBJECT_MAX = 200
-SAFE_PATH = "/usr/local/bin:/usr/bin:/bin"
+SAFE_PATH = "/usr/local/bin:/usr/bin:/bin"  # git is looked up here, never on the caller's PATH
 
+# Override repo config that would run programs (see the module docstring).
 GIT_FLAGS = [
     "--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "diff.external=",
 ]
+# No color codes, so added_lines sees plain "+" lines; no external or textconv diff programs.
 DIFF_FLAGS = ["--no-ext-diff", "--no-textconv", "--no-color"]
 
-# The subject rules are the lifecycle scripts' own (github-issue-lifecycle/scripts/issue_lifecycle.py,
-# jira-ticket-lifecycle/scripts/ticket_lifecycle.py); a test compares them with `ast`.
+# Copies of the lifecycle scripts' subject rules (github-issue-lifecycle/scripts/issue_lifecycle.py,
+# jira-ticket-lifecycle/scripts/ticket_lifecycle.py). A test compares them with `ast`, so they cannot drift.
 CC_TYPES = (
     "feat",
     "fix",
@@ -71,11 +78,14 @@ ISSUE_REF_RE = re.compile(r"\((?:[\w.-]+/[\w.-]+)?#\d+\)$")
 TICKET_REF_RE = re.compile(r" \(([A-Z][A-Z0-9_]{1,9}-[0-9]+)\)$")
 RELEASE_PREFIX = "chore(release):"
 
+# The branch shape the lifecycle skills create: type/{issue}-slug.
 LIFECYCLE_BRANCH = re.compile(r"(feature|fix|hotfix|docs|chore)/(\d+|[A-Z][A-Z0-9]+-\d+)-[a-z0-9-]+")
+# Branches other tools create (improvement runs, experiments, OMC team workers); rule 4 skips them.
 EXEMPT_PREFIXES = ("improve/", "experiment/", "omc-team/")
 
 # Secret file: the same definition as secrets_guard.py; a test keeps them equal.
 SAFE_SUFFIXES = {"example", "sample", "template"}
+# Token shapes for rule 5, matched on added lines only.
 TOKENS = {
     "sk": re.compile(r"\bsk-[A-Za-z0-9]{20,}"),
     "ghp": re.compile(r"\bghp_[A-Za-z0-9]{36}"),
@@ -92,16 +102,21 @@ SECRET_REASON = "The commit content holds {files} secret file name(s) and {token
 LABEL_REASON = "Adding the approved label needs your confirmation (global rule: set no approval marker yourself)"
 
 EXPANSION = "\0"  # stands in a word for $VAR, $(...) or `...`; a command holding a real NUL is ignored
+# A run of ordinary characters; quotes, $, backslashes and globs are handled one at a time.
 PLAIN = re.compile(r"[^\s;&|()<>'\"\\$`*?\[]+")
 ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+# Shell keywords that may precede a command name; command_words skips them.
 RESERVED = {"if", "then", "else", "elif", "do", "while", "until", "!", "{", "time"}
+# Variables that choose another repo; a command that sets one is not judged (ADR-0004, deviation 7).
 REPO_VARIABLES = ("GIT_DIR=", "GIT_WORK_TREE=", "GIT_INDEX_FILE=")
 
 
+# The 5-second deadline passed: the hook passes silently.
 class Timeout(Exception):
     pass
 
 
+# Input beyond what the parser models (nesting past MAX_DEPTH): the hook passes.
 class Unparsed(Exception):
     pass
 
@@ -154,12 +169,12 @@ class Parser:
         seg = self.new_segment()
         while self.i < self.n:
             c = s[self.i]
-            if c == closer:
+            if c == closer:  # the end of the $(...) or `...` this call parses
                 self.i += 1
                 return
             if c in " \t\r":
                 self.i += 1
-            elif c == "\n":
+            elif c == "\n":  # a heredoc body starts after the newline that ends its command line
                 self.i += 1
                 self.read_heredocs()
                 seg = self.new_segment()
@@ -168,6 +183,7 @@ class Parser:
             elif c == "#":
                 end = s.find("\n", self.i)
                 self.i = self.n if end < 0 else end
+            # &> redirects stdout and stderr; it does not separate commands.
             elif c == "&" and s.startswith(">", self.i + 1):
                 self.i += 1
                 self.redirection(seg, closer, depth)
@@ -215,6 +231,7 @@ class Parser:
             strip_tabs = s.startswith("-", self.i)
             self.i += strip_tabs
             self.skip_blanks()
+            # The body is read at the next newline (read_heredocs).
             self.pending.append((self.word(closer, depth).text, strip_tabs, seg))
             return
         while self.i < self.n and s[self.i] in "<>&|":
@@ -229,6 +246,7 @@ class Parser:
         parts: list[str] = []
         while self.i < self.n:
             c = s[self.i]
+            # A closer ends the $(...) or `...` that this call is parsing.
             if c in " \t\r\n;&|()<>" or c == closer:
                 break
             plain = PLAIN.match(s, self.i)
@@ -244,6 +262,7 @@ class Parser:
                 self.i = min(end + 1, self.n)
             elif c == '"':
                 self.double_quoted(w, parts, depth)
+            # A backslash quotes the next character; backslash-newline joins two lines.
             elif c == "\\":
                 if self.i < self.n:
                     if s[self.i] != "\n":
@@ -254,7 +273,7 @@ class Parser:
             elif c == "`":
                 w.subs.append(self.substitution("`", depth))
                 parts.append(EXPANSION)
-            else:  # * ? [
+            else:  # * ? [ make the word a pattern; git add treats such a word as broad
                 w.glob = True
                 parts.append(c)
         w.text = "".join(parts)
@@ -285,7 +304,7 @@ class Parser:
         if nxt == "(":
             self.i += 1
             w.subs.append(self.substitution(")", depth))
-        elif nxt == "{":
+        elif nxt == "{":  # ${...}: the value is unknown, so skip to the closing brace
             end = s.find("}", self.i)
             self.i = self.n if end < 0 else end + 1
         elif nxt == "'" and not quoted:  # $'...': escapes are not decoded, so the value is unknown
@@ -293,7 +312,7 @@ class Parser:
             while self.i < self.n and s[self.i] != "'":
                 self.i += 2 if s[self.i] == "\\" else 1
             self.i = min(self.i + 1, self.n)
-        elif nxt and nxt in "@*#?$!-0123456789":
+        elif nxt and nxt in "@*#?$!-0123456789":  # special parameters ($1, $@, ...): value unknown
             self.i += 1
         elif nxt and (nxt.isalpha() or nxt == "_"):
             while self.i < self.n and (s[self.i].isalnum() or s[self.i] == "_"):
@@ -304,6 +323,7 @@ class Parser:
         parts.append(EXPANSION)
 
     def substitution(self, closer: str, depth: int) -> list[Segment]:
+        """Parse the commands inside a $(...) or `...`; return the segments it added."""
         start = len(self.segments)
         self.commands(closer, depth + 1)
         return self.segments[start:]
@@ -317,13 +337,14 @@ def command_words(seg: Segment) -> list[Word]:
         text = words[i].text
         if ASSIGNMENT.match(text):
             if text.startswith(REPO_VARIABLES):
-                return []  # the repo is set by the environment: undeterminable
+                return []  # GIT_DIR and friends pick the repo: not judged (ADR-0004, deviation 7)
             i += 1
         elif text in RESERVED:
             i += 1
         elif text == "env":
             i += 1
             while i < len(words) and words[i].text.startswith("-"):
+                # env -C and -S change the directory or split the arguments: not judged.
                 if words[i].text in ("-C", "--chdir", "-S", "--split-string") or words[i].text.startswith("--chdir="):
                     return []
                 i += 2 if words[i].text in ("-u", "--unset") else 1
@@ -340,7 +361,10 @@ def command_words(seg: Segment) -> list[Word]:
 
 
 def run_git(exe: str, cwd: str, args: list[str], deadline: float) -> str | None:
-    """git's stdout capped at CAP, or None on failure or past the deadline. The tests' seam."""
+    """git's stdout capped at CAP, or None on failure or past the deadline.
+
+    Tests replace this function to simulate a missing or slow git.
+    """
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env["PATH"] = SAFE_PATH
     try:
@@ -397,7 +421,7 @@ def git_parts(words: list[Word]) -> tuple[list[str] | None, str, list[Word]] | N
 
 
 def join_path(base: str | None, path: str) -> str | None:
-    if EXPANSION in path:
+    if EXPANSION in path:  # $VAR or $(...) in the path: its value is unknown
         return None
     if path.startswith("~"):
         path = os.path.expanduser(path)
@@ -411,6 +435,7 @@ def join_path(base: str | None, path: str) -> str | None:
 def read_file(path: str, first_line: bool = False) -> bytes | None:
     """At most CAP bytes of a regular file, never following a final symlink and never blocking."""
     try:
+        # O_NONBLOCK: a FIFO or device named by -F cannot block the hook. O_NOFOLLOW: no symlink.
         fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC)
     except (OSError, ValueError):
         return None
@@ -439,6 +464,7 @@ def read_file(path: str, first_line: bool = False) -> bytes | None:
 
 
 def names_secret(name: str) -> bool:
+    """Whether a bare file name is a secret file. Same definition as secrets_guard.py."""
     if name == "deny-terms" or name == ".env":
         return True
     return name.startswith(".env.") and name[5:] not in SAFE_SUFFIXES
@@ -450,6 +476,7 @@ def subject_ok(subject: str) -> bool:
 
 
 def branch_name_ok(name: str) -> bool:
+    """Lifecycle-shaped, or exempt from rule 4."""
     return name.startswith(EXEMPT_PREFIXES) or LIFECYCLE_BRANCH.fullmatch(name) is not None
 
 
@@ -460,7 +487,7 @@ def first_subject(text: str) -> str | None:
         end = text.find("\n", start)
         end = len(text) if end < 0 else end
         if end - start > SUBJECT_MAX + 64:
-            return None  # too long to be a checked subject, even after stripping
+            return None  # longer than any checked subject, even before trailing spaces are stripped
         line = text[start:end].rstrip()
         if line:
             return line if len(line) <= SUBJECT_MAX else None
@@ -479,6 +506,8 @@ def message_text(text: str, word: Word) -> str | None:
     return None
 
 
+# Long options that take a value. The kind says what the value is: m message, F file,
+# C message reused (not read, so not checked), "" ignored.
 COMMIT_VALUE_LONG = {
     "--message": "m", "--file": "F", "--reuse-message": "C", "--reedit-message": "c", "--fixup": "C",
     "--squash": "C", "--author": "", "--date": "", "--template": "", "--trailer": "", "--cleanup": "",
@@ -538,13 +567,13 @@ def commit_options(args: list[Word]) -> tuple[list[tuple[str, Word]], list[str],
 
 def commit_subject(args: list[Word], seg: Segment, cwd: str) -> str | None:
     messages, files, reused, _ = commit_options(args)
-    if reused:
+    if reused:  # -C, -c, --fixup and --squash reuse a message this hook does not read
         return None
     if messages:
         text = message_text(*messages[0])
         return None if text is None else first_subject(text)
     if files:
-        if files[0] == "-":
+        if files[0] == "-":  # -F -: the message is on stdin, which only this command's heredoc can supply
             return first_subject(seg.heredocs[0]) if len(seg.heredocs) == 1 else None
         path = join_path(cwd, files[0])
         data = None if path is None else read_file(path, first_line=True)
@@ -559,6 +588,7 @@ def commit_subject(args: list[Word], seg: Segment, cwd: str) -> str | None:
 
 
 def added_lines(patch: str):
+    """The added lines of a -U0 patch. The file headers before each hunk are skipped."""
     in_hunk = False
     for line in patch.split("\n"):
         if line.startswith("diff --git "):
@@ -570,6 +600,7 @@ def added_lines(patch: str):
 
 
 def label_values(texts: list[str], names: set[str], short: str):
+    """Values of the given long flags, or of the short flag, in `--flag value` and `--flag=value` forms."""
     i = 0
     while i < len(texts):
         text = texts[i]
@@ -590,10 +621,12 @@ def label_values(texts: list[str], names: set[str], short: str):
 
 
 def is_approved(value: str) -> bool:
+    """Whether a comma-separated label list includes `approved`."""
     return "approved" in (part.strip() for part in value.split(","))
 
 
 def adds_approved(args: list[Word]) -> bool:
+    """Rule 6: whether a gh command adds the approved label. The approval marker is the user's to set."""
     texts = [w.text for w in args]
     if len(texts) >= 2 and texts[0] == "issue" and texts[1] in ("edit", "create"):
         return any(is_approved(v) for v in label_values(texts[2:], {"--add-label", "--label"}, "l"))
@@ -609,6 +642,8 @@ def adds_approved(args: list[Word]) -> bool:
 
 
 class Guard:
+    """Applies rules 1-6 to one command. Repo facts come from git, each looked up once and cached."""
+
     def __init__(self, deadline: float, exe: str | None) -> None:
         self.deadline = deadline
         self.exe = exe
@@ -626,6 +661,7 @@ class Guard:
             self.reasons.append(reason)
 
     def git(self, cwd: str, *args: str) -> str | None:
+        """One git call under the shared deadline. Raises Timeout once the deadline has passed."""
         if self.exe is None:
             return None
         if time.monotonic() >= self.deadline:
@@ -658,6 +694,7 @@ class Guard:
 
     def default(self, top: str) -> str | None:
         def compute():
+            # origin/HEAD first; without it, main or master if either exists.
             head = (self.git(top, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD") or "").strip()
             if head.startswith("origin/") and len(head) > 7:
                 return head[7:]
@@ -673,6 +710,7 @@ class Guard:
         if not name:
             return False
         default = self.default(top)
+        # Without a detectable default branch, main and master count.
         return name == default if default else name in ("main", "master")
 
     def refs(self, top: str, *patterns: str) -> set[str]:
@@ -690,9 +728,11 @@ class Guard:
         commands = [words for seg in segments if (words := command_words(seg))]
         subs = [git_parts(w) for w in commands if os.path.basename(w[0].text) == "git"]
         names = {p[1] for p in subs if p}
+        # add and commit in one command: the add has not run yet, so the commit scan must be broad.
         self.add_and_commit = "add" in names and "commit" in names
         for seg in segments:
             words = command_words(seg)
+            # A command name that is an expansion cannot be judged.
             if not words or EXPANSION in words[0].text:
                 continue
             name = os.path.basename(words[0].text)
@@ -715,20 +755,21 @@ class Guard:
             args = args[1:]
         if args and args[0] == "--":
             args = args[1:]
-        if not args:
+        if not args:  # a bare cd goes to $HOME
             home = os.environ.get("HOME")
             return home if home and os.path.isabs(home) else None
-        if args[0] == "-":
+        if args[0] == "-":  # cd -: the previous directory is not tracked
             return None
         return join_path(cwd, args[0])
 
     def git_command(self, seg: Segment, words: list[Word], cwd: str | None) -> None:
         parts = git_parts(words)
+        # --git-dir or --work-tree names a repo this hook cannot pick: not judged.
         if parts is None or parts[0] is None:
             return
         paths, sub, args = parts
         d = cwd
-        for path in paths:
+        for path in paths:  # each -C is relative to the one before it, as in git
             d = join_path(d, path)
         handler = {
             "commit": self.commit, "push": self.push, "add": self.add, "checkout": self.checkout,
@@ -741,6 +782,7 @@ class Guard:
             handler(top, d, args, seg)
 
     def new_branch(self, top: str, name: str) -> None:
+        """Rule 4: a new branch name must be lifecycle-shaped, in a repo with an origin."""
         if EXPANSION not in name and self.has_origin(top) and not branch_name_ok(name):
             self.ask(BRANCH_REASON)
 
@@ -756,6 +798,7 @@ class Guard:
                 self.ask(SUBJECT_REASON)
         if self.add_and_commit:
             self.scan(top, "broad")
+        # -a commits tracked edits from the work tree, so scan against HEAD; otherwise scan the index.
         self.scan(top, "head" if commit_options(args)[3] else "cached")
 
     def add(self, top: str, d: str, args: list[Word], seg: Segment) -> None:
@@ -796,6 +839,7 @@ class Guard:
         if not self.scan_diff(top, "HEAD"):
             self.scan_diff(top, "--cached")  # no commit yet
         if kind == "broad":
+            # Untracked files can enter a broad add; their reads share UNTRACKED_BUDGET.
             out = self.git(top, "ls-files", "-z", "-o", "--exclude-standard") or ""
             for name in out.split("\0"):
                 if not name:
@@ -810,6 +854,7 @@ class Guard:
                         self.scan_lines(data.decode("utf-8", errors="replace").split("\n"))
 
     def scan_diff(self, top: str, rev: str) -> bool:
+        # A deleted file is not in the commit, so its name is not checked.
         names = self.git(top, "diff", *DIFF_FLAGS, "--name-only", "-z", "--diff-filter=d", rev)
         if names is None:
             return False
@@ -857,27 +902,28 @@ class Guard:
                         force = True
                     elif ch == "d":
                         delete = True
-                    elif ch == "o":
+                    elif ch == "o":  # -o takes a push option value
                         i += 0 if text[j + 1:] else 1
                         break
             else:
                 positional.append(text)
-        if every:
+        if every:  # --mirror, --all, --prune and the like reach the default branch whatever the refspec
             self.ask(PUSH_REASON)
             return
         current = self.branch(top)
         targets: list[str | None] = []
-        if len(positional) < 2 and not delete and not tags:
+        if len(positional) < 2 and not delete and not tags:  # no refspec: the current branch is pushed
             targets.append(current)
         for spec in positional[1:]:
             if EXPANSION in spec:
                 continue
-            if spec.startswith("+"):
+            if spec.startswith("+"):  # +spec forces a non-fast-forward update
                 force = True
                 spec = spec[1:]
             if delete:
                 dst = spec
             else:
+                # src:dst names the remote branch; a bare src is also the destination.
                 src, colon, dst = spec.partition(":")
                 dst = dst if colon and dst else src
                 if dst == "HEAD":
@@ -885,6 +931,7 @@ class Guard:
             if dst and dst.startswith("refs/heads/"):
                 dst = dst[len("refs/heads/"):]
             targets.append(dst)
+        # A force push with the default branch checked out asks, even when the refspec names another branch.
         if any(self.is_default(top, t) for t in targets) or (force and self.is_default(top, current)):
             self.ask(PUSH_REASON)
 
@@ -927,13 +974,15 @@ class Guard:
             else:
                 positional.append(text)
         if delete:
+            # -r deletes only a remote-tracking ref, so it is not asked.
             if not remote and self.has_origin(top) and any(self.is_default(top, n) for n in positional):
                 self.ask(PUSH_REASON)
         elif move:
+            # git branch -m <new> renames the current branch.
             old = positional[0] if len(positional) >= 2 else self.branch(top)
             if self.has_origin(top) and self.is_default(top, old):
                 self.ask(PUSH_REASON)
-        elif not other and positional:
+        elif not other and positional:  # git branch <name> creates a branch; list and copy modes do not
             self.new_branch(top, positional[0])
 
     # rule 4 and the branch a later commit lands on
@@ -945,7 +994,7 @@ class Guard:
         while i < len(args):
             text = args[i].text
             i += 1
-            if text == "--":
+            if text == "--":  # after --, checkout takes paths and leaves the branch alone
                 paths = True
                 break
             if text in ("-b", "-B", "--orphan"):
@@ -1007,6 +1056,7 @@ class Guard:
             self.branches[top] = None if detach or target == "-" or EXPANSION in target else target
 
     def worktree(self, top: str, d: str, args: list[Word], seg: Segment) -> None:
+        """Rule 4 for `git worktree add -b/-B <name>`."""
         if not args or args[0].text != "add":
             return
         for i, word in enumerate(args[1:-1], 1):
@@ -1024,16 +1074,18 @@ def evaluate(payload) -> str | None:
         return None
     tool_input = payload.get("tool_input")
     command = tool_input.get("command") if isinstance(tool_input, dict) else None
+    # Nothing to judge unless the text mentions git or gh.
     if not isinstance(command, str) or "\0" in command or ("git" not in command and "gh" not in command):
         return None
     cwd = payload.get("cwd")
+    # A relative or NUL cwd is not trusted; cd steps then have no base to resolve from.
     if not isinstance(cwd, str) or "\0" in cwd or not os.path.isabs(cwd):
         cwd = None
     deadline = time.monotonic() + DEADLINE_SECONDS
     try:
         segments = Parser(command).parse()
         return Guard(deadline, shutil.which("git", path=SAFE_PATH)).check(segments, cwd)
-    except (Timeout, Unparsed):
+    except (Timeout, Unparsed):  # past the deadline or unparseable: pass, no ask
         return None
 
 
@@ -1050,15 +1102,15 @@ def main() -> None:
         signal.signal(signal.SIGALRM, on_deadline)
         signal.alarm(DEADLINE_SECONDS)
         reason = evaluate(payload)
-        signal.alarm(0)
+        signal.alarm(0)  # disarm before printing, so the alarm cannot fire mid-output
         if reason:
             print(json.dumps({"hookSpecificOutput": {
                 "hookEventName": "PreToolUse", "permissionDecision": "ask", "permissionDecisionReason": reason,
             }}))
-    except Timeout:
+    except Timeout:  # past the deadline: pass silently
         return
     except Exception:
-        sys.stderr.write("bash_guard: error\n")
+        sys.stderr.write("bash_guard: error\n")  # the only output on an error: one fixed code
 
 
 if __name__ == "__main__":
