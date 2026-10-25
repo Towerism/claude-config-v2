@@ -197,6 +197,7 @@ class Env:
             cwd=cwd or self.repo,
             env=self.environ(**env),
             timeout=60,
+            check=False,
         )
         assert TOKEN not in result.stdout + result.stderr, "the token leaked into output"
         return result

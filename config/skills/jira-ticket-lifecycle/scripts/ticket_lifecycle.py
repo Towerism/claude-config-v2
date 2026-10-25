@@ -388,7 +388,7 @@ def has_subject(listing):
 
 def git_runner(repo_dir):
     def git(*args, ok=(0,)):
-        result = subprocess.run(["git", "-C", repo_dir, *args], capture_output=True, text=True)
+        result = subprocess.run(["git", "-C", repo_dir, *args], capture_output=True, text=True, check=False)
         if result.returncode not in ok:
             raise UsageError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
         return result.stdout
@@ -686,6 +686,7 @@ class Cli:
                 text=True,
                 stdin=subprocess.DEVNULL,
                 timeout=self.timeout,
+                check=False,
             )
         except subprocess.TimeoutExpired:
             return -1, "", f"{self.prog} {' '.join(args[:2])} timed out after {self.timeout:g}s"

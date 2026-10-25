@@ -252,7 +252,7 @@ def has_subject(listing):
 
 def cmd_diff_check(base, repo_dir):
     def git(*args, ok=(0,)):
-        result = subprocess.run(["git", "-C", repo_dir, *args], capture_output=True, text=True)
+        result = subprocess.run(["git", "-C", repo_dir, *args], capture_output=True, text=True, check=False)
         if result.returncode not in ok:
             raise UsageError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
         return result.stdout
@@ -468,7 +468,7 @@ def write_stamp(issue, passed):
     """Write the per-worktree stamp that lets the PR command through, or remove it on failure."""
 
     def git(*args):
-        result = subprocess.run(["git", *args], capture_output=True, text=True)
+        result = subprocess.run(["git", *args], capture_output=True, text=True, check=False)
         if result.returncode:
             raise UsageError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
         return result.stdout.strip()

@@ -383,6 +383,7 @@ def test_a_commit_message_on_stdin(env):
         text=True,
         env=env.environ(),
         cwd=env.repo,
+        check=False,
     )
     assert r.stdout.startswith("OK")
 

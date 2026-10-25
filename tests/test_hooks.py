@@ -23,7 +23,7 @@ def run(name, payload, env=None):
     stdin = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
     done = subprocess.run(
         [sys.executable, "-I", str(HOOKS / name)],
-        input=stdin, capture_output=True, env={"PATH": "/usr/bin:/bin", **(env or {})}, timeout=10,
+        input=stdin, capture_output=True, env={"PATH": "/usr/bin:/bin", **(env or {})}, timeout=10, check=False,
     )
     assert done.returncode == 0 and done.stderr == b""
     return done.stdout.decode()
@@ -82,7 +82,7 @@ def start(home, env, event="SessionStart"):
 def run_installed(home, payload, env):
     done = subprocess.run(
         [sys.executable, "-I", str(home / "hooks" / "host_default.py")],
-        input=json.dumps(payload).encode(), capture_output=True, env=env, timeout=10,
+        input=json.dumps(payload).encode(), capture_output=True, env=env, timeout=10, check=False,
     )
     assert done.returncode == 0 and done.stderr == b""
     return done.stdout.decode()
@@ -485,7 +485,7 @@ def test_hooks_print_only_checked_values(repo):
     for name, payload in runs:
         done = subprocess.run(
             [sys.executable, "-I", str(HOOKS / name)],
-            input=json.dumps(payload).encode(), capture_output=True, env={"PATH": "/usr/bin:/bin"}, timeout=10,
+            input=json.dumps(payload).encode(), capture_output=True, env={"PATH": "/usr/bin:/bin"}, timeout=10, check=False,
         )
         assert done.returncode == 0 and done.stdout and done.stderr == b""
         assert word.encode() not in done.stdout and str(repo).encode() not in done.stdout
@@ -670,7 +670,7 @@ def test_secrets_guard_prints_only_checked_values(fake_home, tmp_path):
         done = subprocess.run(
             [sys.executable, "-I", str(HOOKS / "secrets_guard.py")],
             input=json.dumps(payload).encode(), capture_output=True,
-            env={"PATH": "/usr/bin:/bin", "HOME": str(fake_home)}, timeout=10,
+            env={"PATH": "/usr/bin:/bin", "HOME": str(fake_home)}, timeout=10, check=False,
         )
         assert done.returncode == 0 and done.stdout and done.stderr == b""
         assert word.encode() not in done.stdout and str(tmp_path).encode() not in done.stdout
@@ -1445,7 +1445,7 @@ def test_hooks_do_not_run_repo_filters(repo, tmp_path, kind):
     git(repo, "config", f"filter.p.w.{kind}", str(script))
     write_lines(repo, "base.txt", 20, word="new")
     if kind != "smudge":  # the fixture works: plain git runs the program on a diff
-        subprocess.run(["git", "-C", str(repo), "diff", "HEAD"], capture_output=True, env=GIT_ENV)
+        subprocess.run(["git", "-C", str(repo), "diff", "HEAD"], capture_output=True, env=GIT_ENV, check=False)
         assert mark.exists()
         mark.unlink()
     assert "code-simplifier" in context(repo)
@@ -1468,7 +1468,7 @@ def test_hooks_do_not_run_gpg_from_repo_config(repo, tmp_path):
     git(repo, "update-ref", "HEAD", signed)
     git(repo, "config", "log.showSignature", "true")
     git(repo, "config", "gpg.program", str(script))
-    subprocess.run(["git", "-C", str(repo), "log", "--format=%s", "-1"], capture_output=True, env=GIT_ENV)
+    subprocess.run(["git", "-C", str(repo), "log", "--format=%s", "-1"], capture_output=True, env=GIT_ENV, check=False)
     assert mark.exists()  # the fixture works: plain git log runs gpg.program
     mark.unlink()
     context(repo)
