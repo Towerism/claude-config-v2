@@ -2,6 +2,8 @@
 
 oh-my-claudecode (OMC) owns the development workflow. These rules add guardrails on top of it and never replace one of its stages. A repo's own CLAUDE.md wins on commands, paths and conventions.
 
+**Bypass:** if the session's first prompt starts `ralph` or `autopilot` (typed as `/ralph`, `/oh-my-claudecode:autopilot` or the bare word), ignore every rule in this block, including the host-default tracker line, and let OMC run its own workflow. Its hooks go silent for that session. Mentioning either word later in a prompt, or invoking one in a later prompt, does not count.
+
 ### Workflow, in order
 
 1. Unclear or large request: `/oh-my-claudecode:deep-interview` to settle the requirements. `/oh-my-claudecode:ralplan` (Planner, Architect and Critic loop until they agree; that loop is the plan review) writes the spec at step 4, after the test plan. A new repo: `/oh-my-claudecode:drydock` first.
