@@ -455,9 +455,20 @@ def test_ci_workflow_runs_lint_and_tests_on_pull_requests():
     assert not re.search(r"^\s+push:", text, re.MULTILINE)
     assert re.search(r"^\s+- run: make lint$", text, re.MULTILINE)
     assert re.search(r"^\s+- run: make test$", text, re.MULTILINE)
-    assert re.search(r"^permissions:\s*\n\s+contents: read\s*$", text, re.MULTILINE)
+    permissions = re.search(r"^permissions:\s*\n((?:[ \t]+\S.*\n)+)", text, re.MULTILINE)
+    assert permissions and permissions[1].split() == ["contents:", "read"]
     assert text.count("permissions:") == 1
-    assert re.search(r"^\s+timeout-minutes: \d+$", text, re.MULTILINE)
-    floor = re.search(r'requires-python = ">=([\d.]+)"', (ROOT / "pyproject.toml").read_text())[1]
-    setup = re.search(r"uses: actions/setup-python@\S+.*\n\s+with:\s*\n\s+python-version: \"([\d.]+)\"", text)
-    assert setup and setup[1] == floor
+    assert re.search(r"^    timeout-minutes: \d+$", text, re.MULTILINE)
+    # A failing step must fail the job, and nothing may widen the trigger or skip a step.
+    assert "continue-on-error" not in text
+    assert "pull_request_target" not in text
+    assert not re.search(r"^\s+if:", text, re.MULTILINE)
+    assert "persist-credentials: false" in text
+    assert all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in re.findall(r"uses: \S+@(\S+)", text))
+    pyproject = (ROOT / "pyproject.toml").read_text()
+    floor = re.search(r'requires-python = ">=([\d.]+)"', pyproject)
+    assert floor, "requires-python has no >= floor"
+    setup = re.search(
+        r"uses: actions/setup-python@\S+.*\n\s+with:\s*\n\s+python-version: \"([\d.]+)\"", text
+    )
+    assert setup and setup[1] == floor[1]
