@@ -98,6 +98,8 @@ def test_merge_confirm_is_linear_on_dash_heavy_commands():
     "echo 5 | xargs -n 1 gh pr merge", "eval eval 'gh pr merge 5'",
     "gh api graphql -f query=\"$(cat <<'EOF'\nmutation { mergePullRequest(input: {}) { clientMutationId } }\nEOF\n)\"",
     "cat <<E | bash\ngh pr merge 5\nE",
+    "watch -n 5 gh pr merge 5", "coproc gh pr merge 5", "builtin eval 'gh pr merge 5'", "dash -c 'gh pr merge 5'",
+    "ksh -c 'gh pr merge 5'", 'printf "gh pr merge\\n" | sh', "printf '\\tgh pr merge 5' | sh",
     "echo gh pr merge 5; bash",  # accepted false ask: the parser records no separator, so `;` acts like `|`
 ])
 def test_merges_behind_prefixes_and_shell_runners_ask(command):
@@ -721,6 +723,8 @@ def test_bash_not_naming_a_secret_file_passes(fake_home, command):
     "wc -l < .env", "bash -c 'wc < .env'", "cat .e*", "grep x src/.env.l*",
     "cp .env.example .env",  # accepted false ask: cp is a reader and .env its operand
     "tar --exclude=x -czf a.tgz .env", "rsync -x .env host:", "diff --exclude-from=.env a b",
+    "watch cat .env", "coproc cat .env", "builtin source .env", "dash -c 'cat .env'", "ksh -c 'cat .env'",
+    "xargs -a .env echo", "xargs --arg-file=.env echo", "sudo xargs --arg-file .env echo", 'printf "cat .env\\n" | sh',
 ])
 def test_bash_reading_a_secret_file_asks(fake_home, command):
     assert decision(guard(bash(command), fake_home)) == "ask"
@@ -734,6 +738,7 @@ def test_bash_reading_a_secret_file_asks(fake_home, command):
     # An excluded name is not a file operand.
     "tar --exclude=.env -czf a.tgz .", "tar --exclude .env -czf a.tgz .", "rsync -av --exclude=.env . host:",
     "diff -x .env a b", "diff -r --exclude=.env a b", "zip -r a.zip . -x .env",
+    "xargs -a list.txt echo .env", "echo xargs -a .env",
     "echo " + "$(" * 40 + "cat .env" + ")" * 40,  # nesting past MAX_DEPTH is unparsed and passes
     # Accepted misses: not a listed reader, or a value the parser cannot see.
     "> .env", ">> .env", "echo x > .env", "cd .env", "ls .env*", "rm .env", "vim .env", "git show HEAD:.env",

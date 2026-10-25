@@ -2,17 +2,17 @@
 
 The command is parsed as bash_guard.py parses it. A merge counts only at command position: at the
 start of the command or after a separator (`&& || ; | &`, a newline, `(`, `$(` or a backtick), past
-VAR=value words and the wrappers `env`, `command`, sudo, doas, nohup, exec, time -p, timeout N,
-nice -n N, stdbuf and xargs. It asks for:
+VAR=value words and the wrappers `env`, `command`, `builtin`, sudo, doas, nohup, coproc, exec,
+time -p, timeout N, nice -n N, stdbuf, watch and xargs. It asks for:
 
 - `gh [flags] pr [flags] merge`;
 - `gh api` or `tea api` (tea is the Gitea CLI) with a `/merge` path in an operand, the endpoint,
   not in a flag value such as `-f body=...` or `-H`; or with `mergePullRequest` or
   `enablePullRequestAutoMerge` among any of its words or in its heredoc body.
 
-The text that `bash|sh|zsh -c`, `eval` and `env -S` run is parsed again, and so are a heredoc fed to
-a shell (`bash <<E`, `cat <<E | bash`) and the echo or printf text before a bare shell
-(`echo 'gh pr merge 5' | bash`). Quoted text,
+The text that `bash|sh|zsh|dash|ksh -c`, `eval` and `env -S` run is parsed again, and so are a
+heredoc fed to a shell (`bash <<E`, `cat <<E | bash`) and the echo or printf text before a bare
+shell (`echo 'gh pr merge 5' | bash`; printf's `\\n` and `\\t` are decoded first). Quoted text,
 heredoc bodies and comments of other commands do not ask: `echo "gh pr merge"`, `grep`,
 `git commit -m` and `python3 -c` pass. A squash merge (`--squash`, a short flag group holding `s`
 after `merge`, or a `gh api …/merge` sending merge_method=squash) gets its own reason, because the
@@ -309,7 +309,7 @@ def command_words(seg: Segment) -> list[Word]:
 
 # ── wrappers around the copied parser ────────────────────────────────────────
 
-SHELLS = {"bash", "sh", "zsh"}
+SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
 # Prefix commands, each with its short and long options that take a value; the command follows them.
 PREFIXES = {
     "sudo": (
@@ -318,6 +318,9 @@ PREFIXES = {
     ),
     "doas": ({"-u", "-C"}, set()),
     "nohup": (set(), set()),
+    "coproc": (set(), set()),
+    "builtin": (set(), set()),
+    "watch": ({"-n", "-q"}, {"--interval", "--equexit"}),
     "exec": ({"-a"}, set()),
     "timeout": ({"-s", "-k"}, {"--signal", "--kill-after"}),  # a duration word follows the options
     "nice": ({"-n"}, {"--adjustment"}),
@@ -381,8 +384,9 @@ def unjudged_skipped(words: list[Word]) -> tuple[list[Word], str | None]:
     return kept + words[i:], None
 
 
-def resolve(words: list[Word]) -> tuple[list[Word], str | None]:
-    """The words from the command name on, past every prefix, or ([], text) when env -S gives text to parse."""
+def resolve(words: list[Word], skipped: list[list[Word]] | None = None) -> tuple[list[Word], str | None]:
+    """The words from the command name on, past every prefix, or ([], text) when env -S gives text to parse.
+    Each prefix command skipped, with its options, is added to skipped when it is given."""
     for _ in range(MAX_DEPTH):
         words, text = unjudged_skipped(words)
         if text is not None:
@@ -398,10 +402,17 @@ def resolve(words: list[Word]) -> tuple[list[Word], str | None]:
             words = found[1:]
         elif name in PREFIXES:
             i = skip_options(found, 1, *PREFIXES[name])
+            if skipped is not None:
+                skipped.append(found[:i])
             words = found[i + (name == "timeout"):]
         else:
             return found, None
     raise Unparsed
+
+
+# The printf escapes decoded before its text is parsed again.
+PRINTF_ESCAPE = re.compile(r"\\([nt\\])")
+PRINTF_CHARACTERS = {"n": "\n", "t": "\t", "\\": "\\"}
 
 
 def shell_texts(words: list[Word], seg: Segment, previous: list[Word], previous_heredocs: list[str]) -> list[str]:
@@ -426,7 +437,10 @@ def shell_texts(words: list[Word], seg: Segment, previous: list[Word], previous_
         args = previous[1:]
         while args and re.fullmatch(r"-[neE]+", args[0].text):
             args = args[1:]
-        texts.append(" ".join(w.text for w in args))
+        text = " ".join(w.text for w in args)
+        if os.path.basename(previous[0].text) == "printf":
+            text = PRINTF_ESCAPE.sub(lambda m: PRINTF_CHARACTERS[m.group(1)], text)
+        texts.append(text)
     return texts
 
 

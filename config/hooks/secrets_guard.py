@@ -35,12 +35,12 @@ opens with a literal character and matches one of `.env`, `.env.local`, `.env.pr
 The value of `--exclude` (and of `-x` for diff and zip) names a file to leave out, so it is not an
 operand: `tar --exclude=.env -czf a.tgz .` passes.
 
-VAR=value words and the wrappers `env`, `command`, sudo, doas, nohup, exec, time -p, timeout N,
-nice -n N, stdbuf and xargs are skipped. The text that `bash|sh|zsh -c`, `eval` and `env -S` run,
-a heredoc fed to a shell (`bash <<E`, `cat <<E | bash`), and the echo or printf text before a bare
-shell are parsed again. Other
-commands (echo, printf, git commit -m, python3 -c, git log --grep), comments and heredoc bodies stay
-silent. It is a reminder, not a security boundary: an unlisted reader gets past it, and so do an
+VAR=value words and the wrappers `env`, `command`, `builtin`, sudo, doas, nohup, coproc, exec,
+time -p, timeout N, nice -n N, stdbuf, watch and xargs are skipped; the file of `xargs -a` or
+`--arg-file` is read, so a secret there asks. The text that `bash|sh|zsh|dash|ksh -c`, `eval` and
+`env -S` run, a heredoc fed to a shell (`bash <<E`, `cat <<E | bash`), and the echo or printf text
+before a bare shell (printf's `\\n` and `\\t` decoded) are parsed again. Other commands (echo,
+printf, git commit -m, python3 -c, git log --grep), comments and heredoc bodies stay silent. It is a reminder, not a security boundary: an unlisted reader gets past it, and so do an
 output redirection, `python3 x.py .env`, `git show HEAD:.env` and `cat $(echo .env)`. Nesting past
 MAX_DEPTH, re-parses included, is unparsed and passes.
 
@@ -402,7 +402,7 @@ def command_words(seg: Segment) -> list[Word]:
 
 # ── wrappers around the copied parser ────────────────────────────────────────
 
-SHELLS = {"bash", "sh", "zsh"}
+SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
 # Prefix commands, each with its short and long options that take a value; the command follows them.
 PREFIXES = {
     "sudo": (
@@ -411,6 +411,9 @@ PREFIXES = {
     ),
     "doas": ({"-u", "-C"}, set()),
     "nohup": (set(), set()),
+    "coproc": (set(), set()),
+    "builtin": (set(), set()),
+    "watch": ({"-n", "-q"}, {"--interval", "--equexit"}),
     "exec": ({"-a"}, set()),
     "timeout": ({"-s", "-k"}, {"--signal", "--kill-after"}),  # a duration word follows the options
     "nice": ({"-n"}, {"--adjustment"}),
@@ -474,8 +477,9 @@ def unjudged_skipped(words: list[Word]) -> tuple[list[Word], str | None]:
     return kept + words[i:], None
 
 
-def resolve(words: list[Word]) -> tuple[list[Word], str | None]:
-    """The words from the command name on, past every prefix, or ([], text) when env -S gives text to parse."""
+def resolve(words: list[Word], skipped: list[list[Word]] | None = None) -> tuple[list[Word], str | None]:
+    """The words from the command name on, past every prefix, or ([], text) when env -S gives text to parse.
+    Each prefix command skipped, with its options, is added to skipped when it is given."""
     for _ in range(MAX_DEPTH):
         words, text = unjudged_skipped(words)
         if text is not None:
@@ -491,10 +495,17 @@ def resolve(words: list[Word]) -> tuple[list[Word], str | None]:
             words = found[1:]
         elif name in PREFIXES:
             i = skip_options(found, 1, *PREFIXES[name])
+            if skipped is not None:
+                skipped.append(found[:i])
             words = found[i + (name == "timeout"):]
         else:
             return found, None
     raise Unparsed
+
+
+# The printf escapes decoded before its text is parsed again.
+PRINTF_ESCAPE = re.compile(r"\\([nt\\])")
+PRINTF_CHARACTERS = {"n": "\n", "t": "\t", "\\": "\\"}
 
 
 def shell_texts(words: list[Word], seg: Segment, previous: list[Word], previous_heredocs: list[str]) -> list[str]:
@@ -519,7 +530,10 @@ def shell_texts(words: list[Word], seg: Segment, previous: list[Word], previous_
         args = previous[1:]
         while args and re.fullmatch(r"-[neE]+", args[0].text):
             args = args[1:]
-        texts.append(" ".join(w.text for w in args))
+        text = " ".join(w.text for w in args)
+        if os.path.basename(previous[0].text) == "printf":
+            text = PRINTF_ESCAPE.sub(lambda m: PRINTF_CHARACTERS[m.group(1)], text)
+        texts.append(text)
     return texts
 
 
@@ -556,7 +570,11 @@ def walk(text: str, depth: int, visit) -> bool:
     previous: list[Word] = []
     previous_heredocs: list[str] = []
     for seg in parser.segments:
-        words, script = resolve(seg.words)
+        skipped: list[list[Word]] = []
+        words, script = resolve(seg.words, skipped)
+        # xargs -a reads its arguments from a file.
+        if any(os.path.basename(p[0].text) == "xargs" and flag_reads(p[1:], "-a", "--arg-file") for p in skipped):
+            return True
         if script is not None:
             texts = [script]
         elif not words:
@@ -732,10 +750,11 @@ def curl_reads(args: list[Word]) -> bool:
     return False
 
 
-def flag_reads(args: list[Word], flag: str) -> bool:
-    """Whether the value of `flag` (docker --env-file, wget --post-file) is a secret path."""
-    flags, _ = options(args, {flag})
-    return any(name == flag and secret_path(value, glob) for name, value, glob in flags)
+def flag_reads(args: list[Word], *names: str) -> bool:
+    """Whether the value of one of the flags `names` (docker --env-file, wget --post-file, xargs -a)
+    is a secret path."""
+    flags, _ = options(args, set(names))
+    return any(name in names and secret_path(value, glob) for name, value, glob in flags)
 
 
 def reads_secret(words: list[Word], seg: Segment) -> bool:
