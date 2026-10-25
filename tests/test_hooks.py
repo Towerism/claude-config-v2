@@ -23,7 +23,7 @@ def run(name, payload, env=None):
     stdin = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
     done = subprocess.run(
         [sys.executable, "-I", str(HOOKS / name)],
-        input=stdin, capture_output=True, env={"PATH": "/usr/bin:/bin", **(env or {})}, timeout=10,
+        input=stdin, capture_output=True, env={"PATH": "/usr/bin:/bin", **(env or {})}, timeout=10, check=False,
     )
     assert done.returncode == 0 and done.stderr == b""
     return done.stdout.decode()
@@ -82,7 +82,7 @@ def start(home, env, event="SessionStart"):
 def run_installed(home, payload, env):
     done = subprocess.run(
         [sys.executable, "-I", str(home / "hooks" / "host_default.py")],
-        input=json.dumps(payload).encode(), capture_output=True, env=env, timeout=10,
+        input=json.dumps(payload).encode(), capture_output=True, env=env, timeout=10, check=False,
     )
     assert done.returncode == 0 and done.stderr == b""
     return done.stdout.decode()
@@ -477,7 +477,7 @@ def test_hooks_print_only_checked_values(repo):
         f"git commit -m '{word} subject'",
         f"git checkout -b {word}",
         f"git add {word}.py .env && git commit -m 'fix(x): {word} (#7)'",
-        f"git add -A && git commit -m 'fix(x): y (#7)'",
+        "git add -A && git commit -m 'fix(x): y (#7)'",
         f"cd {repo} && git switch main && git commit -m 'fix(x): {word} (#7)'",
         f"git push origin HEAD:main {word}",
         f"gh issue edit {word} --add-label approved,{word}",
@@ -485,7 +485,7 @@ def test_hooks_print_only_checked_values(repo):
     for name, payload in runs:
         done = subprocess.run(
             [sys.executable, "-I", str(HOOKS / name)],
-            input=json.dumps(payload).encode(), capture_output=True, env={"PATH": "/usr/bin:/bin"}, timeout=10,
+            input=json.dumps(payload).encode(), capture_output=True, env={"PATH": "/usr/bin:/bin"}, timeout=10, check=False,
         )
         assert done.returncode == 0 and done.stdout and done.stderr == b""
         assert word.encode() not in done.stdout and str(repo).encode() not in done.stdout
@@ -670,7 +670,7 @@ def test_secrets_guard_prints_only_checked_values(fake_home, tmp_path):
         done = subprocess.run(
             [sys.executable, "-I", str(HOOKS / "secrets_guard.py")],
             input=json.dumps(payload).encode(), capture_output=True,
-            env={"PATH": "/usr/bin:/bin", "HOME": str(fake_home)}, timeout=10,
+            env={"PATH": "/usr/bin:/bin", "HOME": str(fake_home)}, timeout=10, check=False,
         )
         assert done.returncode == 0 and done.stdout and done.stderr == b""
         assert word.encode() not in done.stdout and str(tmp_path).encode() not in done.stdout
@@ -868,7 +868,7 @@ def test_checkout_and_switch_apply_in_order(on_main, repo):
     assert asks(f"git switch main && git commit -m '{GOOD}'", repo, COMMIT_DEFAULT)
     assert asks(f"git checkout main && git commit -m '{GOOD}'", repo, COMMIT_DEFAULT)
     assert asks(f"git checkout -q main; git commit -m '{GOOD}'", repo, COMMIT_DEFAULT)
-    assert guarded(f"git checkout -- main.txt && git commit -m 'fix(x): y (#1)'", repo) is None
+    assert guarded("git checkout -- main.txt && git commit -m 'fix(x): y (#1)'", repo) is None
     assert guarded("git switch --detach main && git commit -m x", repo) is None
 
 
@@ -946,7 +946,7 @@ def subject_forms(subject, tmp):
         f"git commit -m \"$(cat <<'EOF'\n{subject}\n\nbody\nEOF\n)\"",
         f"git commit -F - <<'EOF'\n{subject}\n\nbody\nEOF",
         f"git commit -F {tmp / 'msg.txt'}",
-        f"git commit --file=msg.txt",
+        "git commit --file=msg.txt",
     ]
 
 
@@ -1445,7 +1445,7 @@ def test_hooks_do_not_run_repo_filters(repo, tmp_path, kind):
     git(repo, "config", f"filter.p.w.{kind}", str(script))
     write_lines(repo, "base.txt", 20, word="new")
     if kind != "smudge":  # the fixture works: plain git runs the program on a diff
-        subprocess.run(["git", "-C", str(repo), "diff", "HEAD"], capture_output=True, env=GIT_ENV)
+        subprocess.run(["git", "-C", str(repo), "diff", "HEAD"], capture_output=True, env=GIT_ENV, check=False)
         assert mark.exists()
         mark.unlink()
     assert "code-simplifier" in context(repo)
@@ -1468,7 +1468,7 @@ def test_hooks_do_not_run_gpg_from_repo_config(repo, tmp_path):
     git(repo, "update-ref", "HEAD", signed)
     git(repo, "config", "log.showSignature", "true")
     git(repo, "config", "gpg.program", str(script))
-    subprocess.run(["git", "-C", str(repo), "log", "--format=%s", "-1"], capture_output=True, env=GIT_ENV)
+    subprocess.run(["git", "-C", str(repo), "log", "--format=%s", "-1"], capture_output=True, env=GIT_ENV, check=False)
     assert mark.exists()  # the fixture works: plain git log runs gpg.program
     mark.unlink()
     context(repo)
@@ -1680,3 +1680,95 @@ def test_the_bypass_check_is_the_same_in_every_hook():
     copies = {name: segments(HOOKS / name) for name in BYPASS_HOOKS}
     assert all(set(c) == {"function", "pattern"} for c in copies.values()), copies.keys()
     assert len({tuple(sorted(c.items())) for c in copies.values()}) == 1
+
+
+# Exact output on malformed input, on an error and past the deadline (#3)
+
+EVENT_ONLY = {
+    "merge_confirm.py": {"hook_event_name": "PreToolUse", "tool_name": "Bash"},
+    "bash_guard.py": {"hook_event_name": "PreToolUse", "tool_name": "Bash"},
+    "skill_gate.py": {"hook_event_name": "PreToolUse", "tool_name": "Skill"},
+    "secrets_guard.py": {"hook_event_name": "PreToolUse", "tool_name": "Read"},
+    "host_default.py": {"hook_event_name": "SessionStart"},
+}
+HOST_CONTEXT = (
+    b'{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "Host profile: work. '
+    b"Default issue tracker: jira. Use the jira-ticket-lifecycle skill unless the repo's CLAUDE.md names "
+    b'another tracker; the repo\'s choice wins."}}\n'
+)
+MALFORMED = [b"{}", b'{"tool_input": {}}', b'{"tool_name": 1}', b"null", b"", b"{", b"\xff\xfe"]
+
+
+def hook_result(name, stdin, machine):
+    """Exit code, stdout and stderr of a hook fed `stdin`; host_default runs as deployed in `machine`."""
+    home, env, _ = machine
+    script = home / "hooks" / name if name == "host_default.py" else HOOKS / name
+    done = subprocess.run(
+        [sys.executable, "-I", str(script)],
+        input=stdin, capture_output=True, env={"PATH": "/usr/bin:/bin", **env}, timeout=10, check=False,
+    )
+    return done.returncode, done.stdout, done.stderr
+
+
+@pytest.mark.parametrize("stdin", MALFORMED)
+@pytest.mark.parametrize("name", BYPASS_HOOKS)
+def test_malformed_input_exits_0_with_no_output(name, stdin, machine):
+    assert hook_result(name, stdin, machine) == (0, b"", b"")
+
+
+def test_host_default_on_a_list_payload_exits_0_with_no_output(machine):
+    assert hook_result("host_default.py", b"[]", machine) == (0, b"", b"")
+
+
+@pytest.mark.parametrize("name", BYPASS_HOOKS)
+def test_an_event_without_tool_input_gives_the_usual_output(name, machine):
+    expected = HOST_CONTEXT if name == "host_default.py" else b""
+    assert hook_result(name, json.dumps(EVENT_ONLY[name]).encode(), machine) == (0, expected, b"")
+
+
+# Runs a hook's main() as its __main__ block does. `patch` is Python source, run after the
+# module loads as `hook`, that replaces one of the hook's functions.
+DRIVER = """
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("hook", sys.argv[1])
+hook = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(hook)
+exec(sys.argv[2])
+try:
+    hook.main()
+finally:
+    sys.exit(0)
+"""
+RAISE = "def boom(*args, **kwargs):\n    raise RuntimeError\n"
+
+
+def driven(name, patch, payload):
+    done = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", DRIVER, str(HOOKS / name), patch],
+        input=json.dumps(payload).encode(), capture_output=True, env={"PATH": "/usr/bin:/bin"},
+        timeout=20, check=False,
+    )
+    return done.returncode, done.stdout, done.stderr
+
+
+@pytest.mark.parametrize("name,patch,payload,stderr", [
+    ("bash_guard.py", RAISE + "hook.evaluate = boom", bash("git status"), b"bash_guard: error\n"),
+    ("secrets_guard.py", RAISE + "hook.emit = boom", bash("cat .env"), b"secrets_guard: error\n"),
+    (
+        "skill_gate.py", RAISE + "hook.emit = boom",
+        {"hook_event_name": "PreToolUse", "tool_name": "Skill", "tool_input": {"skill": "autopilot"}},
+        b"skill_gate: error\n",
+    ),
+])
+def test_an_error_in_the_last_step_writes_only_the_fixed_code(name, patch, payload, stderr):
+    assert driven(name, patch, payload) == (0, b"", stderr)
+
+
+def test_secrets_guard_past_its_deadline_writes_only_the_fixed_code():
+    patch = "import time\nhook.DEADLINE_SECONDS = 1\nhook.command_names_secret = lambda command: time.sleep(5)\n"
+    assert driven("secrets_guard.py", patch, bash("cat .env")) == (0, b"", b"secrets_guard: error\n")
+
+
+def test_bash_guard_past_its_deadline_writes_nothing():
+    patch = "def late(payload):\n    raise hook.Timeout\nhook.evaluate = late\n"
+    assert driven("bash_guard.py", patch, bash("git status")) == (0, b"", b"")

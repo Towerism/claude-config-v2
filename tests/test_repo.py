@@ -3,6 +3,7 @@
 import ast
 import json
 import re
+import subprocess
 import sys
 
 import pytest
@@ -25,12 +26,12 @@ TRACKERS = hook_trackers()
 
 SKILLS = sorted(p for p in (ROOT / "config" / "skills").iterdir() if p.is_dir())
 HOSTS = sorted((ROOT / "hosts").glob("*.json"))
-PERSONAL = re.compile(r"/home/|/Users/|/omc-dev|mfracker", re.I)
+PERSONAL = re.compile(r"/home/|/Users/|/omc-dev|mfracker", re.IGNORECASE)
 
 
 def front_matter(skill):
     text = (skill / "SKILL.md").read_text()
-    match = re.match(r"---\n(.*?)\n---\n", text, re.S)
+    match = re.match(r"---\n(.*?)\n---\n", text, re.DOTALL)
     assert match, f"{skill.name}: SKILL.md has no front matter"
     return dict(line.split(": ", 1) for line in match.group(1).splitlines() if ": " in line)
 
@@ -146,7 +147,7 @@ def test_global_rules_stay_short_and_name_only_real_skills():
     assert len(text.splitlines()) < 80
     assert not PERSONAL.search(text)
     named = re.findall(r"`([a-z:-]+)`", text)
-    for skill in [n for n in named if n.endswith("-lifecycle") or n.endswith("-handoff")]:
+    for skill in [n for n in named if n.endswith(("-lifecycle", "-handoff"))]:
         assert (ROOT / "config" / "skills" / skill).is_dir(), skill
     for skill in TRACKERS.values():
         assert f"`{skill}`" in text
@@ -417,3 +418,28 @@ def test_adr_records_that_required_steps_bind_omc():
     assert "ADR-0001" in text and "ADR-0004" in text
     assert "lightest-weight path" in text and "bash_guard" in text
     assert "writes the comments itself" in text
+
+
+def suppresses_exception(node):
+    """Whether `node` is contextlib.suppress(Exception) or suppress(Exception)."""
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    if isinstance(func, ast.Attribute):
+        module = func.value
+        named = func.attr == "suppress" and isinstance(module, ast.Name) and module.id == "contextlib"
+    else:
+        named = isinstance(func, ast.Name) and func.id == "suppress"
+    return named and any(isinstance(a, ast.Name) and a.id == "Exception" for a in node.args)
+
+
+def test_only_hooks_suppress_every_exception():
+    """The hook contract allows a blind catch; anywhere else it hides real bugs (#3)."""
+    tracked = subprocess.run(
+        ["git", "-C", str(ROOT), "ls-files", "*.py"], capture_output=True, text=True, check=True
+    ).stdout.split()
+    others = [path for path in tracked if not path.startswith("config/hooks/")]
+    assert others
+    for path in others:
+        tree = ast.parse((ROOT / path).read_text())
+        assert not any(suppresses_exception(node) for node in ast.walk(tree)), path

@@ -399,7 +399,7 @@ def gh(state, argv):
         if len(pos) > 2:
             pr = pr_by_number(state, re.sub(r"\D", "", pos[2].rsplit("/", 1)[-1]))
         elif prs:
-            pr = prs[sorted(prs, key=int)[-1]]
+            pr = prs[max(prs, key=int)]
         else:
             raise Failure("no pull requests found for branch")
         fields = (opts.get("--json") or [",".join(PR_FIELDS)])[-1].split(",")

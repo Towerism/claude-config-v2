@@ -23,7 +23,7 @@ LABELS = [
 
 
 def claim_block():
-    blocks = re.findall(r"```bash\n(.*?)```", SKILL, re.S)
+    blocks = re.findall(r"```bash\n(.*?)```", SKILL, re.DOTALL)
     return next(b for b in blocks if 'gh label create "in progress"' in b)
 
 
@@ -59,7 +59,7 @@ def test_the_temp_folder_line_never_writes_into_the_working_tree(tmp_path, job_d
     if job_dir:
         env["CLAUDE_JOB_DIR"] = str(job)
     script = temp_line() + '\nprintf %s "$tmp"'
-    out = subprocess.run(["bash", "-c", script], cwd=cwd, env=env, capture_output=True, text=True)
+    out = subprocess.run(["bash", "-c", script], cwd=cwd, env=env, capture_output=True, text=True, check=False)
     made = Path(out.stdout)
     assert made.is_dir() and not list(cwd.iterdir())
     assert made.parent == (job / "tmp" if job_dir else tmpdir)

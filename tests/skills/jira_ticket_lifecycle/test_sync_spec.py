@@ -43,7 +43,7 @@ def test_first_sync_moves_the_original_then_writes_the_spec_between_markers(rest
     env = rest_env
     env.add_ticket("PAY-142", description="Users want CSV.", labels=["spec-approved"])
     working_copy(env)
-    r, out = sync(env)
+    r, _out = sync(env)
     assert r.returncode == 0, r.stdout
     t = env.ticket("PAY-142")
     assert t["comments"][0].startswith("Original description, moved here by jira-ticket-lifecycle")
@@ -70,7 +70,7 @@ def test_a_second_sync_writes_no_comment_and_isnt_refused(rest_env):
     working_copy(env)
     sync(env)
     working_copy(env, text=SPEC + "- FR-2: The export MUST quote commas.\n")
-    r, out = sync(env)
+    r, _out = sync(env)
     assert r.returncode == 0, r.stdout
     t = env.ticket("PAY-142")
     assert len(t["comments"]) == 1
@@ -144,7 +144,7 @@ def test_an_original_too_long_for_a_comment_is_left_alone(rest_env):
     env = rest_env
     env.add_ticket("PAY-142", description="x" * 33000)
     working_copy(env)
-    r, out = sync(env)
+    _r, out = sync(env)
     assert steps(out)["move"] == "failed"
     assert "32,767" in out["steps"][-1]["detail"]
     assert env.ticket("PAY-142")["description"] == "x" * 33000
@@ -156,7 +156,7 @@ def test_a_long_spec_is_attached_and_old_copies_removed_only_after(rest_env):
     long_spec = SPEC + ("- detail line for the spec\n" * 1600)
     assert len(long_spec) > 40000
     working_copy(env, text=long_spec)
-    r, out = sync(env)
+    r, _out = sync(env)
     assert r.returncode == 0, r.stdout
     t = env.ticket("PAY-142")
     assert [a["filename"] for a in t["attachments"]] == ["PAY-142-spec.md"]
@@ -178,7 +178,7 @@ def test_a_long_spec_is_attached_and_old_copies_removed_only_after(rest_env):
         if c["method"] == "POST"
     )
     working_copy(env, text=SPEC)
-    r, out = sync(env)
+    r, _out = sync(env)
     assert r.returncode == 0
     assert env.ticket("PAY-142")["attachments"] == []
     assert "FR-1" in env.ticket("PAY-142")["description"]
@@ -203,7 +203,7 @@ def test_jiras_size_error_falls_back_to_the_attachment(rest_env):
     env.add_ticket("PAY-142")
     env.update(descriptionLimit=200)
     working_copy(env, text=SPEC * 4)
-    r, out = sync(env)
+    r, _out = sync(env)
     assert r.returncode == 0, r.stdout
     assert [a["filename"] for a in env.ticket("PAY-142")["attachments"]] == ["PAY-142-spec.md"]
 
@@ -234,7 +234,7 @@ def test_main_checkout_and_worktree_share_one_working_copy(rest_env):
         ["git", "worktree", "add", "-q", "-b", "f", str(wt)], cwd=main, check=True, env=g
     )
     working_copy(env)
-    r, out = env.json("pull-spec", "--key", "PAY-142", cwd=wt)
+    _r, out = env.json("pull-spec", "--key", "PAY-142", cwd=wt)
     assert steps(out) == {"working-copy": "skipped"}
     assert out["steps"][0]["detail"].endswith("roster/PAY-142.md")
 

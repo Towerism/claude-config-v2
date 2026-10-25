@@ -58,7 +58,7 @@ SPEC = "## Goal\nExport the roster.\n"
 SPEC_WITH_SEAMS = "## Goal\nExport the roster.\n\n## Seams\n- export_csv(rows)\n"
 SPEC_SEAMS_IN_FENCE = "## Goal\nExport.\n\n```\n## Seams\n```\n"
 
-LINE_RE = re.compile(r"^- (?:run|waived|n/a): (\S+)", re.M)
+LINE_RE = re.compile(r"^- (?:run|waived|n/a): (\S+)", re.MULTILINE)
 
 
 def block(variant, *lines):

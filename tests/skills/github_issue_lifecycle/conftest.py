@@ -29,6 +29,7 @@ def run(*args, stdin=None, cwd=None):
         text=True,
         cwd=cwd,
         timeout=30,
+        check=False,
     )
 
 
@@ -149,6 +150,7 @@ class FakeGh:
             capture_output=True,
             text=True,
             timeout=30,
+            check=False,
         )
 
 

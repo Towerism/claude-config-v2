@@ -40,6 +40,7 @@ O_NONBLOCK|O_NOFOLLOW and checked again with fstat, at most 64 KiB. One 5-second
 hook. Always exits 0; an unexpected error is one fixed code on stderr.
 """
 
+import contextlib
 import json
 import os
 import re
@@ -141,7 +142,7 @@ class Unparsed(Exception):
 
 
 class Word:
-    __slots__ = ("text", "subs", "glob")
+    __slots__ = ("glob", "subs", "text")
 
     def __init__(self) -> None:
         self.text = ""
@@ -152,7 +153,7 @@ class Word:
 class Segment:
     """One simple command: its words and the bodies of its heredocs."""
 
-    __slots__ = ("words", "heredocs")
+    __slots__ = ("heredocs", "words")
 
     def __init__(self) -> None:
         self.words: list[Word] = []
@@ -1242,7 +1243,7 @@ BYPASS_PROMPT = re.compile(
 def session_bypassed(payload: dict) -> bool:
     """Whether the session's first user prompt starts ralph or autopilot. Reads the first 256 KB of the
     transcript; anything unreadable means no."""
-    try:
+    with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
         path = payload["transcript_path"]
         if not isinstance(path, str) or not os.path.isfile(path):
             return False
@@ -1260,30 +1261,33 @@ def session_bypassed(payload: dict) -> bool:
                 content = "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
             if isinstance(content, str) and content.strip():
                 return BYPASS_PROMPT.match(content) is not None
-    except Exception:
-        pass
     return False
 
 
 def main() -> None:
-    try:
+    parsed = False
+    with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
         payload = json.loads(sys.stdin.buffer.read().decode("utf-8"))
-    except Exception:
+        parsed = True
+    if not parsed:
         return
     if session_bypassed(payload):
         return
-    try:
-        signal.signal(signal.SIGALRM, on_deadline)
-        signal.alarm(DEADLINE_SECONDS)
-        reason = evaluate(payload)
-        signal.alarm(0)  # disarm before printing, so the alarm cannot fire mid-output
-        if reason:
-            print(json.dumps({"hookSpecificOutput": {
-                "hookEventName": "PreToolUse", "permissionDecision": "ask", "permissionDecisionReason": reason,
-            }}))
-    except Timeout:  # past the deadline: pass silently
-        return
-    except Exception:
+    failed = True
+    with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
+        try:
+            signal.signal(signal.SIGALRM, on_deadline)
+            signal.alarm(DEADLINE_SECONDS)
+            reason = evaluate(payload)
+            signal.alarm(0)  # disarm before printing, so the alarm cannot fire mid-output
+            if reason:
+                print(json.dumps({"hookSpecificOutput": {
+                    "hookEventName": "PreToolUse", "permissionDecision": "ask", "permissionDecisionReason": reason,
+                }}))
+            failed = False
+        except Timeout:  # past the deadline: pass silently
+            return
+    if failed:
         sys.stderr.write("bash_guard: error\n")  # the only output on an error: one fixed code
 
 

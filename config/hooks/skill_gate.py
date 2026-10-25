@@ -16,6 +16,7 @@ the diff. GIT_* variables are dropped, git is found once on a fixed PATH, output
 a test keeps the two equal.
 """
 
+import contextlib
 import json
 import os
 import re
@@ -206,7 +207,7 @@ BYPASS_PROMPT = re.compile(
 def session_bypassed(payload: dict) -> bool:
     """Whether the session's first user prompt starts ralph or autopilot. Reads the first 256 KB of the
     transcript; anything unreadable means no."""
-    try:
+    with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
         path = payload["transcript_path"]
         if not isinstance(path, str) or not os.path.isfile(path):
             return False
@@ -224,13 +225,12 @@ def session_bypassed(payload: dict) -> bool:
                 content = "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
             if isinstance(content, str) and content.strip():
                 return BYPASS_PROMPT.match(content) is not None
-    except Exception:
-        pass
     return False
 
 
 def main() -> None:
-    try:
+    parsed = False
+    with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
         payload = json.loads(sys.stdin.buffer.read().decode("utf-8"))
         if session_bypassed(payload):
             return
@@ -246,9 +246,11 @@ def main() -> None:
         cwd = payload.get("cwd")
         if not isinstance(name, str) or not NAME.fullmatch(name):
             return
-    except Exception:
+        parsed = True
+    if not parsed:
         return
-    try:
+    failed = True
+    with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
         if name in AUTOPILOT and event == "PreToolUse":
             emit(event, permissionDecision="ask", permissionDecisionReason=AUTOPILOT_REASON)
         # A NUL byte would make subprocess raise; such a cwd is skipped, not reported.
@@ -256,7 +258,8 @@ def main() -> None:
             text = review_context(cwd)
             if text:
                 emit(event, additionalContext=text)
-    except Exception:
+        failed = False
+    if failed:
         sys.stderr.write("skill_gate: error\n")
 
 

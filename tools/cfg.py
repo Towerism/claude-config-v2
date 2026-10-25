@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """cfg: install claude-config v2 into a Claude home, per machine.
 
     cfg.py plan     [--host NAME]   show what a deploy would change

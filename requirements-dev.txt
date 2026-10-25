@@ -1,4 +1,4 @@
 # Dev tooling only; keep equal to [dependency-groups].dev in pyproject.toml.
 pytest>=8
 pytest-cov>=5
-ruff>=0.6
+ruff==0.17.2

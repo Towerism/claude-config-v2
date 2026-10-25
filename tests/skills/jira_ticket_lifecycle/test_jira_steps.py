@@ -353,7 +353,7 @@ def test_comment_posts_a_file(env):
 def test_approve_in_manual_mode_quotes_the_words_and_swaps_the_labels(env):
     env.add_ticket("PAY-142", labels=["spec-draft", "approval-manual"])
     quote = env.file("quote.txt", "i approve the spec")
-    r, out = env.json("approve", "--key", "PAY-142", "--quote-file", quote)
+    r, _out = env.json("approve", "--key", "PAY-142", "--quote-file", quote)
     assert r.returncode == 0, r.stdout
     t = env.ticket("PAY-142")
     assert sorted(t["labels"]) == ["approval-manual", "spec-approved"]
@@ -439,7 +439,7 @@ def test_pr_body_writes_only_over_its_own_last_copy(env):
 def test_pr_body_with_no_copy_refuses_a_body_it_didnt_write(env):
     env.add_ticket("PAY-142")
     add_pr(env, body="someone's text\n")
-    r, out = env.json(
+    _r, out = env.json(
         "pr-body", "--key", "PAY-142", "--pr", "1", "--body", env.file("b.md", "mine\n")
     )
     assert steps(out) == {"body": "refused"}
@@ -448,7 +448,7 @@ def test_pr_body_with_no_copy_refuses_a_body_it_didnt_write(env):
 def test_review_marks_the_pr_ready_and_moves_the_ticket(env):
     env.add_ticket("PAY-142", state="In Progress")
     add_pr(env)
-    r, out = env.json("review", "--key", "PAY-142", "--pr", "1")
+    r, _out = env.json("review", "--key", "PAY-142", "--pr", "1")
     assert r.returncode == 0, r.stdout
     assert env.state()["prs"]["1"]["isDraft"] is False
     assert env.ticket("PAY-142")["state"] == "In Review"

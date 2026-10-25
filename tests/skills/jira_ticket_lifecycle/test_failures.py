@@ -223,7 +223,7 @@ def test_an_attachment_upload_with_no_id_fails(rest_env):
             {"match": "POST /rest/api/3/issue/PAY-142/attachments", "status": 200, "json": {}}
         ]
     )
-    r, out = rest_env.json(
+    _r, out = rest_env.json(
         "sync-spec", "--key", "PAY-142", "--spec", rest_env.file("s.md", "x\n" * 20000)
     )
     assert steps(out)["attachment"] == "failed"
@@ -383,6 +383,7 @@ def test_a_commit_message_on_stdin(env):
         text=True,
         env=env.environ(),
         cwd=env.repo,
+        check=False,
     )
     assert r.stdout.startswith("OK")
 

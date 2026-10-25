@@ -90,6 +90,7 @@ def diff_check(script, repo):
         capture_output=True,
         text=True,
         timeout=30,
+        check=False,
     )
     return r.returncode, json.loads(r.stdout)["problems"]
 

@@ -24,6 +24,7 @@ length. Nothing from the input is printed. Always exits 0; one 5-second deadline
 one fixed code on stderr.
 """
 
+import contextlib
 import fnmatch
 import json
 import os
@@ -122,10 +123,9 @@ def glob_denied(value: str) -> bool:
 
 def deny_terms_file() -> str | None:
     """The real path of deny-terms, or None when the home directory cannot be found."""
-    try:
+    with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
         return os.path.realpath(Path.home() / ".config" / "claude-config" / "deny-terms")
-    except Exception:
-        return None
+    return None
 
 
 def command_names_secret(command: str) -> bool:
@@ -134,7 +134,7 @@ def command_names_secret(command: str) -> bool:
             word, glob = match.groups()
             if glob:
                 # A glob word asks when its literal start is .env or deny-terms.
-                if word.startswith(".env") or word.startswith("deny-terms"):
+                if word.startswith((".env", "deny-terms")):
                     return True
             elif names_secret(word):
                 return True
@@ -163,7 +163,7 @@ BYPASS_PROMPT = re.compile(
 def session_bypassed(payload: dict) -> bool:
     """Whether the session's first user prompt starts ralph or autopilot. Reads the first 256 KB of the
     transcript; anything unreadable means no."""
-    try:
+    with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
         path = payload["transcript_path"]
         if not isinstance(path, str) or not os.path.isfile(path):
             return False
@@ -181,13 +181,12 @@ def session_bypassed(payload: dict) -> bool:
                 content = "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
             if isinstance(content, str) and content.strip():
                 return BYPASS_PROMPT.match(content) is not None
-    except Exception:
-        pass
     return False
 
 
 def main() -> None:
-    try:
+    parsed = False
+    with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
         payload = json.loads(sys.stdin.buffer.read().decode("utf-8"))
         if session_bypassed(payload):
             return
@@ -195,9 +194,11 @@ def main() -> None:
         fields = payload["tool_input"]
         if not isinstance(name, str) or not isinstance(fields, dict):
             return
-    except Exception:
+        parsed = True
+    if not parsed:
         return
-    try:
+    failed = True
+    with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
         signal.signal(signal.SIGALRM, on_deadline)
         signal.alarm(DEADLINE_SECONDS)  # one deadline for the whole hook
         if name == "Bash":
@@ -215,7 +216,8 @@ def main() -> None:
                     signal.alarm(0)
                     emit(permissionDecision="deny", permissionDecisionReason=DENY_REASON)
                     return
-    except Exception:
+        failed = False
+    if failed:
         sys.stderr.write("secrets_guard: error\n")  # the only output on error: a fixed code
 
 
