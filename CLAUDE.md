@@ -2,6 +2,11 @@
 
 The workflow here is OMC's: `/oh-my-claudecode:deep-interview` or `:ralplan` for anything non-trivial, then `:execute` with `:tdd`, `:review`, `:verify`. The design is in `README.md` and `docs/adr/`; a departure needs a new or updated ADR.
 
+## Shared background
+
+- Glossary: `GLOSSARY.md`. On term conflicts it wins; record a new term when it settles.
+- Decisions: `docs/adr/`.
+
 ## Commands
 
 - Tests: `python3 -I -m pytest`. Quote the result before saying done.
