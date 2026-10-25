@@ -4,7 +4,7 @@ oh-my-claudecode (OMC) owns the development workflow. These rules add guardrails
 
 ### Workflow, in order
 
-1. Unclear or large request: `/oh-my-claudecode:deep-interview`, then `/oh-my-claudecode:ralplan` (Planner, Architect and Critic loop until they agree; that loop is the plan review). A new repo: `/oh-my-claudecode:drydock` first.
+1. Unclear or large request: `/oh-my-claudecode:deep-interview` to settle the requirements. `/oh-my-claudecode:ralplan` (Planner, Architect and Critic loop until they agree; that loop is the plan review) writes the spec at step 4, after the test plan. A new repo: `/oh-my-claudecode:drydock` first.
 2. Start: the lifecycle skill for the tracker, `github-issue-lifecycle`, `gitea-issue-lifecycle` or `jira-ticket-lifecycle` (it owns claim, approval and merge even when `/launch`, `/harbor` or `/psm` is running; launch's parent issue holds the spec then), for the tracker the repo's CLAUDE.md names, else the host default stated at session start. Every code-change request in a repo with a tracker starts here, before editing code, even a bare "fix X".
 3. Test plan: the `oh-my-claudecode:test-engineer` agent plans the tests (seams, cases, expected behaviour) from the request, before any spec is written.
 4. Spec: the deep-interview spec or ralplan plan, written after the test plan and built on it, stored on the issue where the lifecycle skill says.

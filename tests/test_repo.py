@@ -154,10 +154,12 @@ def test_global_rules_stay_short_and_name_only_real_skills():
 
 def test_workflow_plans_the_tests_before_the_spec():
     text = (ROOT / "config" / "CLAUDE.global.md").read_text()
-    steps = re.findall(r"^\d+\. (.*)$", text, re.M)
-    plan = next(i for i, s in enumerate(steps) if "oh-my-claudecode:test-engineer" in s)
-    spec = next(i for i, s in enumerate(steps) if s.startswith("Spec:"))
+    steps = re.findall(r"^\d+\. (.*)$", text, re.MULTILINE)
+    plan = next((i for i, s in enumerate(steps) if s.startswith("Test plan:") and "oh-my-claudecode:test-engineer" in s), None)
+    spec = next((i for i, s in enumerate(steps) if s.startswith("Spec:")), None)
+    assert plan is not None and spec is not None, "workflow needs a Test plan step and a Spec step"
     assert plan < spec
+    assert "after the test plan" in steps[spec]
 
 
 def test_nothing_personal_is_committed():
