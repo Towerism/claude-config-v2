@@ -425,9 +425,11 @@ def suppresses_exception(node):
     if not isinstance(node, ast.Call):
         return False
     func = node.func
-    named = (isinstance(func, ast.Attribute) and func.attr == "suppress"
-             and isinstance(func.value, ast.Name) and func.value.id == "contextlib")
-    named = named or (isinstance(func, ast.Name) and func.id == "suppress")
+    if isinstance(func, ast.Attribute):
+        module = func.value
+        named = func.attr == "suppress" and isinstance(module, ast.Name) and module.id == "contextlib"
+    else:
+        named = isinstance(func, ast.Name) and func.id == "suppress"
     return named and any(isinstance(a, ast.Name) and a.id == "Exception" for a in node.args)
 
 
