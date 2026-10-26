@@ -23,7 +23,7 @@ One entry per term: definition, boundaries, one resolved ambiguity. Write here t
 - Resolved ambiguity: profiles differ only in `name` and `defaultTracker`; a test fails otherwise.
 
 ## Path declaration
-- Definition: the one issue comment between `<!-- path-declaration v1 -->` markers that marks each step of the change `run`, `waived` or `n/a` (ADR-0005).
+- Definition: the one issue comment (ticket comment in Jira) between `<!-- path-declaration v1 -->` markers (`path-declaration:start` and `path-declaration:end` lines in Jira, which strips HTML comments) that marks each step of the change `run`, `waived` or `n/a` (ADR-0005).
 - Boundary: `declaration-check` validates it at approval and at PR time; it records the path and does not prove a step ran.
 
 ## Pathway

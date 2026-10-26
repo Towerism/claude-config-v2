@@ -365,6 +365,13 @@ def test_self_review_does_not_let_required_steps_be_skipped():
 
 
 LIFECYCLE_SKILLS = ("github-issue-lifecycle", "gitea-issue-lifecycle", "jira-ticket-lifecycle")
+HTML_MARKERS = ("<!-- path-declaration v1 -->", "<!-- /path-declaration -->")
+# Jira strips HTML comments from stored comments, so its declaration uses plain marker lines.
+DECLARATION_MARKERS = {
+    "github-issue-lifecycle": HTML_MARKERS,
+    "gitea-issue-lifecycle": HTML_MARKERS,
+    "jira-ticket-lifecycle": ("path-declaration:start", "path-declaration:end"),
+}
 
 
 @pytest.mark.parametrize("skill", LIFECYCLE_SKILLS)
@@ -378,7 +385,7 @@ def test_lifecycle_skill_declares_the_path_after_the_claim_and_checks_it_twice(s
     assert claim < declare < settle
     section = text[declare:settle]
     for needle in ("Review the proposed pipeline?", "plain yes or no", "lists no skipped steps",
-                   "verbatim", "<!-- path-declaration v1 -->", "<!-- /path-declaration -->",
+                   "verbatim", *DECLARATION_MARKERS[skill],
                    "- run: ", "- waived: ", "- n/a: ", "variant:"):
         assert needle in section, needle
     checks = [m.start() for m in re.finditer("declaration-check", text)]
