@@ -440,6 +440,10 @@ def diff_check(base, repo_dir):
 
 DECL_START = "<!-- path-declaration v1 -->"
 DECL_END = "<!-- /path-declaration -->"
+# Jira strips the HTML form from stored comments, so the skill writes these; the HTML form stays
+# readable because the constants above are shared with the GitHub script.
+DECL_PLAIN_START = "path-declaration:start"
+DECL_PLAIN_END = "path-declaration:end"
 ADVISORY_STEPS = (
     "interview",
     "analyst",
@@ -479,8 +483,8 @@ SEAMS_RE = re.compile(r"#{1,6}\s+seams\b", re.IGNORECASE)
 def declaration_lines(text):
     """The lines inside the one declaration block, or None when there is no block."""
     lines = [line.strip() for line in text.splitlines()]
-    starts = [i for i, line in enumerate(lines) if line == DECL_START]
-    ends = [i for i, line in enumerate(lines) if line == DECL_END]
+    starts = [i for i, line in enumerate(lines) if line in (DECL_START, DECL_PLAIN_START)]
+    ends = [i for i, line in enumerate(lines) if line in (DECL_END, DECL_PLAIN_END)]
     if not starts and not ends:
         return None
     if len(starts) > 1 or len(ends) > 1:
@@ -489,6 +493,8 @@ def declaration_lines(text):
         raise MarkerError(EXIT_MALFORMED, "path-declaration block is not closed")
     if not starts or ends[0] < starts[0]:
         raise MarkerError(EXIT_MALFORMED, "closing marker without an opening marker")
+    if (lines[starts[0]] == DECL_START) != (lines[ends[0]] == DECL_END):
+        raise MarkerError(EXIT_MALFORMED, "path-declaration markers are of two different forms")
     return lines[starts[0] + 1 : ends[0]]
 
 

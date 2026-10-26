@@ -72,14 +72,16 @@ Post the user's answer to the question, and each wizard answer, as a ticket comm
 
 Step ids. Advisory (may be waived): `interview`, `analyst`, `docs-lookup`, `test-plan`, `history-cleanup`, `simplifier`, `qa`, `design`. Required (never waived): `self-review`, `spec-review`, `review-notes`, `tdd`, `diff-review`, `security-gate`, `verify`, plus `repro` for variant bug. `security-gate` is `n/a` with a fact stating that the diff touches none of auth, input parsing, secrets, shell, network or deserialization. `spec-review` is `n/a` only with fact `approval: no-review`. Variant docs marks `test-plan` and `tdd` `n/a` with fact `variant: docs`. Conditional advisory steps (`docs-lookup`, `history-cleanup`, `simplifier`, `qa`, `design`) may be `n/a` with the fact that makes them so. `interview`, `analyst` and `test-plan` are never `n/a` apart from that docs case: run them or record a waiver.
 
-Keep the declaration as one ticket comment. Post it, then update it as steps run. List every advisory step on its own line, marked `run`, `waived` or `n/a`. The check fails on any advisory step left out:
+Keep the declaration as one ticket comment. Post it, then update it as steps run. Jira strips `<!-- -->` from stored comments, so the markers are plain lines, each its own paragraph with a blank line around it. A declaration already posted with the HTML markers has lost them: repost it. List every advisory step on its own line, marked `run`, `waived` or `n/a`. The check fails on any advisory step left out:
 ```
-<!-- path-declaration v1 -->
+path-declaration:start
+
 variant: feature
 - run: <step-id> — <comment URL>
 - waived: <step-id> — "<quote>" — <comment URL of the verbatim answer>
 - n/a: <step-id> — <fact>
-<!-- /path-declaration -->
+
+path-declaration:end
 ```
 A `run` line cites a ticket comment that records the step, such as a review note or a self-review list. Under "No", each skipped advisory step is a `waived` line whose quote and URL come from the "No" answer. If the user later asks to waive a step, reopen the wizard: replace the line and cite the new comment. A spec returned to draft reopens the declaration. A waiver covers one issue. The check runs at approval (step 5) and at PR time (step 7).
 
@@ -113,7 +115,7 @@ Publishing a spec sets the draft label and removes the approved one. Then, by mo
 
 Every review pass, on the spec or the PR diff, gets its review note posted as a ticket comment listing each finding and how it was handled. One pass per spec and one per diff; never re-run it after fixes.
 
-Before the approve step, in every mode, show the declaration in the approval prompt and run the check. Only comments by the authenticated login (what `jira me` prints, held in `$me`) count. Read the ticket with `view --key <key>`, write its comments to `$tmp/comments.json` as a JSON list of `{url, body, author}` (url `<site>/browse/<key>?focusedCommentId=<id>`, author the commenter's login in the same form as `$me`), the latest comment by `$me` holding `<!-- path-declaration v1 -->` to `$tmp/declaration.md`, and the working-copy spec to `$tmp/spec.md`; then:
+Before the approve step, in every mode, show the declaration in the approval prompt and run the check. Only comments by the authenticated login (what `jira me` prints, held in `$me`) count. Read the ticket with `view --key <key>`, write its comments to `$tmp/comments.json` as a JSON list of `{url, body, author}` (url `<site>/browse/<key>?focusedCommentId=<id>`, author the commenter's login in the same form as `$me`), the latest comment by `$me` with a line that is exactly `path-declaration:start` to `$tmp/declaration.md`, and the working-copy spec to `$tmp/spec.md`; then:
 ```bash
 python3 -I <skill-dir>/scripts/ticket_lifecycle.py declaration-check --declaration "$tmp/declaration.md" --comments "$tmp/comments.json" --author "$me" --approval-mode manual --spec "$tmp/spec.md"
 ```
