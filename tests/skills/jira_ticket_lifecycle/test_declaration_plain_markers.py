@@ -14,37 +14,36 @@ PLAIN_START = "path-declaration:start"
 PLAIN_END = "path-declaration:end"
 
 
-def plain_block(variant, *lines, start=PLAIN_START, end=PLAIN_END, gap=""):
-    head = [start, gap] if gap else [start]
+def plain_block(variant, *lines, start=PLAIN_START, end=PLAIN_END, gap=None):
+    head = [start] if gap is None else [start, gap]
     body = [f"variant: {variant}", *lines, "{runs}"]
-    tail = [gap, end] if gap else [end]
+    tail = [end] if gap is None else [gap, end]
     return "\n".join(head + body + tail) + "\n"
 
 
-named = case
-
 VALID = [
-    named("plain markers, adjacent lines", plain_block("feature"), exit=0),
-    named("plain markers, blank lines around", plain_block("feature", gap=" "), exit=0),
-    named(
+    case("plain markers, adjacent lines", plain_block("feature"), exit=0),
+    case("plain markers, blank lines around", plain_block("feature", gap=""), exit=0),
+    case(
         "html markers still read",
         plain_block("feature", start=dc.START, end=dc.END),
         exit=0,
     ),
 ]
 MISSING = [
-    named(
+    case(
         "markers stripped by Jira",
         "variant: feature\n{runs}\n",
         codes=["missing-declaration"],
     ),
 ]
 MALFORMED = [
-    named("plain start, html end", plain_block("feature", end=dc.END), exit=4),
-    named("html start, plain end", plain_block("feature", start=dc.START), exit=4),
-    named("two plain starts", PLAIN_START + "\n" + plain_block("feature"), exit=4),
-    named("unclosed plain block", plain_block("feature", end="- n/a: x — y"), exit=4),
-    named("plain end before start", plain_block("feature", start=PLAIN_END, end=PLAIN_START), exit=4),
+    case("plain start, html end", plain_block("feature", end=dc.END), exit=4),
+    case("html start, plain end", plain_block("feature", start=dc.START), exit=4),
+    case("html start with a plain start", dc.START + "\n" + plain_block("feature"), exit=4),
+    case("two plain starts", PLAIN_START + "\n" + plain_block("feature"), exit=4),
+    case("unclosed plain block", plain_block("feature", end="- n/a: x — y"), exit=4),
+    case("plain end before start", plain_block("feature", start=PLAIN_END, end=PLAIN_START), exit=4),
 ]
 
 
