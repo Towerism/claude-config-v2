@@ -134,7 +134,8 @@ def desired_files(host: dict) -> dict[str, bytes]:
     files: dict[str, bytes] = {}
     for skill in host.get("skills", []):
         base = ROOT / "config" / "skills" / skill
-        for path in sorted(p for p in base.rglob("*") if p.is_file() and "__pycache__" not in p.parts):
+        skipped = {"__pycache__", ".omc"}
+        for path in sorted(p for p in base.rglob("*") if p.is_file() and not skipped & set(p.relative_to(base).parts)):
             files[f"skills/{skill}/{path.relative_to(base).as_posix()}"] = path.read_bytes()
     for hook in host.get("hooks", []):
         files[f"hooks/{hook}"] = (ROOT / "config" / "hooks" / hook).read_bytes()

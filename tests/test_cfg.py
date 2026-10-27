@@ -357,6 +357,21 @@ def test_host_names_cannot_climb(tmp_path, monkeypatch, field, value):
         cfg.load_host("evil")
 
 
+def test_deploy_skips_omc_state_folders_inside_a_skill(tmp_path, monkeypatch):
+    skill = tmp_path / "config" / "skills" / "demo"
+    (skill / ".omc" / "state").mkdir(parents=True)
+    (skill / "scripts" / ".omc").mkdir(parents=True)
+    (skill / "SKILL.md").write_text("demo")
+    (skill / ".omc" / "state" / "x.json").write_text("{}")
+    (skill / "scripts" / ".omc" / "y.json").write_text("{}")
+    (skill / "scripts" / "run.py").write_text("pass")
+    monkeypatch.setattr(cfg, "ROOT", tmp_path)
+    assert sorted(cfg.desired_files({"skills": ["demo"], "hooks": []})) == [
+        "skills/demo/SKILL.md",
+        "skills/demo/scripts/run.py",
+    ]
+
+
 def test_a_planted_temp_file_symlink_is_not_followed(home, tmp_path):
     home.mkdir()
     victim = tmp_path / "victim"
