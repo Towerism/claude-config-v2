@@ -365,6 +365,8 @@ def test_deploy_skips_omc_state_folders_inside_a_skill(tmp_path, monkeypatch):
     (skill / ".omc" / "state" / "x.json").write_text("{}")
     (skill / "scripts" / ".omc" / "y.json").write_text("{}")
     (skill / "scripts" / "run.py").write_text("pass")
+    (skill / "scripts" / "__pycache__").mkdir()
+    (skill / "scripts" / "__pycache__" / "run.pyc").write_text("x")
     monkeypatch.setattr(cfg, "ROOT", tmp_path)
     assert sorted(cfg.desired_files({"skills": ["demo"], "hooks": []})) == [
         "skills/demo/SKILL.md",
