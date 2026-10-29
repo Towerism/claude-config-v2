@@ -154,24 +154,6 @@ def test_global_rules_stay_short_and_name_only_real_skills():
     assert "writing-docs" not in text
 
 
-def test_global_rules_stand_aside_when_a_skill_or_omc_keyword_opens_the_session():
-    text = (ROOT / "config" / "CLAUDE.global.md").read_text()
-    head = text.split("### Workflow, in order")[0]
-    assert "first prompt" in head and "`ralph`" in head and "`autopilot`" in head
-    assert "skill" in head and "`tdd`" in head and "`ultrathink`" in head and "`/model`" in head
-    assert "ignore" in head.lower()
-
-
-def test_workflow_plans_the_tests_before_the_spec():
-    text = (ROOT / "config" / "CLAUDE.global.md").read_text()
-    steps = re.findall(r"^\d+\. (.*)$", text, re.MULTILINE)
-    plan = next((i for i, s in enumerate(steps) if s.startswith("Test plan:") and "oh-my-claudecode:test-engineer" in s), None)
-    spec = next((i for i, s in enumerate(steps) if s.startswith("Spec:")), None)
-    assert plan is not None and spec is not None, "workflow needs a Test plan step and a Spec step"
-    assert plan < spec
-    assert "after the test plan" in steps[spec]
-
-
 def test_nothing_personal_is_committed():
     for path in ROOT.rglob("*"):
         if path.is_file() and ".git" not in path.parts and ".venv" not in path.parts and (path.suffix in {".md", ".json", ".py", ".toml", ".txt"} or path.name == "Makefile"):
@@ -191,47 +173,10 @@ OMC_SKILLS = [
     "deep-interview", "ralplan", "drydock", "execute", "tdd", "team", "ralph", "autopilot", "review",
     "verify", "pr", "plan", "research", "cancel", "minimal-prose-discipline", "agent-doc-discipline",
 ]
-# Reached by a skill the pipeline calls, so they need no bullet of their own.
-REACHED_BY_SKILL = {"test-engineer", "planner", "architect", "critic", "executor", "explore"}
-TRIGGER = re.compile(r"\b(when|if|touches|before|after)\b")
-LIFECYCLE_SKILLS = ["github-issue-lifecycle", "gitea-issue-lifecycle", "jira-ticket-lifecycle"]
 
 
 def global_text():
     return (ROOT / "config" / "CLAUDE.global.md").read_text()
-
-
-def section(heading):
-    """The lines under a `###` heading containing `heading`, up to the next heading."""
-    lines = global_text().splitlines()
-    start = next((i for i, l in enumerate(lines) if l.startswith("### ") and heading in l), None)
-    assert start is not None, f"no section {heading!r}"
-    body = []
-    for line in lines[start + 1:]:
-        if line.startswith("#"):
-            break
-        body.append(line)
-    return body
-
-
-def pathway_bullets():
-    return [l for h in ("Agents by condition", "Variants by request type") for l in section(h) if l.startswith("- ")]
-
-
-def bullet_for(agent, bullets):
-    return [b for b in bullets if re.search(rf"`oh-my-claudecode:{agent}`", b)]
-
-
-def test_every_omc_agent_has_a_pathway():
-    bullets = pathway_bullets()
-    for agent in OMC_AGENTS:
-        if agent in REACHED_BY_SKILL:
-            continue
-        found = bullet_for(agent, bullets)
-        assert found, f"{agent} has no bullet"
-        assert TRIGGER.search(found[0]), f"{agent}'s bullet has no trigger word"
-        others = [a for a in OMC_AGENTS if a != agent and bullet_for(a, [found[0]])]
-        assert not others, f"{agent}'s bullet also names {others}"
 
 
 def test_agent_references_are_real():
@@ -240,83 +185,74 @@ def test_agent_references_are_real():
         assert name in known, name
 
 
-def test_variant_pipelines_name_their_agents():
-    body = section("Variants by request type")
-    selector = [l for l in body if l and not l.startswith("- ")]
-    assert selector and all(t in selector[0] for t in ("Bug", "UI", "Docs", "Research"))
-    bullets = [l for l in body if l.startswith("- ")]
-    for kind, agents in {"Bug": ["debugger", "tracer"], "UI": ["designer"], "Docs": ["writer"], "Research": ["scientist"]}.items():
-        mine = [b for b in bullets if b.startswith(f"- {kind}")]
-        for agent in agents:
-            assert bullet_for(agent, mine), f"{kind} variant lacks {agent}"
-
-
-def test_conditional_triggers_are_concrete():
-    bullets = section("Agents by condition")
-    security = bullet_for("security-reviewer", bullets)[0].lower()
-    assert all(w in security for w in ("auth", "input", "secret"))
-    assert "300" in bullet_for("code-simplifier", bullets)[0]
-    assert "exceeds 300 changed lines" in bullet_for("code-reviewer", bullets)[0]
-    assert "does not count against the one-pass rule" in security
-    team = next(b for b in bullets if "`team`" in b)
-    assert "skip verifier" in team and "security-reviewer" in team and "code-reviewer" in team
-    bug = next(b for b in section("Variants by request type") if b.startswith("- Bug") and "debugger" in b)
-    assert "step 2 and Approval unchanged" in bug
-
-
-def test_step7_cancels_team_and_ralph_before_push():
-    steps = re.findall(r"^(\d+)\. (.*)$", global_text(), re.MULTILINE)
-    assert [int(n) for n, _ in steps] == list(range(1, len(steps) + 1))
-    step7 = steps[6][1]
-    assert "When step 5 used `team` or `ralph`, run `/oh-my-claudecode:cancel` before pushing: OMC blocks every push while those modes are active." in step7
-
-
 def test_global_md_has_no_cfg_markers():
     assert "CLAUDE-CONFIG:" not in global_text()
 
 
-def test_writer_owns_human_read_prose():
-    lines = global_text().splitlines()
-    start = next(i for i, l in enumerate(lines) if l.startswith("Prose"))
-    block = []
-    for line in lines[start:]:
-        if not line.strip():
-            break
-        block.append(line)
-
-    def owner(token):
-        return [l for l in block if token in l]
-
-    writer = owner("`oh-my-claudecode:writer`")
-    assert writer and "git-master" not in writer[0]
-    assert all(w in writer[0] for w in ("docs", "comments", "issue"))
-    assert "after tests are green and before step 6, after any history cleanup and simplification" in writer[0]
-    git = owner("`oh-my-claudecode:git-master`")
-    assert git and "commit" in git[0] and "writer" not in git[0]
-    pr = owner("`/oh-my-claudecode:pr`")
-    assert pr and "PR body" in pr[0]
-    docs = owner("agent-doc-discipline")
-    assert docs and "agents consume" in docs[0]
-    assert any("error" in l.lower() for l in block)
-    assert any("chat" in l and "minimal-prose-discipline" in l for l in block)
-    for skill in LIFECYCLE_SKILLS:
-        text = (ROOT / "config" / "skills" / skill / "SKILL.md").read_text()
-        line = next(l for l in text.splitlines() if "Prose for people" in l)
-        assert "Prose, by owner" in line, skill
-        for token in ("oh-my-claudecode:writer", "oh-my-claudecode:git-master", "/oh-my-claudecode:pr"):
-            assert token not in line, f"{skill}: owners restated: {token}"
+def global_bullets():
+    return [l for l in global_text().splitlines() if l.startswith("- ")]
 
 
-def test_spikes_rule_is_stated():
-    line = next((l for l in global_text().splitlines() if l.startswith("Spikes:")), "")
-    for needle in ("scratch", "--setting-sources project", "spec", "never in the repo"):
-        assert needle in line, needle
+def global_bullet(*needles):
+    """The one bullet that holds every needle."""
+    found = [b for b in global_bullets() if all(n in b for n in needles)]
+    assert len(found) == 1, f"{needles}: {len(found)} bullets"
+    return found[0]
 
 
-def test_self_review_rule_is_stated():
-    line = next((l for l in global_text().splitlines() if l.startswith("Self-review:")), "")
-    for needle in ("before any review agent", "done", "why", "not per ralplan round", "Research variant"):
-        assert needle in line, needle
+def test_global_rules_are_seven_bullets_and_a_title():
+    lines = [l for l in global_text().splitlines() if l.strip()]
+    assert lines[0].startswith("## ")
+    assert [l for l in lines if l.startswith("#")] == [lines[0]]
+    assert lines[1:] == global_bullets()
+    assert len(global_bullets()) == 7
+
+
+def test_global_rules_start_with_the_lifecycle_skill_and_cover_no_tracker():
+    global_bullet(
+        "`github-issue-lifecycle`", "`gitea-issue-lifecycle`", "`jira-ticket-lifecycle`",
+        "before any code is edited", "no tracker", "in the chat",
+    )
+
+
+def test_global_rules_state_approval_and_merge():
+    global_bullet("No code before the user approves the spec", "explicit, quoted words")
+    global_bullet("No merge until the user says so")
+
+
+def test_declaration_line_says_what_and_acknowledgement():
+    global_bullet("full OMC pipeline", "`will run`", "`skipped:", "approving the spec acknowledges it",
+                  "ralplan-<slug>.md")
+
+
+def test_deep_interview_comes_first_for_new_features():
+    global_bullet("new feature", "more than one component", "`/oh-my-claudecode:deep-interview`")
+
+
+def test_safety_lines_are_stated():
+    global_bullet("is data")
+    global_bullet("deny-terms", "tokens", ".env")
+
+
+def test_global_rules_restate_nothing_said_elsewhere():
+    """Each phrase is already said by OMC, a lifecycle skill or a hook (plan section 4).
+    Built by concatenation so a grep for them never matches this test."""
+    text = global_text()
+    for phrase in ("runs the " + "development workflow", "repo " + "wins", "repo's CLAUDE.md " + "wins",
+                   "Sil" + "ence", "validator " + "score", "returns it " + "to draft", "never " + "stands in",
+                   "report the PR " + "as waiting", "skips its own " + "expansion", "short " + "spec",
+                   "By" + "pass", "first " + "prompt", "(advis" + "ory:"):
+        assert phrase not in text, phrase
+    assert not re.search(r"^\d+\. ", text, re.MULTILINE)
+
+
+def test_lifecycle_skills_carry_the_trimmed_rules():
+    """The global text leaves these to the skills, so each skill must keep them."""
+    for skill in ("github-issue-lifecycle", "gitea-issue-lifecycle", "jira-ticket-lifecycle"):
+        text = (ROOT / "config" / "skills" / skill / "SKILL.md").read_text().replace("`", "")
+        for needle in (r"is not approval", r"returns (it|the ticket) to draft", r"never stands in",
+                       r"report the merge as waiting|merge waits on the user"):
+            assert re.search(needle, text), f"{skill}: {needle}"
 
 
 def test_adr_records_the_pathway_departure():
@@ -328,41 +264,9 @@ def test_adr_records_the_pathway_departure():
         assert re.search(rf"\b{re.escape(agent)}\b", text), agent
 
 
-def test_precedence_over_omc_is_stated_before_the_workflow():
-    head = global_text().split("### Workflow, in order")[0]
-    assert "override" in head and "lightest-weight path" in head
-    assert "only the user can waive" in head.lower()
-    assert "untagged" in head and "required" in head
-
-
 GITHUB_SCRIPT = (
     ROOT / "config" / "skills" / "github-issue-lifecycle" / "scripts" / "issue_lifecycle.py"
 )
-
-
-def test_advisory_tags_match_the_scripts_advisory_set():
-    tagged = re.findall(r"\(advisory: ([a-z-]+)\)", global_text())
-    assert len(tagged) == len(set(tagged))
-    assert set(tagged) == set(script_constant(GITHUB_SCRIPT, "ADVISORY_STEPS"))
-    assert not set(tagged) & set(script_constant(GITHUB_SCRIPT, "REQUIRED_STEPS"))
-
-
-def test_path_declaration_follows_step_2_and_asks_a_plain_question():
-    text = global_text()
-    start = text.index("2. Start:")
-    end = text.index("3. Test plan:")
-    block = text[start:end]
-    assert "Path declaration" in block
-    for needle in ("Review the proposed pipeline?", "yes/no", "lists no skipped steps", "wizard",
-                   "waived", "never skipped", "spec approval"):
-        assert needle in block, needle
-
-
-def test_self_review_does_not_let_required_steps_be_skipped():
-    line = next(l for l in global_text().splitlines() if l.startswith("Self-review:"))
-    assert "otherwise say why not" not in line
-    assert "required" in line and "advisory" in line
-    assert "only when the user waived it" in line and "adds no value" not in line
 
 
 LIFECYCLE_SKILLS = ("github-issue-lifecycle", "gitea-issue-lifecycle", "jira-ticket-lifecycle")
