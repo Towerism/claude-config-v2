@@ -41,7 +41,7 @@ Request bodies:
 
 ```json
 {"title": "Add CSV export to the roster page", "body": "..."}
-{"name": "in progress", "color": "FBCA04", "description": "Claimed"}
+{"name": "in progress", "color": "FBCA04", "description": "Spec approved; work under way"}
 {"labels": [12, 15]}
 {"assignees": ["login"]}
 {"title": "feat(roster): add CSV export (#42)", "body": "...", "head": "feature/42-add-csv-export", "base": "main"}

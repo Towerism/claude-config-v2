@@ -58,7 +58,7 @@ Before reopening a closed issue, or taking over one assigned to someone else or 
 ### 2. Claim it
 
 ```bash
-gh label create "in progress" --color FBCA04 --description "Claimed" 2>/dev/null || true
+gh label create "in progress" --color FBCA04 --description "Spec approved; work under way" 2>/dev/null || true
 gh label create "draft" --color D4C5F9 --description "Spec awaiting approval" 2>/dev/null || true
 gh label create "approved" --color 0E8A16 --description "Spec approved" 2>/dev/null || true
 gh label create "hotfix" --color B60205 --description "Emergency fix" 2>/dev/null || true

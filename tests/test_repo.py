@@ -268,6 +268,16 @@ def test_git_workflow_has_no_rewrite_of_a_pushed_commit(skill):
     assert "**pushed** commit" not in text
 
 
+@pytest.mark.parametrize("path,label", [
+    ("github-issue-lifecycle/SKILL.md", 'gh label create "in progress" --color FBCA04 --description "Spec approved; work under way"'),
+    ("gitea-issue-lifecycle/references/gitea-commands.md",
+     '{"name": "in progress", "color": "FBCA04", "description": "Spec approved; work under way"}'),
+])
+def test_in_progress_label_says_it_starts_at_approval(path, label):
+    """in progress is set at approval, not at the claim (ADR-0006)."""
+    assert label in (ROOT / "config" / "skills" / path).read_text()
+
+
 def test_adr_records_the_pathway_departure():
     adrs = sorted((ROOT / "docs" / "adr").glob("0004-*.md"))
     assert len(adrs) == 1
