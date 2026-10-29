@@ -1436,8 +1436,8 @@ def spec_attachments(fields, key):
 
 
 def placeholder_description(header, key, text):
-    """The description when the spec is attached: the note that names the attachment, then the
-    optional summary from --placeholder-file. The note always comes first."""
+    """The description for a spec that lives in the attachment: a note, plus an optional
+    distilled summary the user asked for. The first block always says where the spec is."""
     note = f"The spec is too long for the ticket description, so it is attached as {key}-spec.md."
     text = (text or "").strip()
     if text:
@@ -1455,7 +1455,7 @@ def placeholder_description(header, key, text):
 
 
 def is_attachment_placeholder(inner, key):
-    """True when the description's first block is the attachment note, so the spec is not inline."""
+    """True when the blocks between the markers are an attachment note, not the spec."""
     return bool(inner) and f"attached as {key}-spec.md" in inner[0]
 
 
@@ -1565,7 +1565,7 @@ def cmd_pull_spec(res, jira, cfg, key, repo_dir):
         return res.step("working-copy", "none", path)
     inner = blocks[span[0] + 1 : span[1]]
     if is_attachment_placeholder(inner, key):
-        # The description holds the note, with any summary, never the spec, whether or not the file is there.
+        # The description holds only the note, never the spec, whether or not the file is there.
         where = (
             ""
             if spec_attachments(fields, key)
