@@ -154,10 +154,11 @@ def test_global_rules_stay_short_and_name_only_real_skills():
     assert "writing-docs" not in text
 
 
-def test_global_rules_stand_aside_when_ralph_or_autopilot_opens_the_session():
+def test_global_rules_stand_aside_when_a_skill_or_omc_keyword_opens_the_session():
     text = (ROOT / "config" / "CLAUDE.global.md").read_text()
     head = text.split("### Workflow, in order")[0]
     assert "first prompt" in head and "`ralph`" in head and "`autopilot`" in head
+    assert "skill" in head and "`tdd`" in head and "`ultrathink`" in head and "`/model`" in head
     assert "ignore" in head.lower()
 
 
