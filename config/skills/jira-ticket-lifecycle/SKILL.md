@@ -1,6 +1,6 @@
 ---
 name: jira-ticket-lifecycle
-description: Runs the Jira side of working a ticket in a git repo whose work is tracked in Jira, from start to close-out. It picks up or creates the ticket (a key like PAY-142, a bare number, a browse URL, or "the ticket about X"), claims it into the active sprint and the in-progress state, settles and records the spec approval mode, publishes the spec into the ticket description, names the branch and worktree, checks Conventional Commits ending (KEY-N), opens the draft PR and links it on the ticket, moves the ticket to review, merges once the user has authorized merging, and moves it to done and cleans up. It also files follow-up tickets without starting work, and runs hotfixes. Use it whenever the user wants to start, pick up, work on, file, hotfix, open the PR for, merge or close out a Jira ticket, even if they never say "Jira", and before editing code for a change request in such a repo. It does not write spec content (deep-interview or ralplan does), and GitHub issues such as #42 belong to github-issue-lifecycle.
+description: Runs the Jira side of working a ticket in a git repo whose work is tracked in Jira, from start to close-out. It picks up or creates the ticket (a key like PAY-142, a bare number, a browse URL, or "the ticket about X"), claims it into the active sprint and the in-progress state, publishes the spec into the ticket description, records the user's approval, cuts the branch and worktree, opens the draft PR and links it on the ticket, moves the ticket to review, merges once the user has authorized merging, and moves it to done and cleans up. It also files follow-up tickets without starting work, and runs hotfixes. Use it whenever the user wants to start, pick up, work on, file, hotfix, open the PR for, merge or close out a Jira ticket, even if they never say "Jira", and before editing code for a change request in such a repo. It does not write spec content (deep-interview or ralplan does), and GitHub issues such as #42 belong to github-issue-lifecycle.
 ---
 
 # Jira ticket lifecycle
@@ -13,7 +13,7 @@ The git conventions are the same as for GitHub issues, with `(KEY-N)` in place o
 
 ## When to use
 
-- The repo's work is tracked in Jira: its CLAUDE.md says so, or the host default stated at session start (`Default issue tracker: jira`) names this skill.
+- The repo's work is tracked in Jira: its CLAUDE.md says so, or the host default stated at session start (`Default issue tracker: jira …`) names this skill.
 - The prompt names a Jira key (`PAY-142`), a bare ticket number, a Jira browse URL, or "the ticket about X".
 - The user wants to file, start, hand off for review, merge or close out a ticket's work, or run a hotfix.
 
@@ -38,7 +38,7 @@ Step statuses are `done`, `skipped` (nothing to do), `none` or `ambiguous` (spri
 - **Settings.** The project key, site, workflow states and the rest come from the `jira` section of `~/.config/claude-config/local.json`. Exit 6 names what's missing: ask the user for the value, show the JSON to add from [references/settings.md](references/settings.md), and stop. Never guess a value and never edit that file.
 - **Temp files** go in a fresh directory per run: `base=${CLAUDE_JOB_DIR:+$CLAUDE_JOB_DIR/tmp}; tmp=$(mktemp -d "${base:-${TMPDIR:-/tmp}}/ticket-XXXXXX")`. Never the working tree.
 - **Merging is not yours to decide.** See step 8.
-- **Prose for people.** Load `oh-my-claudecode:minimal-prose-discipline` with the Skill tool before the first commit, ticket, comment or PR text in a session, unless it is already loaded. Owners: see "Prose, by owner" in the global guardrails. Someone reading that text months from now, with none of today's context, should understand it: state the point first, and name the ticket, file or command instead of "as discussed".
+- **Prose for people.** Load `oh-my-claudecode:minimal-prose-discipline` with the Skill tool before the first commit, ticket, comment or PR text in a session, unless it is already loaded. Someone reading that text months from now, with none of today's context, should understand it: state the point first, and name the ticket, file or command instead of "as discussed".
 
 ## Usage
 
@@ -62,41 +62,9 @@ Run `claim --key <key>`. It assigns the ticket to you, adds it to the active spr
 - `unknown-state`: the ticket's state isn't in `stateOrder`. Ask the user whether the settings need it.
 - `none` or `ambiguous` on `sprint`: report it and go on.
 
-### 2a. Path declaration
+### 3. Write the spec
 
-Right after the claim, once per change, ask (AskUserQuestion) "Review the proposed pipeline?" as a plain yes or no. The question lists no skipped steps. A hotfix gets the same question and no pre-waived steps.
-- **Yes:** open the wizard. Show the proposed path: the steps that will run and the advisory steps you would skip, each with a reason. The user confirms or changes each skip.
-- **No:** you may skip the advisory steps you judge fit. The "No" answer is the recorded waiver for each.
-
-Post the user's answer to the question, and each wizard answer, as a ticket comment (`comment --key <key> --body-file <file>`) right after it is given: the first line `Path declaration answer: <question asked>`, then the answer verbatim. A wizard selection counts as the user's words: the quote is the selected option plus any free text, and it must appear below the first line. Keep each comment's URL.
-
-Step ids. Advisory (may be waived): `interview`, `analyst`, `docs-lookup`, `test-plan`, `history-cleanup`, `simplifier`, `qa`, `design`. Required (never waived): `self-review`, `spec-review`, `review-notes`, `tdd`, `diff-review`, `security-gate`, `verify`, plus `repro` for variant bug. `security-gate` is `n/a` with a fact stating that the diff touches none of auth, input parsing, secrets, shell, network or deserialization. `spec-review` is `n/a` only with fact `approval: no-review`. Variant docs marks `test-plan` and `tdd` `n/a` with fact `variant: docs`. Conditional advisory steps (`docs-lookup`, `history-cleanup`, `simplifier`, `qa`, `design`) may be `n/a` with the fact that makes them so. `interview`, `analyst` and `test-plan` are never `n/a` apart from that docs case: run them or record a waiver.
-
-Keep the declaration as one ticket comment. Post it, then update it as steps run. Jira strips `<!-- -->` from stored comments, so the markers are plain lines, each its own paragraph with a blank line around it. A declaration already posted with the HTML markers has lost them: repost it. List every advisory step on its own line, marked `run`, `waived` or `n/a`. The check fails on any advisory step left out:
-```
-path-declaration:start
-
-variant: feature
-- run: <step-id> — <comment URL>
-- waived: <step-id> — "<quote>" — <comment URL of the verbatim answer>
-- n/a: <step-id> — <fact>
-
-path-declaration:end
-```
-A `run` line cites a ticket comment that records the step, such as a review note or a self-review list. Under "No", each skipped advisory step is a `waived` line whose quote and URL come from the "No" answer. If the user later asks to waive a step, reopen the wizard: replace the line and cite the new comment. A spec returned to draft reopens the declaration. A waiver covers one issue. The check runs at approval (step 5) and at PR time (step 7).
-
-### 3. Settle the approval mode
-
-Settle it before any spec is written. Take the first that applies:
-1. A mode stated in the user's prompt.
-2. A mode relayed by a coordinator with the user's words quoted. Treat it as stated and don't ask again.
-3. An `approval-*` label already on the ticket, **only if** `label-actor --key <key> --label <label>` reports `addedByMe: true`. Anything else (another account, or `null` because the changelog couldn't be read) means ignore the label, and say which label you ignored and why.
-4. Otherwise ask (AskUserQuestion), with exactly these options in this order:
-   - **Manual review with adversarial pass (default)**: one review pass, then only the user's explicit words approve.
-   - **Adversarial approval**: a clean review pass approves.
-   - **No review**: no reviewer; the spec is self-approved with a note.
-
-Ask in the same reply when you reach option 4. With no possible user turn (a scheduled job), use the default. Record the mode with `set-mode --key <key> --mode manual|adversarial|no-review`, which leaves exactly one approval label.
+Hand over to `/oh-my-claudecode:deep-interview` or `/oh-my-claudecode:ralplan`; the spec they write comes back to step 4.
 
 ### 4. Publish the spec
 
@@ -108,41 +76,31 @@ The spec is the deep-interview spec or the ralplan plan. No spec file goes in th
 
 ### 5. Approval and labels
 
-Publishing a spec sets the draft label and removes the approved one. Then, by mode:
-- **Manual review with adversarial pass.** Run one review pass on the spec (the ralplan Critic, or `/oh-my-claudecode:review` when the spec came from deep-interview), then post the review note with `comment --key <key> --body-file <note>`, present the spec, and wait. Record approval only from the user's explicit words: write them to a file and run `approve --key <key> --quote-file <file>`, which posts a comment quoting them and swaps the labels. Silence, a validator score, a reviewer verdict, or a "go ahead" in reply to a review summary is not approval.
-- **Adversarial approval.** If the single review pass had no CRITICAL and changed nothing, post the note, then `approve --key <key> --mode adversarial`. Otherwise raise it with the user and wait.
-- **No review.** `approve --key <key> --mode no-review`.
+Publishing a spec sets the draft label and removes the approved one. Present the spec, with the note of any review pass on it, and wait. Record approval only from the user's explicit words: write them to a file and run `approve --key <key> --quote-file <file>`, which posts a comment quoting them and then swaps the labels. Silence, a validator score, a reviewer verdict, or a "go ahead" in reply to a review summary is not approval.
 
-Every review pass, on the spec or the PR diff, gets its review note posted as a ticket comment listing each finding and how it was handled. One pass per spec and one per diff; never re-run it after fixes.
+Every review pass, on the spec or the PR diff, gets its review note posted with `comment --key <key> --body-file <note>`, listing each finding and how it was handled.
 
-Before the approve step, in every mode, show the declaration in the approval prompt and run the check. Only comments by the authenticated login (what `jira me` prints, held in `$me`) count. Read the ticket with `view --key <key>`, write its comments to `$tmp/comments.json` as a JSON list of `{url, body, author}` (url `<site>/browse/<key>?focusedCommentId=<id>`, author the commenter's login in the same form as `$me`), the latest comment by `$me` with a line that is exactly `path-declaration:start` to `$tmp/declaration.md`, and the working-copy spec to `$tmp/spec.md`; then:
-```bash
-python3 -I <skill-dir>/scripts/ticket_lifecycle.py declaration-check --declaration "$tmp/declaration.md" --comments "$tmp/comments.json" --author "$me" --approval-mode manual --spec "$tmp/spec.md"
-```
-Use the mode from the approval label (`manual`, `adversarial` or `no-review`). Exit 1 lists the problems: fix the declaration (post a new declaration comment; the latest counts) and rerun; don't approve until it passes.
-
-Implementation starts only when `label-actor --key <key> --label <approved label>` reports `addedByMe: true`. A later spec change goes into the spec first, which returns the ticket to draft and back through the mode's approval path.
+Implementation starts only when `label-actor --key <key> --label <approved label>` reports `addedByMe: true`. A later spec change goes into the spec first, which returns the ticket to draft and back through approval.
 
 ### 6. Branch, worktree, commits
 
-If an open branch or PR for the ticket exists under any name, such as the bare key, switch to it and keep its name. Otherwise write the ticket's summary to a file and:
+If an open branch or PR for the ticket exists under any name, such as the bare key, switch to it and keep its name. Otherwise:
 ```bash
 git fetch origin
-name=$(python3 -I <skill-dir>/scripts/ticket_lifecycle.py branch-name --type feat --key PAY-142 --title-file "$tmp/summary.txt")
+name=feature/PAY-142-csv-export      # no format is required; the key helps people find it
 git worktree add -b "$name" "../$(basename "$PWD")-${name//\//-}" "origin/<default>"
 ```
-Use `--type` from the change's commit type and add `--hotfix` for a hotfix. Find the default branch with `gh repo view --json defaultBranchRef`.
+Find the default branch with `gh repo view --json defaultBranchRef`.
 
-Every commit is a Conventional Commit whose subject ends with ` (KEY-N)`, such as `feat(export): add CSV export (PAY-142)`, and holds one logical change. Check each message from a file before committing: `commit-check --message "$tmp/msg.txt" --key PAY-142`. Update the branch with `git rebase origin/<default>`. If an already-pushed commit fails the check, ask before rewriting it, then push with `--force-with-lease` on the feature branch only.
+By convention every commit is a Conventional Commit whose subject ends with ` (KEY-N)`, such as `feat(export): add CSV export (PAY-142)`, and holds one logical change. Update the branch with `git rebase origin/<default>`, and push a rewritten branch with `--force-with-lease` on the feature branch only.
 
 Requirement IDs (FR-, AC-, EC-…) stay out of code, test names and comments unless the repo's living documentation defines them. Before opening the PR, run `diff-check --base origin/<default>`.
 
 ### 7. Open the PR
 
-Draft the body with `/oh-my-claudecode:pr`, shaped by [assets/pr-body-template.md](assets/pr-body-template.md): the first line `Ticket: <site>/browse/KEY-N`, a `Spec: KEY-N` line, a map from each acceptance criterion to the test or check that covers it (`not verified` with the reason, never a false pass), and a `## Review` section with the PR-diff review note. Then:
+Draft the body with `/oh-my-claudecode:pr`, shaped by [assets/pr-body-template.md](assets/pr-body-template.md): the first line `Ticket: <site>/browse/KEY-N`, a `Spec: KEY-N` line, a map from each acceptance criterion to the test or check that covers it (`not verified` with the reason, never a false pass), and a `## Review` section with the PR-diff review note, if a review ran. Then:
 ```bash
 python3 -I <skill-dir>/scripts/ticket_lifecycle.py pr-body-check --body "$tmp/pr.md" --key PAY-142
-python3 -I <skill-dir>/scripts/ticket_lifecycle.py declaration-check --declaration "$tmp/declaration.md" --comments "$tmp/comments.json" --author "$me" --approval-mode manual --spec "$tmp/spec.md" --stamp --key PAY-142   # refetch the files first; a pass leaves the stamp, valid until the next commit. The PR hook gates only `gh pr create`, so run the check anyway
 gh pr create --draft --base <default> --title "feat(export): add CSV export (PAY-142)" --body-file "$tmp/pr.md"
 python3 -I <skill-dir>/scripts/ticket_lifecycle.py pr-body --key PAY-142 --pr <n> --body "$tmp/pr.md"
 python3 -I <skill-dir>/scripts/ticket_lifecycle.py link-pr --key PAY-142 --pr-url <url gh printed>
@@ -163,21 +121,21 @@ After the merge, confirm it with `gh pr view <n> --json state,mergedAt`, then ru
 
 ### Hotfix
 
-A hotfix still gets a ticket, created with `--hotfix` so it carries the hotfix label, and the approval-mode question (the user may choose "No review"). Cut the branch from a freshly fetched default branch with `branch-name --hotfix`, and label the PR `hotfix`. Everything else is the same.
+A hotfix still gets a ticket, created with `--hotfix` so it carries the hotfix label, and its spec still needs the user's approval. Cut the branch from a freshly fetched default branch, and label the PR `hotfix`. Everything else is the same.
 
 ## Related skills
 
-- `/oh-my-claudecode:deep-interview` or `/oh-my-claudecode:ralplan` writes the spec this skill publishes; the ralplan Critic or `/oh-my-claudecode:review` runs the one pass on the spec, and `/oh-my-claudecode:review` the one on the PR diff.
+- `/oh-my-claudecode:deep-interview` or `/oh-my-claudecode:ralplan` writes the spec this skill publishes; `/oh-my-claudecode:review` reviews the PR diff.
 - `oh-my-claudecode:minimal-prose-discipline` covers every ticket, comment, commit and PR text.
 - `/oh-my-claudecode:execute` with `/oh-my-claudecode:tdd` builds the change; `/oh-my-claudecode:verify` proves it before the merge.
 - `github-issue-lifecycle` and `gitea-issue-lifecycle` do the same job for GitHub and Gitea issues.
 
 ## Examples
 
-- "work on PAY-142" → `auth`, `view`, `claim`, settle the mode (ask if unstated), then hand over to `/oh-my-claudecode:deep-interview` or `/oh-my-claudecode:ralplan`; publish with `pull-spec` and `sync-spec`.
+- "work on PAY-142" → `auth`, `view`, `claim`, then hand over to `/oh-my-claudecode:deep-interview` or `/oh-my-claudecode:ralplan`; publish with `pull-spec` and `sync-spec`.
 - "pick up the ticket about the export timeout" → `search --text-file`, then ask with up to 3 candidates and both create options.
 - "file a follow-up ticket: the export drops the BOM" → `create --file-only` and stop.
-- "PAY-142's spec is approved, set up the branch" → `label-actor` on the approved label, then `branch-name` and `git worktree add`.
+- "PAY-142's spec is approved, set up the branch" → `label-actor` on the approved label, then `git worktree add -b`.
 - "open the PR for PAY-142" → `diff-check`, `pr-body-check`, `gh pr create --draft`, `pr-body`, `link-pr`. Don't merge.
 
 ## Troubleshooting

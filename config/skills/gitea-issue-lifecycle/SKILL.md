@@ -1,6 +1,6 @@
 ---
 name: gitea-issue-lifecycle
-description: Runs the Gitea side of working an issue in a git repo whose code and issues live on a Gitea server, from start to close-out. It picks up or creates the issue (#42, issue 42, an issue URL on the repo's Gitea server, or "the issue about X"), claims it, settles and records the spec approval mode, stores the spec in the issue body with draft/approved labels, names the branch and worktree, checks Conventional Commit messages, opens the PR that closes the issue, merges once the user has authorized merging and confirmed it in the chat, and cleans up. It also files follow-up or bug issues without starting work, and runs hotfixes. Use it whenever the user wants to start, pick up, work on, file, hotfix, open the PR for, merge, or close out an issue in a Gitea repo, even if they never say "Gitea", and before editing code for a change request in such a repo. It does not write spec content (deep-interview or ralplan does); GitHub issues belong to github-issue-lifecycle and Jira tickets to jira-ticket-lifecycle.
+description: Runs the Gitea side of working an issue in a git repo whose code and issues live on a Gitea server, from start to close-out. It picks up or creates the issue (#42, issue 42, an issue URL on the repo's Gitea server, or "the issue about X"), claims it, stores the spec in the issue body with draft/approved labels, records the user's approval, cuts the branch and worktree, opens the PR that closes the issue, merges once the user has authorized merging and confirmed it in the chat, and cleans up. It also files follow-up or bug issues without starting work, and runs hotfixes. Use it whenever the user wants to start, pick up, work on, file, hotfix, open the PR for, merge, or close out an issue in a Gitea repo, even if they never say "Gitea", and before editing code for a change request in such a repo. It does not write spec content (deep-interview or ralplan does); GitHub issues belong to github-issue-lifecycle and Jira tickets to jira-ticket-lifecycle.
 ---
 
 # Gitea issue lifecycle
@@ -24,7 +24,7 @@ Git conventions (commit format, branch names, rebasing, hotfix, rollback) are in
 - **Text goes in a file.** Write each JSON request body with the Write tool and pass it as `-d @<file>`; never put a title, body or comment on a command line. The one exception is search words (step 1), reduced to letters, digits and single spaces first.
 - **Temp files** go in a fresh directory per run, never in the working tree: `base=${CLAUDE_JOB_DIR:+$CLAUDE_JOB_DIR/tmp}; mktemp -d "${base:-${TMPDIR:-/tmp}}/issue-XXXXXX"`. Shell variables don't persist between Bash calls, so run it once, note the printed path, and write that path out in full in every later command and in every Write call. Where the commands below show `$tmp`, that path goes in its place.
 - **Merging is not yours to decide.** See step 8.
-- **Prose for people.** Load `oh-my-claudecode:minimal-prose-discipline` with the Skill tool before the first commit, issue, comment or PR text in a session, unless it's already loaded. Owners: see "Prose, by owner" in the global guardrails. Someone reading that text months from now, with none of today's context, should understand it: state the point first, and name the issue, file or command instead of "as discussed".
+- **Prose for people.** Load `oh-my-claudecode:minimal-prose-discipline` with the Skill tool before the first commit, issue, comment or PR text in a session, unless it's already loaded. Someone reading that text months from now, with none of today's context, should understand it: state the point first, and name the issue, file or command instead of "as discussed".
 
 ## Usage
 
@@ -44,7 +44,7 @@ Ask before reopening a closed issue, and before taking over one assigned to some
 
 ### 2. Claim it
 
-Read the labels with `GET repos/<o>/<r>/labels`, following pages until a short page comes back. Gitea accepts a second label with the same name, so list first and never create one that exists. For each of these seven that is missing, `POST repos/<o>/<r>/labels` with `{"name": ..., "color": ..., "description": ...}`:
+Read the labels with `GET repos/<o>/<r>/labels`, following pages until a short page comes back. Gitea accepts a second label with the same name, so list first and never create one that exists. For each of these four that is missing, `POST repos/<o>/<r>/labels` with `{"name": ..., "color": ..., "description": ...}`:
 
 | Label | Colour |
 |---|---|
@@ -52,44 +52,12 @@ Read the labels with `GET repos/<o>/<r>/labels`, following pages until a short p
 | `draft` | `D4C5F9` |
 | `approved` | `0E8A16` |
 | `hotfix` | `B60205` |
-| `approval: manual`, `approval: adversarial`, `approval: no-review` | `5319E7` |
 
 Then assign the user (`PATCH repos/<o>/<r>/issues/N` with `{"assignees": ["<login>"]}`) and add `in progress`. Labels are added with `POST repos/<o>/<r>/issues/N/labels` and `{"labels": [<ids>]}` and removed with `DELETE repos/<o>/<r>/issues/N/labels/<id>`, always by id from the label list.
 
-### 2a. Path declaration
+### 3. Write the spec
 
-Right after the claim, once per change, ask (AskUserQuestion) "Review the proposed pipeline?" as a plain yes or no. The question lists no skipped steps. A hotfix gets the same question and no pre-waived steps.
-- **Yes:** open the wizard. Show the proposed path: the steps that will run and the advisory steps you would skip, each with a reason. The user confirms or changes each skip.
-- **No:** you may skip the advisory steps you judge fit. The "No" answer is the recorded waiver for each.
-
-Post the user's answer to the question, and each wizard answer, as an issue comment (`POST repos/<o>/<r>/issues/N/comments`) right after it is given: the first line `Path declaration answer: <question asked>`, then the answer verbatim. A wizard selection counts as the user's words: the quote is the selected option plus any free text, and it must appear below the first line. Keep each comment's URL.
-
-Step ids. Advisory (may be waived): `interview`, `analyst`, `docs-lookup`, `test-plan`, `history-cleanup`, `simplifier`, `qa`, `design`. Required (never waived): `self-review`, `spec-review`, `review-notes`, `tdd`, `diff-review`, `security-gate`, `verify`, plus `repro` for variant bug. `security-gate` is `n/a` with a fact stating that the diff touches none of auth, input parsing, secrets, shell, network or deserialization. `spec-review` is `n/a` only with fact `approval: no-review`. Variant docs marks `test-plan` and `tdd` `n/a` with fact `variant: docs`. Conditional advisory steps (`docs-lookup`, `history-cleanup`, `simplifier`, `qa`, `design`) may be `n/a` with the fact that makes them so. `interview`, `analyst` and `test-plan` are never `n/a` apart from that docs case: run them or record a waiver.
-
-Keep the declaration as one issue comment. Post it, then update it as steps run. List every advisory step on its own line, marked `run`, `waived` or `n/a`. The check fails on any advisory step left out:
-```
-<!-- path-declaration v1 -->
-variant: feature
-- run: <step-id> — <comment URL>
-- waived: <step-id> — "<quote>" — <comment URL of the verbatim answer>
-- n/a: <step-id> — <fact>
-<!-- /path-declaration -->
-```
-A `run` line cites an issue comment that records the step, such as a review note or a self-review list. Under "No", each skipped advisory step is a `waived` line whose quote and URL come from the "No" answer. If the user later asks to waive a step, reopen the wizard: replace the line and cite the new comment. A spec returned to draft reopens the declaration. A waiver covers one issue. The check runs at approval (step 5) and at PR time (step 7).
-
-### 3. Settle the approval mode
-
-Settle it before any spec is written. Take the first that applies:
-
-1. A mode stated in the user's prompt.
-2. A mode relayed by a coordinator with the user's words quoted; don't ask again.
-3. An `approval: *` label already on the issue, **only if the user's own login added it**. Read `GET repos/<o>/<r>/issues/N/timeline`, following pages until a short page comes back, and take the most recent entry whose `type` is `label` for that label and whose `body` is `1` (added); its `user.login` is the actor. If there is no such entry or the shape isn't what you expect, ignore the label and say so.
-4. Otherwise ask (AskUserQuestion), offering exactly these, in this order:
-   - **Manual review with adversarial pass (default)**: one review pass, then only the user's explicit words approve.
-   - **Adversarial approval**: a clean review pass approves.
-   - **No review**: no reviewer; the spec is self-approved with a note.
-
-Ask in this same reply, before other work. With no user turn possible (a scheduled job), use the default. Record the mode as exactly one `approval: *` label, replacing any other. Only the user changes the mode.
+Hand over to `/oh-my-claudecode:deep-interview` or `/oh-my-claudecode:ralplan`; the spec they write comes back to step 4.
 
 ### 4. Store the spec on the issue
 
@@ -108,31 +76,17 @@ tea api --login <login> -X PATCH repos/<o>/<r>/issues/N -d @"$tmp/patch.json"
 
 ### 5. Approval and labels
 
-- **Manual review with adversarial pass.** Run one review pass on the spec (the ralplan Critic, or `/oh-my-claudecode:review` when the spec came from deep-interview), then post the review note as an issue comment (`POST repos/<o>/<r>/issues/N/comments`) and present the spec. Then wait. Add `approved` only to record the user's explicit approval words, in the same step as a comment quoting them. Silence, a validator score, a reviewer verdict, or a "go ahead" to a review summary is not approval.
-- **Adversarial approval.** A single review pass with no CRITICAL that changed nothing: post the note and add `approved`. Otherwise raise it with the user and wait.
-- **No review.** Add `approved` with a comment saying it was self-approved under "no review".
+Present the spec, with the note of any review pass on it, and wait. Add `approved` only to record the user's explicit approval words, in the same step as a comment quoting them (`POST repos/<o>/<r>/issues/N/comments`). Silence, a validator score, a reviewer verdict, or a "go ahead" to a review summary is not approval.
 
-Before `approved` is set, in every mode, show the declaration in the approval prompt and run the check. Only comments by the authenticated login (`login` from `GET user`, held in `$me`) count. Write the issue's comments (`GET repos/<o>/<r>/issues/N/comments`, every page) to `$tmp/comments.json` as a JSON list of `{url, body, author}` with `url` from `html_url` and `author` from `user.login`, the latest comment by `$me` holding `<!-- path-declaration v1 -->` to `$tmp/declaration.md`, and the spec to `$tmp/spec.md`; then:
-```bash
-python3 -I <skill-dir>/scripts/issue_lifecycle.py declaration-check --declaration "$tmp/declaration.md" --comments "$tmp/comments.json" --author "$me" --approval-mode manual --spec "$tmp/spec.md"
-```
-Use the mode from the `approval: *` label (`manual`, `adversarial` or `no-review`). Exit 1 lists the problems: fix the declaration and rerun; don't set `approved` until it passes.
-
-Implementation starts only when `approved` is on the issue **and the user's login added it** (the timeline check from step 3). An `approved` added by any other account is reported and treated as `draft`. If the spec must change later, change the spec first; that returns it to `draft`. Every review pass, on the spec or the PR diff, gets its note posted as an issue comment; one pass per spec and one per diff, never re-run after fixes.
+Implementation starts only when `approved` is on the issue **and the user's login added it**. Read `GET repos/<o>/<r>/issues/N/timeline`, following pages until a short page comes back, and take the most recent entry whose `type` is `label` for `approved` and whose `body` is `1` (added); its `user.login` is the actor. If there is no such entry or the shape isn't what you expect, treat the label as not added by the user and say so. An `approved` added by any other account is reported and treated as `draft`. If the spec must change later, change the spec first; that returns it to `draft`. Every review pass, on the spec or the PR diff, gets its note posted as an issue comment.
 
 ### 6. Branch, worktree, commits
 
-Reuse an open branch or PR for the issue if one exists. Otherwise:
-
-```bash
-python3 -I <skill-dir>/scripts/issue_lifecycle.py branch-name --type feat --issue 42 --title "Add CSV export to the roster page"
-```
-
-The title is issue text, so reduce it to letters, digits and single spaces before it goes on the command line. Cut the branch from the freshly fetched default branch into a worktree of the same name. Every commit is a Conventional Commit ending `(#42)`, checked first with `commit-check --message "$tmp/msg.txt"` on that script. Update with `git rebase`, never a merge from the default branch. Before the PR, run `diff-check --base origin/<default>` on that script. Add `--hotfix` to `branch-name` for a hotfix.
+Reuse an open branch or PR for the issue if one exists. Otherwise cut a branch from the freshly fetched default branch into a worktree of the same name, with `git worktree add -b <name>`. No name format is required; a name built from issue text holds only letters, digits, `-` and `/`. By convention every commit is a Conventional Commit ending `(#42)`. Update with `git rebase`, never a merge from the default branch. Before the PR, run `diff-check --base origin/<default>` on the script.
 
 ### 7. Open the PR
 
-Draft the body with `/oh-my-claudecode:pr`, shaped by [assets/pr-body-template.md](assets/pr-body-template.md): `Closes #42` alone on its line, `Spec: #42`, a map from each acceptance criterion to its test, and a `## Review` section with the PR-diff review note. Check it with `pr-body-check --body "$tmp/pr.md" --issue 42` on the script. Then refetch the comments and rerun the step 5 `declaration-check` with `--stamp --issue 42`; a pass leaves the stamp, valid until the next commit. The PR hook gates only `gh pr create`, so this PR call is not blocked without it: run the check anyway. Read the default branch from `GET repos/<o>/<r>` (`default_branch`), then `POST repos/<o>/<r>/pulls` with `{"title": ..., "body": ..., "head": ..., "base": ...}` in a file. Give a hotfix PR the `hotfix` label.
+Draft the body with `/oh-my-claudecode:pr`, shaped by [assets/pr-body-template.md](assets/pr-body-template.md): `Closes #42` alone on its line, `Spec: #42`, a map from each acceptance criterion to its test, and a `## Review` section with the PR-diff review note, if a review ran. Check it with `pr-body-check --body "$tmp/pr.md" --issue 42` on the script. Read the default branch from `GET repos/<o>/<r>` (`default_branch`), then `POST repos/<o>/<r>/pulls` with `{"title": ..., "body": ..., "head": ..., "base": ...}` in a file. Give a hotfix PR the `hotfix` label.
 
 Gitea doesn't report which issues a PR will close, so don't claim a link you can't read. The body check plus step 8's close check stand in for it. If the PR can't target the default branch, warn that the issue won't close on merge.
 
@@ -148,7 +102,7 @@ After the merge, confirm `state` is `closed` on the issue, remove `in progress`,
 
 ### Hotfix
 
-A hotfix gets an issue labelled `hotfix`, the approval-mode question (the user may choose "No review"), and a `hotfix/` branch cut from a freshly fetched default branch. Everything else is the same.
+A hotfix gets an issue labelled `hotfix`, a spec the user approves like any other, and a branch cut from a freshly fetched default branch. Everything else is the same.
 
 ## Troubleshooting
 

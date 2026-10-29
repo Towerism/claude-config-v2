@@ -8,7 +8,6 @@ Every value here is invented. Replace them with the project's own.
 
 ```json
 {
-  "defaultTracker": "jira",
   "jira": {
     "project": "PAY",
     "site": "https://example.atlassian.net",
@@ -20,7 +19,7 @@ Every value here is invented. Replace them with the project's own.
 }
 ```
 
-The top-level `defaultTracker` is optional: it overrides the host profile's default tracker on this machine (the session-start hook reads it). The script reads only the `jira` object.
+The top-level `defaultTracker` is ignored. The tracker comes from the repo's CLAUDE.md, a `jira.project` key in its history, its `origin`, or the host profile. The script reads only the `jira` object.
 
 ## Every key
 
@@ -39,7 +38,7 @@ The top-level `defaultTracker` is optional: it overrides the host profile's defa
 | `labels` | no | below | Label names, to override any default. Jira labels can't hold spaces. |
 | `specDir` | no | `~/.local/state/claude-config/jira-specs` | Where the local working copies of specs live, one folder per repo. |
 
-Default labels: `draft` is `spec-draft`, `approved` is `spec-approved`, `hotfix` is `hotfix`, and `manual`, `adversarial` and `noReview` are `approval-manual`, `approval-adversarial` and `approval-no-review`.
+Default labels: `draft` is `spec-draft`, `approved` is `spec-approved` and `hotfix` is `hotfix`. The old `manual`, `adversarial` and `noReview` keys are ignored.
 
 ## What else the machine needs
 

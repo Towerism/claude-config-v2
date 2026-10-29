@@ -9,7 +9,6 @@ import sys
 import pytest
 
 from tests.conftest import ROOT
-from tests.skills.declaration_cases import script_constant
 
 
 def hook_trackers():
@@ -264,58 +263,23 @@ def test_adr_records_the_pathway_departure():
         assert re.search(rf"\b{re.escape(agent)}\b", text), agent
 
 
-GITHUB_SCRIPT = (
-    ROOT / "config" / "skills" / "github-issue-lifecycle" / "scripts" / "issue_lifecycle.py"
-)
-
-
 LIFECYCLE_SKILLS = ("github-issue-lifecycle", "gitea-issue-lifecycle", "jira-ticket-lifecycle")
-HTML_MARKERS = ("<!-- path-declaration v1 -->", "<!-- /path-declaration -->")
-# Jira strips HTML comments from stored comments, so its declaration uses plain marker lines.
-DECLARATION_MARKERS = {
-    "github-issue-lifecycle": HTML_MARKERS,
-    "gitea-issue-lifecycle": HTML_MARKERS,
-    "jira-ticket-lifecycle": ("path-declaration:start", "path-declaration:end"),
-}
 
 
 @pytest.mark.parametrize("skill", LIFECYCLE_SKILLS)
-def test_lifecycle_skill_declares_the_path_after_the_claim_and_checks_it_twice(skill):
-    text = (ROOT / "config" / "skills" / skill / "SKILL.md").read_text()
-    claim = text.index("### 2. Claim it")
-    declare = text.index("Path declaration")
-    approval = text.index("### 5. Approval and labels")
-    pr = text.index("### 7. Open the PR")
-    settle = text.index("### 3. Settle the approval mode")
-    assert claim < declare < settle
-    section = text[declare:settle]
-    for needle in ("Review the proposed pipeline?", "plain yes or no", "lists no skipped steps",
-                   "verbatim", *DECLARATION_MARKERS[skill],
-                   "- run: ", "- waived: ", "- n/a: ", "variant:"):
-        assert needle in section, needle
-    checks = [m.start() for m in re.finditer("declaration-check", text)]
-    assert not any(declare < c < approval for c in checks), "check belongs to approval and PR time"
-    assert any(approval < c < pr for c in checks), "check before approved is set"
-    assert any(c > pr for c in checks), "check at PR time"
-    assert "--stamp" in text[pr:] and "--approval-mode" in text and "--spec" in text
-
-
-@pytest.mark.parametrize("skill", LIFECYCLE_SKILLS)
-def test_lifecycle_skill_checks_the_declaration_against_your_own_comments(skill):
-    text = (ROOT / "config" / "skills" / skill / "SKILL.md").read_text()
-    calls = [l for l in text.splitlines() if "declaration-check --" in l]
-    assert calls
-    for line in calls:
-        assert '--author "$me"' in line, line
-    assert "{url, body, author}" in text
-    assert "authenticated login" in text
-    section = text[text.index("### 2a. Path declaration"):text.index("### 3. Settle")]
-    assert "`Path declaration answer: <question asked>`" in section
-    conditional = script_constant(GITHUB_SCRIPT, "CONDITIONAL_STEPS")
-    line = next(l for l in section.splitlines() if l.startswith("Step ids."))
-    sentence = line[line.index("Conditional advisory steps"):]
-    sentence = sentence[:sentence.index(".") + 1]
-    assert set(re.findall(r"`([a-z-]+)`", sentence)) == set(conditional)
+def test_lifecycle_skills_carry_no_retired_steps(skill):
+    """Approval modes, the path declaration, its stamp and the commit and branch checks are
+    retired (ADR-0006). Needles are built by concatenation so a grep never matches this test."""
+    needles = ("declaration" + "-check", "path-" + "declaration", "Path " + "declaration",
+               "approval" + ": ", "approval" + "-manual", "approval" + "-adversarial",
+               "approval" + "-no-review", "set" + "-mode", "--" + "mode", "commit" + "-check",
+               "branch" + "-name", "check_" + "commit", "slug" + "ify", "--" + "stamp",
+               "approval " + "mode", "Adversarial " + "approval", "No " + "review",
+               "Review the proposed " + "pipeline")
+    for path in sorted(skill_files(ROOT / "config" / "skills" / skill)):
+        text = path.read_text()
+        for needle in needles:
+            assert needle not in text, f"{path.relative_to(ROOT)}: {needle}"
 
 
 def test_adr_records_that_required_steps_bind_omc():

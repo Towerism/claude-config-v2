@@ -16,9 +16,6 @@ LABELS = [
     "draft",
     "approved",
     "hotfix",
-    "approval: manual",
-    "approval: adversarial",
-    "approval: no-review",
 ]
 
 

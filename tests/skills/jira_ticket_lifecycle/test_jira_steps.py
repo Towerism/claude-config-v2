@@ -270,23 +270,18 @@ def test_a_failing_move_is_reported(rest_env):
     assert "transition not allowed" in out["steps"][-1]["detail"]
 
 
-# ── approval mode and labels ─────────────────────────────────────────────────
+# ── label provenance ─────────────────────────────────────────────────────────
 
 
-def test_set_mode_leaves_exactly_one_approval_label(env):
-    env.add_ticket("PAY-142", labels=["approval-manual", "approval-adversarial", "keep"])
-    r, out = env.json("set-mode", "--key", "PAY-142", "--mode", "no-review")
-    assert r.returncode == 0
-    assert sorted(env.ticket("PAY-142")["labels"]) == ["approval-no-review", "keep"]
-    _, out = env.json("set-mode", "--key", "PAY-142", "--mode", "no-review")
-    assert steps(out) == {"labels": "skipped"}
+def approve(env, key="PAY-142", words="i approve the spec"):
+    return env.json("approve", "--key", key, "--quote-file", env.file("quote.txt", words))
 
 
 def test_label_actor_trusts_only_the_owners_latest_addition(rest_env):
     env = rest_env
-    env.add_ticket("PAY-142")
-    env.run("set-mode", "--key", "PAY-142", "--mode", "manual")
-    r, out = env.json("label-actor", "--key", "PAY-142", "--label", "approval-manual")
+    env.add_ticket("PAY-142", labels=["spec-draft"])
+    approve(env)
+    r, out = env.json("label-actor", "--key", "PAY-142", "--label", "spec-approved")
     assert r.returncode == 0, r.stdout
     assert (out["present"], out["addedByMe"]) == (True, True)
     s = env.state()
@@ -295,38 +290,34 @@ def test_label_actor_trusts_only_the_owners_latest_addition(rest_env):
         {
             "author": {"accountId": OTHER["accountId"]},
             "created": "x",
-            "items": [{"field": "labels", "fromString": "approval-manual", "toString": ""}],
+            "items": [{"field": "labels", "fromString": "spec-approved", "toString": ""}],
         }
     )
     log.append(
         {
             "author": {"accountId": OTHER["accountId"]},
             "created": "y",
-            "items": [
-                {"field": "labels", "fromString": "", "toString": "approval-manual spec-approved"}
-            ],
+            "items": [{"field": "labels", "fromString": "", "toString": "spec-approved"}],
         }
     )
-    s["tickets"]["PAY-142"]["labels"] = ["approval-manual", "spec-approved"]
+    s["tickets"]["PAY-142"]["labels"] = ["spec-approved"]
     s["changelogPageSize"] = 1
     env.write_state(s)
     r, out = env.json("label-actor", "--key", "PAY-142", "--label", "spec-approved")
     assert r.returncode == 1
     assert out["addedByMe"] is False
     assert out["author"] == OTHER["accountId"]
-    _, out = env.json("label-actor", "--key", "PAY-142", "--label", "approval-manual")
-    assert out["addedByMe"] is False
     pages = [c for c in env.calls("rest") if "changelog" in c["path"]]
     assert any("startAt=2" in c["path"] for c in pages)
 
 
 def test_label_actor_does_not_trust_a_label_when_a_page_fails(rest_env):
-    rest_env.add_ticket("PAY-142")
-    rest_env.run("set-mode", "--key", "PAY-142", "--mode", "manual")
+    rest_env.add_ticket("PAY-142", labels=["spec-draft"])
+    approve(rest_env)
     rest_env.update(
         restCanned=[{"match": "GET /rest/api/3/issue/PAY-142/changelog", "status": 500}]
     )
-    r, out = rest_env.json("label-actor", "--key", "PAY-142", "--label", "approval-manual")
+    r, out = rest_env.json("label-actor", "--key", "PAY-142", "--label", "spec-approved")
     assert r.returncode == 1
     assert out["addedByMe"] is None
 
@@ -350,31 +341,23 @@ def test_comment_posts_a_file(env):
     assert not (env.tmp / "pwned").exists()
 
 
-def test_approve_in_manual_mode_quotes_the_words_and_swaps_the_labels(env):
-    env.add_ticket("PAY-142", labels=["spec-draft", "approval-manual"])
-    quote = env.file("quote.txt", "i approve the spec")
-    r, _out = env.json("approve", "--key", "PAY-142", "--quote-file", quote)
+def test_approve_quotes_the_words_and_swaps_the_labels(env):
+    env.add_ticket("PAY-142", labels=["spec-draft"])
+    r, _out = approve(env)
     assert r.returncode == 0, r.stdout
     t = env.ticket("PAY-142")
-    assert sorted(t["labels"]) == ["approval-manual", "spec-approved"]
+    assert t["labels"] == ["spec-approved"]
     assert "> i approve the spec" in t["comments"][-1]
 
 
-def test_approve_needs_the_users_words_in_manual_mode(env):
+def test_approve_needs_the_users_quote(env):
     env.add_ticket("PAY-142", labels=["spec-draft"])
     assert env.run("approve", "--key", "PAY-142").returncode == 2
-    assert env.ticket("PAY-142")["labels"] == ["spec-draft"]
-
-
-@pytest.mark.parametrize(
-    ("mode", "phrase"), [("no-review", "no review"), ("adversarial", "adversarial")]
-)
-def test_approve_in_other_modes_says_why(env, mode, phrase):
-    env.add_ticket("PAY-142", labels=["spec-draft"])
-    env.run("approve", "--key", "PAY-142", "--mode", mode)
+    r = env.run("approve", "--key", "PAY-142", "--quote-file", env.file("empty.txt", " \n"))
+    assert r.returncode == 2
+    assert env.run("approve", "--key", "PAY-142", "--mode", "no-review").returncode == 2
     t = env.ticket("PAY-142")
-    assert t["labels"] == ["spec-approved"]
-    assert phrase in t["comments"][-1].lower()
+    assert (t["labels"], t.get("comments", [])) == (["spec-draft"], [])
 
 
 # ── PR link, body, review, merge-check, done ─────────────────────────────────

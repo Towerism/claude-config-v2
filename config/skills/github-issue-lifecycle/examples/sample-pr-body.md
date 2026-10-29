@@ -7,4 +7,4 @@ Spec: #42
 - export button -> tests/roster-export.test.ts
 
 ## Review
-PR-diff adversarial review: CONCERNS, W1 fixed.
+PR-diff review: CONCERNS, W1 fixed.

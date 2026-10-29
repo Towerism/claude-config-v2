@@ -78,8 +78,6 @@ CASES = {
         "create",
     ),
     "create: link fails": ({}, [fail("jira issue link")], ("create-link",), "link"),
-    "set-mode: missing ticket": (None, [], ("set-mode",), "read"),
-    "set-mode: label edit fails": ({}, [fail("jira issue edit")], ("set-mode",), "labels"),
     "approve: missing ticket": (None, [], ("approve",), "read"),
     "approve: comment fails": (
         {"labels": ["spec-draft"]},
@@ -145,7 +143,6 @@ def command(env, kind, key="PAY-142"):
             "--link",
             key,
         ],
-        "set-mode": ["set-mode", "--key", key, "--mode", "manual"],
         "approve": ["approve", "--key", key, "--quote-file", f("q.txt", "approve")],
         "link-pr": ["link-pr", "--key", key, "--pr-url", PR["url"]],
         "comment-long": ["comment", "--key", key, "--body-file", f("c.md", "x" * 40000)],
@@ -324,7 +321,7 @@ def test_input_checks(env):
         env.run("create", "--input", f("c.json", json.dumps({"title": "T" * 300}))).returncode == 2
     )
     assert env.run("create", "--input", f("c.json", "{nope")).returncode == 2
-    assert env.run("set-mode", "--key", "PAY-142", "--mode", "bogus").returncode == 2
+    assert env.run("approve", "--key", "PAY-142").returncode == 2
 
 
 def test_missing_programs(env):
@@ -371,23 +368,6 @@ def test_states_out_of_order(env):
     assert "in that order" in env.run("settings").stderr
 
 
-def test_a_commit_message_on_stdin(env):
-    import subprocess
-
-    from tests.skills.jira_ticket_lifecycle.conftest import script_command
-
-    r = subprocess.run(
-        [*script_command(), "commit-check", "--message", "-"],
-        input="feat: x (PAY-1)\n",
-        capture_output=True,
-        text=True,
-        env=env.environ(),
-        cwd=env.repo,
-        check=False,
-    )
-    assert r.stdout.startswith("OK")
-
-
 def test_temp_files_go_under_the_job_directory(env, tmp_path):
     env.add_ticket("PAY-142")
     job = tmp_path / "job"
@@ -400,7 +380,10 @@ def test_temp_files_go_under_the_job_directory(env, tmp_path):
         env.file("c.md", "hi"),
         CLAUDE_JOB_DIR=str(job),
     )
-    approve = env.run("approve", "--key", "PAY-142", "--mode", "no-review", CLAUDE_JOB_DIR=str(job))
+    quote = env.file("q.txt", "i approve the spec")
+    approve = env.run(
+        "approve", "--key", "PAY-142", "--quote-file", quote, CLAUDE_JOB_DIR=str(job)
+    )
     assert approve.returncode == 0
     call = [c for c in env.calls("jira") if c["argv"][:3] == ["issue", "comment", "add"]][-1]
     template = call["argv"][call["argv"].index("--template") + 1]

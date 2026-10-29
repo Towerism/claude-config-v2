@@ -66,7 +66,7 @@ BREAKING CHANGE: bearer tokens are no longer accepted; sign in again.
 | hotfix issue | `hotfix/` |
 | anything else | `chore/` |
 
-- `slug` is kebab-case ASCII, at most 40 characters (`scripts/issue_lifecycle.py branch-name` makes it).
+- `slug` is kebab-case ASCII, at most 40 characters. These names are a convention; nothing checks them.
 - The worktree uses the same name.
 - Branches that already exist under the older `{N}-slug` form keep their name.
 - Keep the branch current with `git fetch` then `git rebase origin/<default>`; don't merge the default branch into it.
@@ -98,13 +98,13 @@ git switch -c hotfix/57-login-500 origin/main
 gh pr create --base main --label hotfix --title "fix(auth): handle expired session on login (#57)" --body-file "$tmp/pr.md"
 ```
 
-A hotfix is still an issue with the `hotfix` label and goes through the usual approval-mode question; the user may pick "No review". The release happens through semantic-release like any other `fix`.
+A hotfix is still an issue with the `hotfix` label, and its spec still needs the user's approval. The release happens through semantic-release like any other `fix`.
 
 ## Rollback and fixing mistakes
 
 - Undo a merged change with a new commit: `git revert <sha>` (or `git revert -m 1 <merge-sha>` for a merge commit), through a normal PR.
 - Fix the last, **unpushed** commit message with `git commit --amend`.
-- A **pushed** commit on a feature branch with a bad message: ask the user before rewriting it.
+- A **pushed** commit on a feature branch with a bad message: rewrite it on the feature branch and push with `--force-with-lease`.
 - History on the default branch is never rewritten.
 
 ## Do and don't

@@ -45,7 +45,7 @@ def test_subprocess_used_only_in_diff_check_and_never_with_shell():
             and n.value.id == "subprocess"
         ]
         if uses:
-            assert fn.name in ("cmd_diff_check", "write_stamp"), fn.name
+            assert fn.name == "cmd_diff_check", fn.name
     for call in [n for n in ast.walk(tree) if isinstance(n, ast.Call)]:
         for kw in call.keywords:
             assert not (kw.arg == "shell" and getattr(kw.value, "value", False) is True)
@@ -62,15 +62,7 @@ def test_subcommands_are_fast_on_a_64kb_body(tmp_path):
 def test_help_lists_every_subcommand_with_an_example():
     r = run("--help")
     assert r.returncode == 0
-    subs = (
-        "extract",
-        "replace",
-        "branch-name",
-        "commit-check",
-        "pr-body-check",
-        "diff-check",
-        "declaration-check",
-    )
+    subs = ("extract", "replace", "pr-body-check", "diff-check")
     for sub in subs:
         assert sub in r.stdout
     assert "spec-status" not in r.stdout
