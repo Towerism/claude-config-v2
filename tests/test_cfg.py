@@ -44,15 +44,20 @@ def test_deploy_installs_everything_the_host_selects(home):
     settings = json.loads((home / "settings.json").read_text())
     assert settings["enabledPlugins"] == {"oh-my-claudecode@omc": True}
     commands = [h["command"] for g in settings["hooks"]["PreToolUse"] for h in g["hooks"]]
-    assert commands == [
-        f"python3 -I {home}/hooks/merge_confirm.py",
-        f"python3 -I {home}/hooks/bash_guard.py",
-        f"python3 -I {home}/hooks/skill_gate.py",
-        f"python3 -I {home}/hooks/secrets_guard.py",
-    ]
+    assert commands == [f"python3 -I {home}/hooks/merge_confirm.py"]
     state = json.loads((home / "claude-config" / "state.json").read_text())
     assert state["host"] == "work" and state["defaultTracker"] == "jira"
     assert "{claude_home}" not in (home / "settings.json").read_text()
+
+
+def test_deployed_blocks_are_identical_across_hosts(tmp_path):
+    blocks = []
+    for host in ("personal", "work"):
+        home = tmp_path / host
+        assert run(home, "deploy", "--host", host, "--yes") == 0
+        md = (home / "CLAUDE.md").read_text()
+        blocks.append(md[md.index(cfg.START):md.index(cfg.END)])
+    assert blocks[0] == blocks[1] and "Guardrails" in blocks[0]
 
 
 def test_deploy_is_idempotent(home, capsys):
@@ -238,8 +243,8 @@ def test_retrying_after_a_failed_deploy_does_not_duplicate_hooks(home, monkeypat
     monkeypatch.setattr(cfg, "write_atomic", real)
     assert run(home, "deploy", "--host", "personal", "--yes") == 0
     settings = json.loads((home / "settings.json").read_text())
-    assert [len(g["hooks"]) for g in settings["hooks"]["PreToolUse"]] == [1, 1, 1, 1]
-    assert len(settings["hooks"]["UserPromptExpansion"]) == 1
+    assert [len(g["hooks"]) for g in settings["hooks"]["PreToolUse"]] == [1]
+    assert "UserPromptExpansion" not in settings["hooks"]
     assert len(settings["hooks"]["SessionStart"]) == 1
 
 
