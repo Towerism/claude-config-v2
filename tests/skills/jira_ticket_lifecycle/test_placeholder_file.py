@@ -54,6 +54,7 @@ def test_the_summary_follows_the_note_and_the_attachment_holds_the_spec(rest_env
     note, *rest = inner(t["description"])
     assert "attached as PAY-142-spec.md" in note and "distilled" in note
     assert rest == [SUMMARY]
+    assert f"\n\n{SUMMARY}\n\nspec:end" in t["description"]  # stripped: one blank line each side
     assert t["attachments"][0]["content"] == LONG_SPEC
 
 
@@ -75,6 +76,10 @@ def test_a_marker_line_in_the_summary_is_refused_before_anything_is_attached(res
     assert env.ticket("PAY-142")["attachments"] == []
     assert env.ticket("PAY-142")["description"] == "Users want CSV."
     assert not [c for c in env.calls("rest") if c["method"] == "POST"]
+    # known behaviour: the original is copied into a comment before the summary is checked,
+    # so each refused run posts another copy
+    moves = env.ticket("PAY-142")["comments"]
+    assert len(moves) == 2 and all(m.startswith("Original description") for m in moves)
     # a line that only mentions the marker is allowed
     ok = placeholder(env, "see the spec:start line\n", "ok.md")
     r, _out = sync(env, "--placeholder-file", ok)
@@ -83,19 +88,21 @@ def test_a_marker_line_in_the_summary_is_refused_before_anything_is_attached(res
 
 def test_a_summary_that_overflows_the_description_is_refused(rest_env):
     env = rest_env
-    attached_ticket(env)
+    attached_ticket(env, description="Users want CSV.")
     r = refused(env, "--placeholder-file", placeholder(env, "x" * 32600))
     assert r.returncode == 2, r.stdout
     assert "Shorten it" in r.stderr
     assert env.ticket("PAY-142")["attachments"] == []
+    assert env.ticket("PAY-142")["description"] == "Users want CSV."
 
 
 def test_an_unreadable_summary_file_is_a_usage_error(rest_env):
     env = rest_env
     attached_ticket(env)
-    r = refused(env, "--placeholder-file", env.tmp / "missing.md")
+    missing = env.tmp / "missing.md"
+    r = refused(env, "--placeholder-file", missing)
     assert r.returncode == 2
-    assert "cannot read" in r.stderr
+    assert f"cannot read {missing}" in r.stderr
     assert env.ticket("PAY-142")["attachments"] == []
 
 
