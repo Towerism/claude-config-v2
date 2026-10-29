@@ -20,8 +20,9 @@ them, and the line says so.
 The Claude home is two levels above this file (<home>/hooks/host_default.py). git runs by
 absolute path from a fixed PATH with a fixed argv, with no repo config that runs programs
 (fsmonitor, hooks, external diff, signature checks), no GIT_* variables and no lazy fetch, output
-capped at 64 KiB; one 5-second deadline covers the hook. Lazy fetch is off twice: GIT_NO_LAZY_FETCH
-(git >= 2.44) and protocol.allow=never, which also covers older git by refusing every transport. Prints only checked names (the host, the
+capped at 64 KiB. Lazy fetch is off twice: GIT_NO_LAZY_FETCH (git >= 2.44) and
+protocol.allow=never, which covers older git by refusing every transport. The repo scan gets 3
+seconds and one 5-second deadline covers the hook. Prints only checked names (the host, the
 tracker and its skill) and fixed words, always exits 0 and writes nothing to stderr.
 """
 
@@ -48,6 +49,7 @@ TRACKERS = {
 }
 CAP = 64 * 1024
 DEADLINE_SECONDS = 5
+REPO_SECONDS = 3  # under DEADLINE_SECONDS, so a slow repo still leaves time for the host profile line
 TEA_SECONDS = 2
 SAFE_PATH = "/usr/local/bin:/usr/bin:/bin"  # git and tea are looked up here, never on the caller's PATH
 # Override repo config that would run programs; protocol.allow=never refuses every transport
@@ -121,6 +123,7 @@ def run_tool(name: str, args: list[str], env: dict, deadline: float, cwd: str | 
         proc.kill()
         proc.wait()
         proc.stdout.close()
+    # -9 is our own kill, sent after EOF or at the cap.
     if size < CAP and proc.returncode not in (0, -9):
         return None
     return b"".join(chunks).decode("utf-8", errors="replace")
@@ -199,7 +202,7 @@ def repo_tracker(cwd: object, local: dict, config_home: Path) -> tuple[str, str]
     """(tracker, source) from the repo's own signals, or None."""
     if not isinstance(cwd, str) or "\0" in cwd or not os.path.isabs(cwd) or not os.path.isdir(cwd):
         return None
-    deadline = time.monotonic() + DEADLINE_SECONDS
+    deadline = time.monotonic() + REPO_SECONDS
     jira = local.get("jira")
     key = jira.get("project") if isinstance(jira, dict) else None
     if isinstance(key, str) and JIRA_KEY.fullmatch(key) and jira_in_history(key, cwd, deadline):

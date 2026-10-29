@@ -799,6 +799,25 @@ def test_merge_confirm_parses_the_command_once_for_both_checks(monkeypatch, caps
     assert json.loads(capsys.readouterr().out)["hookSpecificOutput"]["permissionDecisionReason"] == hook.SQUASH_REASON
 
 
+def test_a_slow_repo_scan_still_prints_the_host_profile_line(machine, repo):
+    home, env, tmp = machine
+    jira_project(tmp)
+    # Every git call hangs until its budget runs out, as on a huge or stalled repo.
+    patch = (
+        "import time\n"
+        "def slow(name, args, env, deadline, cwd=None):\n"
+        "    time.sleep(max(0, deadline - time.monotonic()))\n"
+        "hook.run_tool = slow\n"
+    )
+    done = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", DRIVER, str(home / "hooks" / "host_default.py"), patch],
+        input=json.dumps({"hook_event_name": "SessionStart", "cwd": str(repo)}).encode(),
+        capture_output=True, timeout=20, check=False, env={"PATH": "/usr/bin:/bin", **env},
+    )
+    assert (done.returncode, done.stderr) == (0, b"")
+    assert from_profile(json.loads(done.stdout)["hookSpecificOutput"]["additionalContext"])
+
+
 def test_merge_confirm_past_its_deadline_writes_nothing():
     patch = "import time\nhook.DEADLINE_SECONDS = 1\nhook.merges_a_pr = lambda command: time.sleep(5)\n"
     assert driven("merge_confirm.py", patch, bash("gh pr merge 5")) == (0, b"", b"")
