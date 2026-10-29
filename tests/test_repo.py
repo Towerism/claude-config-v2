@@ -254,6 +254,13 @@ def test_lifecycle_skills_carry_the_trimmed_rules():
             assert re.search(needle, text), f"{skill}: {needle}"
 
 
+@pytest.mark.parametrize("skill", ("github-issue-lifecycle", "gitea-issue-lifecycle", "jira-ticket-lifecycle"))
+def test_lifecycle_skills_limit_branch_names_built_from_issue_text(skill):
+    """Issue text can hold shell syntax; a branch name built from it must not carry it."""
+    text = section((ROOT / "config" / "skills" / skill / "SKILL.md").read_text(), "### 6. Branch, worktree, commits")
+    assert re.search(r"(?i)a name built from issue text holds only letters, digits, `-` and `/`", text)
+
+
 def test_adr_records_the_pathway_departure():
     adrs = sorted((ROOT / "docs" / "adr").glob("0004-*.md"))
     assert len(adrs) == 1

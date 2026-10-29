@@ -119,7 +119,7 @@ git fetch origin
 name=feature/42-csv-export      # no format is required; the issue number helps people find it
 git worktree add -b "$name" "../$(basename "$PWD")-${name//\//-}" "origin/<default>"
 ```
-Find the default branch with `gh repo view --json defaultBranchRef`.
+Find the default branch with `gh repo view --json defaultBranchRef`. A name built from issue text holds only letters, digits, `-` and `/`.
 
 By convention every commit is a Conventional Commit ending `(#42)` and holds one logical change. Update the branch with `git rebase origin/<default>`, never a merge from the default branch, and push a rewritten branch with `--force-with-lease`, on the feature branch only.
 

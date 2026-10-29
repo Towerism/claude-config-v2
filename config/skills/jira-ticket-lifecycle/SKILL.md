@@ -99,7 +99,7 @@ git fetch origin
 name=feature/PAY-142-csv-export      # no format is required; the key helps people find it
 git worktree add -b "$name" "../$(basename "$PWD")-${name//\//-}" "origin/<default>"
 ```
-Find the default branch with `gh repo view --json defaultBranchRef`.
+Find the default branch with `gh repo view --json defaultBranchRef`. A name built from issue text holds only letters, digits, `-` and `/`.
 
 By convention every commit is a Conventional Commit whose subject ends with ` (KEY-N)`, such as `feat(export): add CSV export (PAY-142)`, and holds one logical change. Update the branch with `git rebase origin/<default>`, and push a rewritten branch with `--force-with-lease` on the feature branch only.
 
