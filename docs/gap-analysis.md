@@ -7,11 +7,11 @@ Compared on 2026-10-24 against V1 (`claude-config`, 24 skills, 9 overlays, 3 hoo
 | V1 stage | V1 skill | OMC equivalent | V2 |
 |---|---|---|---|
 | Design | `senior-architect` | `/drydock`, `/ralplan`, architect agent | Covered |
-| Start | `github-`, `gitea-`, `jira-…lifecycle` | Partial: `launch`, `harbor`, `drydock` (GitHub only), `project-session-manager` (worktrees for GitHub, Jira, Gitea issues), `ask-navigator`. None claims an issue, records an approval mode, stores the spec on the issue or merges and closes out | **Kept** as `github-issue-lifecycle`, `gitea-issue-lifecycle` and `jira-ticket-lifecycle`, with V1's stdlib scripts for the checks, spec-marker edits and Jira steps (ADR-0003, amended); boundary with those skills is in `CLAUDE.global.md` |
-| Spec | `spec-driven-workflow` | `/deep-interview`, `/ralplan` | Covered; approval rules kept as guardrails |
+| Start | `github-`, `gitea-`, `jira-…lifecycle` | Partial: `launch`, `harbor`, `drydock` (GitHub only), `project-session-manager` (worktrees for GitHub, Jira, Gitea issues), `ask-navigator`. None claims an issue, records the user's spec approval, stores the spec on the issue or merges and closes out | **Kept** as `github-issue-lifecycle`, `gitea-issue-lifecycle` and `jira-ticket-lifecycle`, with V1's stdlib scripts for the checks, spec-marker edits and Jira steps (ADR-0003, amended); the first guardrail line makes them the start of every code change ([ADR-0006](adr/0006-omc-leads-the-pipeline.md)) |
+| Spec | `spec-driven-workflow` | `/deep-interview`, `/ralplan` | Covered; the user's quoted approval kept as a guardrail |
 | Test plan | `senior-qa`, `api-test-suite-builder`, `ci-cd-pipeline-builder` | `/tdd`, test-engineer agent | Covered |
 | Implement | `tdd-guide` | `/tdd`, `/execute` | Covered |
-| Review | `adversarial-reviewer` | `/review`, critic and code-reviewer agents | Covered; "one pass, never re-run" kept as a guardrail |
+| Review | `adversarial-reviewer` | `/review`, critic and code-reviewer agents | Covered; OMC chooses the review depth (ADR-0006) |
 | Merge | `ship-gate` | `/verify`, `/pr` | Covered; the merge hook kept |
 
 ## Everything else
@@ -19,10 +19,10 @@ Compared on 2026-10-24 against V1 (`claude-config`, 24 skills, 9 overlays, 3 hoo
 | V1 piece | Decision | Why |
 |---|---|---|
 | `merge_confirm.py` hook | Kept unchanged | A merge once happened without the owner's click; OMC has no equivalent |
-| `lifecycle_default.py` hook | Replaced by `host_default.py` | Same job (state the machine's default tracker), simpler state, renamed for trackers |
+| `lifecycle_default.py` hook | Replaced by `host_default.py` | Same job (state the machine's default tracker), simpler state, renamed for trackers (rewritten in ADR-0006: repo signals first) |
 | `skill_overlay.py` hook, 9 overlays | Dropped | Overlays existed to bend vendored skills; V2 has none. Guardrails live in `CLAUDE.global.md` |
-| Approval modes, git conventions, split rules | Kept as `CLAUDE.global.md` guardrails | OMC doesn't state who may approve or merge |
-| `plain-prose`, `writing-docs` (with lint scripts) | Dropped; use OMC's `minimal-prose-discipline` and `agent-doc-discipline` | OMC scopes both away from human-only docs (ADR stories, READMEs, commit text), so a cold-reader line in `CLAUDE.global.md` covers that gap. The lifecycle scripts no longer list AI-writing tells |
+| Approval modes, git conventions, split rules | Retired or dropped (ADR-0006) | Approval and merge on the user's word are fixed rules; the approved label, default-branch, secret and naming rules are text-only or unenforced |
+| `plain-prose`, `writing-docs` (with lint scripts) | Dropped; use OMC's `minimal-prose-discipline` and `agent-doc-discipline` | OMC's `minimal-prose-discipline` is relied on for prose a person reads (ADR-0006 dropped the cold-reader line). The lifecycle scripts no longer list AI-writing tells |
 | `fresh-session-handoff` | Kept | OMC's `launch` posts handoffs as tracker comments and `ultragoal` prints `/goal` text, but nothing writes a cold-start note for an arbitrary session. During a `/launch` run, launch's handoff wins |
 | `linux-troubleshooting` | Rewritten | V1's version pointed at skills that aren't installed; V2's is self-contained |
 | Vendored skills (17, upstream copies) | Dropped | Copies drift and need a vendoring process. Some (`database-schema-designer`, `migration-architect`, `api-design-reviewer`) have no OMC equivalent; add one back as a markdown skill when a task needs it |

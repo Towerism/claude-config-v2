@@ -321,18 +321,41 @@ def test_lifecycle_skills_prompt_only_at_the_gates(skill):
             asks = "AskUser" + "Question" in line or ASK.search(line)
             assert not asks or PROMPT_TAG.search(line), f"{path.relative_to(ROOT)}:{n}: {line}"
 
-def test_adr_records_that_required_steps_bind_omc():
-    adrs = sorted((ROOT / "docs" / "adr").glob("0005-*.md"))
-    assert len(adrs) == 1
-    text = adrs[0].read_text()
-    assert "**Status:** Accepted by the owner on 2026-10-25, issue #14." in text
-    assert "branch, issue and HEAD" in text
-    limit = text[text.index("## Limit"):]
-    for needle in ("gh pr new", "--repo", "tea api", "gh api", "unverifiable"):
-        assert needle in limit, needle
-    assert "ADR-0001" in text and "ADR-0004" in text
-    assert "lightest-weight path" in text and "bash_guard" in text
-    assert "writes the comments itself" in text
+def adr(number):
+    paths = sorted((ROOT / "docs" / "adr").glob(f"{number:04d}-*.md"))
+    assert len(paths) == 1
+    return paths[0].read_text()
+
+
+def status(text):
+    return next(line for line in text.splitlines() if line.startswith("**Status:**"))
+
+
+def test_adr_0006_supersedes_0004_and_0005():
+    text = adr(6)
+    assert "**Status:** Accepted by the owner on 2026-10-29, issue #42." in text
+    # Built by concatenation so a grep for the removed hooks outside the ADRs stays empty.
+    for hook in ("bash_" + "guard.py", "skill_" + "gate.py", "secrets_" + "guard.py",
+                 "merge_confirm.py", "host_default.py"):
+        assert hook in text, hook
+    for needle in ("ADR-0001", "ADR-0004", "ADR-0005", "ralplan-<slug>.md", "5.7.14",
+                   "share one login", "Residual risks", "Heuristic limits"):
+        assert needle in text, needle
+    assert status(adr(5)).endswith(" Superseded by ADR-0006.")
+    assert status(adr(1)).endswith(" Gap list amended by ADR-0006.")
+    line = status(adr(4))
+    assert "#7" in line and "Superseded in part by ADR-0006" in line
+    assert "merge_confirm.py" in line and "host_default.py" in line
+    assert "ADR-0006" not in status(adr(2))
+
+
+def test_docs_name_no_retired_hook_or_step():
+    """The README, glossary and gap analysis match ADR-0006; only the ADRs keep the history."""
+    retired = re.compile("skill_" + "gate|secrets_" + "guard|bash_" + "guard|Advisory step"
+                         "|## Stamp|## Waiver|approval mode|first prompt|stand aside")
+    for name in ("README.md", "GLOSSARY.md", "docs/gap-analysis.md"):
+        for n, line in enumerate((ROOT / name).read_text().splitlines(), 1):
+            assert not retired.search(line), f"{name}:{n}: {line}"
 
 
 def suppresses_exception(node):
