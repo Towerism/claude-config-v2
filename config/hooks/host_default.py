@@ -70,15 +70,28 @@ def message(home: Path, config_home: Path) -> str | None:
     )
 
 
-# A session whose first prompt starts ralph or autopilot runs unguarded (#12).
+# A session whose first prompt starts with a skill or holds an OMC keyword runs unguarded (#12, #36).
 BYPASS_PROMPT = re.compile(
-    r"(?i)\s*(?:<command-message>[^<]*</command-message>\s*)?(?:<command-name>)?/?(?:oh-my-claudecode:)?(?:ralph|autopilot)(?=\s|:|<|$)"
+    r"(?i)\s*(?:<command-message>[^<]*</command-message>\s*)?(?:<command-name>)?/(?P<skill>\w[\w.-]*(?::\w[\w.-]*)?)(?=\s|:|<|$)"
 )
+BYPASS_WORD = re.compile(
+    r"(?i)(?<![\w./-])(?:autopilot|ralph|ralplan|deep\s+interview|deslop|anti-slop|deep-analyze|tdd|deepsearch|ultrathink|cancelomc)(?![\w'/-]|\.\w)"
+)
+# Claude Code's own commands: a first prompt starting with one of these is not a skill.
+BUILTIN_COMMANDS = frozenset({
+    "add-dir", "agents", "bashes", "branch", "btw", "bug", "clear", "compact", "config", "context", "copy",
+    "cost", "diff", "doctor", "effort", "exit", "export", "fast", "feedback", "fork", "goal", "help", "hooks",
+    "ide", "init", "install-github-app", "install-slack-app", "keybindings", "login", "logout", "mcp", "memory",
+    "mobile", "model", "new", "output-style", "permissions", "plugin", "pr-comments", "privacy-settings",
+    "quit", "release-notes", "remote-control", "remote-env", "rename", "reset", "resume", "review", "rewind",
+    "sandbox", "settings", "skills", "stats", "status", "statusline", "tasks", "terminal-setup", "theme",
+    "todos", "upgrade", "usage", "vim", "voice", "web-setup",
+})
 
 
 def session_bypassed(payload: dict) -> bool:
-    """Whether the session's first user prompt starts ralph or autopilot. Reads the first 256 KB of the
-    transcript; anything unreadable means no."""
+    """Whether the session's first user prompt starts with a skill or holds an OMC keyword. Reads the first
+    256 KB of the transcript; anything unreadable means no."""
     with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
         path = payload["transcript_path"]
         if not isinstance(path, str) or not os.path.isfile(path):
@@ -96,7 +109,10 @@ def session_bypassed(payload: dict) -> bool:
             if isinstance(content, list):
                 content = "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
             if isinstance(content, str) and content.strip():
-                return BYPASS_PROMPT.match(content) is not None
+                start = BYPASS_PROMPT.match(content)
+                if start and start.group("skill").lower() not in BUILTIN_COMMANDS:
+                    return True
+                return BYPASS_WORD.search(content) is not None
     return False
 
 
