@@ -20,7 +20,8 @@ them, and the line says so.
 The Claude home is two levels above this file (<home>/hooks/host_default.py). git runs by
 absolute path from a fixed PATH with a fixed argv, with no repo config that runs programs
 (fsmonitor, hooks, external diff, signature checks), no GIT_* variables and no lazy fetch, output
-capped at 64 KiB; one 5-second deadline covers the hook. Prints only checked names (the host, the
+capped at 64 KiB; one 5-second deadline covers the hook. Lazy fetch is off twice: GIT_NO_LAZY_FETCH
+(git >= 2.44) and protocol.allow=never, which also covers older git by refusing every transport. Prints only checked names (the host, the
 tracker and its skill) and fixed words, always exits 0 and writes nothing to stderr.
 """
 
@@ -49,10 +50,11 @@ CAP = 64 * 1024
 DEADLINE_SECONDS = 5
 TEA_SECONDS = 2
 SAFE_PATH = "/usr/local/bin:/usr/bin:/bin"  # git and tea are looked up here, never on the caller's PATH
-# Override repo config that would run programs.
+# Override repo config that would run programs; protocol.allow=never refuses every transport
+# (uploadpack, sshCommand), which the scan never needs.
 GIT_FLAGS = [
     "--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "diff.external=",
-    "-c", "log.showSignature=false",
+    "-c", "log.showSignature=false", "-c", "protocol.allow=never",
 ]
 JIRA_KEY = re.compile(r"[A-Z][A-Z0-9_]{1,9}")
 HOST = re.compile(r"[a-z0-9.-]{1,253}")

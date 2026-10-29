@@ -634,6 +634,39 @@ def test_hooks_do_not_run_gpg_from_repo_config(repo, tmp_path):
     assert not mark.exists()
 
 
+@pytest.mark.parametrize("transport", ["uploadpack", "sshCommand"])
+@pytest.mark.parametrize("lazy_fetch_off", [True, False])
+def test_host_default_never_fetches_a_missing_commit(machine, repo, tmp_path, monkeypatch, transport, lazy_fetch_off):
+    # lazy_fetch_off=False drops GIT_NO_LAZY_FETCH from the hook's git env (as on git < 2.44),
+    # so only protocol.allow=never stands between the scan and the transport.
+    mark = tmp_path / "transport-ran"
+    script = executable(tmp_path / "transport.sh", f"#!/bin/sh\ntouch {mark}\nexit 1\n")
+    git(repo, "config", "extensions.partialClone", "origin")
+    git(repo, "config", "remote.origin.promisor", "true")
+    if transport == "uploadpack":
+        git(repo, "config", "remote.origin.uploadpack", str(script))
+    else:
+        git(repo, "remote", "set-url", "origin", "ssh://git.example.org/o/r.git")
+        git(repo, "config", "core.sshCommand", str(script))
+    # A ref at a commit the promisor remote would be asked for; update-ref would fetch it itself.
+    (repo / ".git" / "refs" / "heads" / "feature" / "1-x").write_text("12" * 20 + "\n")
+    subprocess.run(["git", "-C", str(repo), "log", "-1", "HEAD", "--"], capture_output=True, env=GIT_ENV, check=False)
+    assert mark.exists()  # the fixture works: plain git fetches the missing commit
+    mark.unlink()
+    jira_project(machine[2])
+    hook = hook_module("host_default.py")
+    real = hook.run_tool
+
+    def tool(name, args, env, deadline, cwd=None):
+        if not lazy_fetch_off:
+            env = {k: v for k, v in env.items() if k != "GIT_NO_LAZY_FETCH"}
+        return real(name, args, env, deadline, cwd)
+
+    monkeypatch.setattr(hook, "run_tool", tool)
+    assert from_profile(hook.message(machine[0], machine[2] / "xdg", str(repo)))
+    assert not mark.exists()
+
+
 # No bypass: a keyword or skill in the first prompt changes nothing
 
 
