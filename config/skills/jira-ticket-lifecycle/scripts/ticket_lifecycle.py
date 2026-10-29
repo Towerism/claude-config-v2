@@ -987,12 +987,13 @@ def cmd_approve(res, jira, cfg, key, quote):
     text = f"Approved by the user, in their words:\n\n{quoted}\n"
     labels = cfg["labels"]
     current = fields.get("labels", [])
-    # A rerun after a failed later step finds the same words recorded and the label set.
+    # A rerun after a failed later step finds the same words recorded; so does an approval
+    # that repeats words already on the ticket, which stand as its record.
     comments = (fields.get("comment") or {}).get("comments", [])
     recorded = any(
         unquoted("\n".join(adf_blocks(c.get("body")))) == unquoted(text) for c in comments
     )
-    if recorded and labels["approved"] in current:
+    if recorded:
         res.step("comment", "skipped", "the same approval is already recorded")
     elif post_comment(res, jira, key, text) != "done":
         return None

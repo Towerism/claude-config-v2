@@ -347,15 +347,37 @@ def test_approve_rerun_after_a_failed_move_posts_no_second_comment(env):
     assert (len(t["comments"]), t["state"]) == (1, "In Progress")
 
 
+def test_approve_rerun_after_a_failed_label_step_posts_no_second_comment(env):
+    env.add_ticket("PAY-142", labels=["spec-draft"])
+    env.update(canned=[{"match": "jira issue edit", "rc": 1, "stderr": "label update failed"}])
+    r, out = approve(env)
+    assert r.returncode == 1
+    assert steps(out) == {"comment": "done", "labels": "failed"}
+    env.update(canned=[])
+    r, out = approve(env)
+    assert r.returncode == 0, r.stdout
+    assert steps(out)["comment"] == "skipped" and steps(out)["labels"] == "done"
+    t = env.ticket("PAY-142")
+    assert (len(t["comments"]), t["labels"]) == (1, ["spec-approved"])
+
+
 def test_approve_after_a_return_to_draft_records_the_words_again(env):
     env.add_ticket("PAY-142", labels=["spec-draft"])
     approve(env)
     s = env.state()
     s["tickets"]["PAY-142"]["labels"] = ["spec-draft"]
     env.write_state(s)
-    r, out = approve(env)
+    r, out = approve(env, words="the revised spec is approved")
     assert r.returncode == 0, r.stdout
     assert steps(out)["comment"] == "done"
+    assert len(env.ticket("PAY-142")["comments"]) == 2
+    # The same words again are already on the ticket, so they are not posted a third time.
+    s = env.state()
+    s["tickets"]["PAY-142"]["labels"] = ["spec-draft"]
+    env.write_state(s)
+    r, out = approve(env)
+    assert r.returncode == 0, r.stdout
+    assert steps(out)["comment"] == "skipped"
     assert len(env.ticket("PAY-142")["comments"]) == 2
 
 

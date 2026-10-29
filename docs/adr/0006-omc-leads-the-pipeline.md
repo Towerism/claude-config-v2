@@ -20,7 +20,7 @@ The guardrails block in `config/CLAUDE.global.md` had grown to 76 lines: a numbe
 
    If a later change to OMC or a skill drops one of the statements in the "Sentences left to others" table below, the block must restore it.
 3. **The lifecycle skills ask the user three things only**: spec approval, merge, and takeover or reopen of a ticket that is assigned elsewhere, closed or already in progress. Each SKILL.md lists them under `## Prompts`, and `tests/test_repo.py` fails on any other ask. Everything else has a default or is reported and skipped.
-4. **Claim only assigns.** Approval posts the user's quote first, then sets `approved` and in progress together and removes `draft`. If the label step fails, the ticket still holds the recorded words, and a rerun completes it. No branch is cut before approval.
+4. **Claim only assigns.** Approval posts the user's quote first, then sets `approved` and in progress together and removes `draft`. If the label step fails, the ticket still holds the recorded words, and a rerun completes it without posting them again; the Jira script skips the quote whenever a comment already holds the same words. No branch is cut before approval.
 5. **Approval modes, the path declaration, its stamp, `declaration-check`, `commit-check` and `branch-name` are retired** from the three lifecycle skills and their scripts. Hotfixes need the user's approval like any other spec.
 6. **Two hooks remain, with no bypass**:
    - `merge_confirm.py`: asks on every merge;

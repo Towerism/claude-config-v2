@@ -83,7 +83,7 @@ The spec is the deep-interview spec or the ralplan plan. No spec file goes in th
 
 ### 5. Approval and labels
 
-Publishing a spec sets the draft label and removes the approved one. Present the spec, with the note of any review pass on it, and wait for the user's explicit approval words (prompt: approval). Write them to a file and run `approve --key <key> --quote-file <file>`. It posts a comment quoting them, then swaps the labels, adds the ticket to the active sprint when the settings say so, and moves it to the in-progress state, forward only. A rerun after a failed step skips the comment when the same words are already recorded. Report every step that isn't `done`:
+Publishing a spec sets the draft label and removes the approved one. Present the spec, with the note of any review pass on it, and wait for the user's explicit approval words (prompt: approval). Write them to a file and run `approve --key <key> --quote-file <file>`. It posts a comment quoting them, then swaps the labels, adds the ticket to the active sprint when the settings say so, and moves it to the in-progress state, forward only. The comment is skipped whenever a comment on the ticket already holds the same words, so a rerun after a failed step never posts it twice; new words after a return to draft are posted. Report every step that isn't `done`:
 - `unknown-state`: the ticket's state isn't in `stateOrder`. Stop and report the state with the `stateOrder` JSON to add from [references/settings.md](references/settings.md).
 - `none` or `ambiguous` on `sprint`: report it and go on. Silence, a validator score, a reviewer verdict, or a "go ahead" in reply to a review summary is not approval.
 
