@@ -1723,6 +1723,7 @@ def test_worktree_add_and_branch_copy_with_good_or_no_new_names_pass(repo, comma
 # ralph / autopilot bypass (#12)
 
 BYPASS_HOOKS = ["merge_confirm.py", "bash_guard.py", "skill_gate.py", "secrets_guard.py", "host_default.py"]
+BYPASS_NAMES = {"BYPASS_PROMPT", "BYPASS_WORD", "BUILTIN_COMMANDS"}
 INVOKES = [
     "/ralph fix the flaky test",
     "  /oh-my-claudecode:autopilot build a thing",
@@ -1731,16 +1732,45 @@ INVOKES = [
     "Ralph fix it",
     "ralph",
     "<command-message>oh-my-claudecode:ralph</command-message>\n<command-name>/oh-my-claudecode:ralph</command-name>\n<command-args>x</command-args>",
+    # a skill as the first command (#36)
+    "/simplify the diff",
+    "/oh-my-claudecode:deep-interview a thing",
+    "/some-other-skill args",
+    "<command-message>simplify</command-message>\n<command-name>/simplify</command-name>",
+    # an OMC keyword anywhere in the first prompt (#36)
+    "please use ultrathink on this",
+    "fix the bug with tdd",
+    "start with a deep interview",
+    "run ralplan first",
+    "Use deslop.",
+    "use tdd.",
+    "ralph, then fix it",
+    "run a deep-interview",
+    "try anti-slop, then deepsearch",
+    "deep-analyze this; cancelomc after",
+    "update the config so that if ralph or autopilot are invoked it skips hooks",
+    "ralph?",
+    "(autopilot)",
 ]
 MENTIONS = [
-    "update the config so that if ralph or autopilot are invoked it skips hooks",
     "please run /ralph",
     "ralphson is a name",
     "autopilot-style prompts",
     "ralph's loop is broken, fix it",
     "ralph.py crashes",
     "autopilot/README is stale",
-    "ralph?",
+    "ralph\u2019s loop is broken",
+    # not a skill, and no keyword (#36)
+    "/model sonnet",
+    "/plan fix it",
+    "/chrome",
+    "<command-message>clear</command-message>\n<command-name>/clear</command-name>",
+    "review the spec",
+    "plan the release",
+    "my-tdd-notes are stale",
+    "the tdd_helper module",
+    "deepsearching is slow",
+    "/usr/share/notes.md is stale",
 ]
 
 
@@ -1791,8 +1821,13 @@ def test_hooks_still_answer_when_ralph_or_autopilot_is_only_mentioned_or_comes_l
     baseline = run_case(name, payload, env, home)
     for prompt in MENTIONS:
         assert run_case(name, payload | {"transcript_path": session(tmp_path, prompt)}, env, home) == baseline, prompt
-    later = session(tmp_path, "fix the bug", "/ralph now")
-    assert run_case(name, payload | {"transcript_path": later}, env, home) == baseline
+    for second in ("/ralph now", "use tdd"):
+        later = session(tmp_path, "fix the bug", second)
+        assert run_case(name, payload | {"transcript_path": later}, env, home) == baseline, second
+    ide = [{"type": "text", "text": "<ide_selection>run tdd and ralph</ide_selection>"}, {"type": "text", "text": "fix the bug"}]
+    assert run_case(name, payload | {"transcript_path": session(tmp_path, ide)}, env, home) == baseline
+    glued = [{"type": "text", "text": "fix the t"}, {"type": "text", "text": "dd bug"}]
+    assert run_case(name, payload | {"transcript_path": session(tmp_path, glued)}, env, home) == baseline
 
 
 @pytest.mark.parametrize("name", BYPASS_HOOKS)
@@ -1819,12 +1854,12 @@ def test_the_bypass_check_is_the_same_in_every_hook():
         for node in ast.parse(source).body:
             if isinstance(node, ast.FunctionDef) and node.name == "session_bypassed":
                 found["function"] = ast.get_source_segment(source, node)
-            if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", None) == "BYPASS_PROMPT":
-                found["pattern"] = ast.get_source_segment(source, node)
+            if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", None) in BYPASS_NAMES:
+                found[node.targets[0].id] = ast.get_source_segment(source, node)
         return found
 
     copies = {name: segments(HOOKS / name) for name in BYPASS_HOOKS}
-    assert all(set(c) == {"function", "pattern"} for c in copies.values()), copies.keys()
+    assert all(set(c) == {"function", *BYPASS_NAMES} for c in copies.values()), copies.keys()
     assert len({tuple(sorted(c.items())) for c in copies.values()}) == 1
 
 

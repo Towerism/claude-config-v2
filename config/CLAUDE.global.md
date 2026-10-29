@@ -2,7 +2,7 @@
 
 oh-my-claudecode (OMC) owns the development workflow. These rules add guardrails on top of it and never replace one of its stages. A repo's own CLAUDE.md wins on commands, paths and conventions.
 
-**Bypass:** if the session's first prompt starts `ralph` or `autopilot` (typed as `/ralph`, `/oh-my-claudecode:autopilot` or the bare word), ignore every rule in this block, including the host-default tracker line, and let OMC run its own workflow. Its hooks go silent for that session. Mentioning either word later in a prompt, or invoking one in a later prompt, does not count.
+**Bypass:** if the session's first prompt starts with a skill (typed as `/<skill>`, or `ralph` or `autopilot` as a bare word) or contains an OMC keyword anywhere (`autopilot`, `ralph`, `ralplan`, `deep interview`, `deslop`, `anti-slop`, `deep-analyze`, `tdd`, `deepsearch`, `ultrathink`, `cancelomc`), ignore every rule in this block, including the host-default tracker line, and let OMC run its own workflow. Its hooks go silent for that session. A built-in command such as `/model` does not count. Mentioning a skill or keyword only in a later prompt does not count.
 
 **Precedence:** this block's requirements override OMC's "lightest-weight path" principle, which governs only how a step is carried out where this block is silent. Steps tagged `(advisory: <id>)` may be waived; every untagged step is required. Only the user can waive a step.
 
