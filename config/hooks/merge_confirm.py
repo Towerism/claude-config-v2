@@ -598,17 +598,18 @@ BYPASS_PROMPT = re.compile(
     r"(?i)\s*(?:<command-message>[^<]*</command-message>\s*)?(?:<command-name>)?/(?P<skill>\w[\w.-]*(?::\w[\w.-]*)?)(?=\s|:|<|$)"
 )
 BYPASS_WORD = re.compile(
-    r"(?i)(?<![\w./-])(?:autopilot|ralph|ralplan|deep\s+interview|deslop|anti-slop|deep-analyze|tdd|deepsearch|ultrathink|cancelomc)(?![\w'/-]|\.\w)"
+    r"(?i)(?<![\w./-])(?:autopilot|ralph|ralplan|deep[\s-]+interview|deslop|anti-slop|deep-analyze|tdd|deepsearch|ultrathink|cancelomc)(?![\w'\u2019/-]|\.\w)"
 )
-# Claude Code's own commands: a first prompt starting with one of these is not a skill.
+# Claude Code's own commands (as of October 2026): a first prompt starting with one of these is not a skill.
 BUILTIN_COMMANDS = frozenset({
-    "add-dir", "agents", "bashes", "branch", "btw", "bug", "clear", "compact", "config", "context", "copy",
-    "cost", "diff", "doctor", "effort", "exit", "export", "fast", "feedback", "fork", "goal", "help", "hooks",
-    "ide", "init", "install-github-app", "install-slack-app", "keybindings", "login", "logout", "mcp", "memory",
-    "mobile", "model", "new", "output-style", "permissions", "plugin", "pr-comments", "privacy-settings",
-    "quit", "release-notes", "remote-control", "remote-env", "rename", "reset", "resume", "review", "rewind",
-    "sandbox", "settings", "skills", "stats", "status", "statusline", "tasks", "terminal-setup", "theme",
-    "todos", "upgrade", "usage", "vim", "voice", "web-setup",
+    "add-dir", "agents", "artifacts", "bashes", "branch", "btw", "bug", "checkpoint", "chrome", "clear",
+    "compact", "config", "context", "continue", "copy", "cost", "desktop", "diff", "doctor", "effort", "exit",
+    "export", "extra-usage", "fast", "feedback", "fork", "goal", "help", "hooks", "ide", "init", "insights",
+    "install-github-app", "install-slack-app", "keybindings", "login", "logout", "mcp", "memory", "mobile",
+    "model", "new", "output-style", "permissions", "plan", "plugin", "pr-comments", "privacy-settings", "quit",
+    "release-notes", "reload-plugins", "remote-control", "remote-env", "rename", "reset", "resume", "review",
+    "rewind", "sandbox", "settings", "skills", "stats", "status", "statusline", "tasks", "terminal-setup",
+    "theme", "todos", "upgrade", "usage", "vim", "voice", "web-setup",
 })
 
 
@@ -630,7 +631,12 @@ def session_bypassed(payload: dict) -> bool:
             except (ValueError, KeyError, TypeError):
                 continue
             if isinstance(content, list):
-                content = "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+                # Only what the user typed: skip blocks the IDE or harness injected.
+                content = "\n".join(
+                    b.get("text", "")
+                    for b in content
+                    if isinstance(b, dict) and b.get("type") == "text" and not b.get("text", "").lstrip().startswith(("<ide_", "<system-reminder"))
+                )
             if isinstance(content, str) and content.strip():
                 start = BYPASS_PROMPT.match(content)
                 if start and start.group("skill").lower() not in BUILTIN_COMMANDS:

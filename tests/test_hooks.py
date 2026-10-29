@@ -1743,6 +1743,9 @@ INVOKES = [
     "start with a deep interview",
     "run ralplan first",
     "Use deslop.",
+    "use tdd.",
+    "ralph, then fix it",
+    "run a deep-interview",
     "try anti-slop, then deepsearch",
     "deep-analyze this; cancelomc after",
     "update the config so that if ralph or autopilot are invoked it skips hooks",
@@ -1756,8 +1759,11 @@ MENTIONS = [
     "ralph's loop is broken, fix it",
     "ralph.py crashes",
     "autopilot/README is stale",
+    "ralph\u2019s loop is broken",
     # not a skill, and no keyword (#36)
     "/model sonnet",
+    "/plan fix it",
+    "/chrome",
     "<command-message>clear</command-message>\n<command-name>/clear</command-name>",
     "review the spec",
     "plan the release",
@@ -1815,8 +1821,13 @@ def test_hooks_still_answer_when_ralph_or_autopilot_is_only_mentioned_or_comes_l
     baseline = run_case(name, payload, env, home)
     for prompt in MENTIONS:
         assert run_case(name, payload | {"transcript_path": session(tmp_path, prompt)}, env, home) == baseline, prompt
-    later = session(tmp_path, "fix the bug", "/ralph now")
-    assert run_case(name, payload | {"transcript_path": later}, env, home) == baseline
+    for second in ("/ralph now", "use tdd"):
+        later = session(tmp_path, "fix the bug", second)
+        assert run_case(name, payload | {"transcript_path": later}, env, home) == baseline, second
+    ide = [{"type": "text", "text": "<ide_selection>run tdd and ralph</ide_selection>"}, {"type": "text", "text": "fix the bug"}]
+    assert run_case(name, payload | {"transcript_path": session(tmp_path, ide)}, env, home) == baseline
+    glued = [{"type": "text", "text": "fix the t"}, {"type": "text", "text": "dd bug"}]
+    assert run_case(name, payload | {"transcript_path": session(tmp_path, glued)}, env, home) == baseline
 
 
 @pytest.mark.parametrize("name", BYPASS_HOOKS)
