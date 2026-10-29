@@ -261,6 +261,13 @@ def test_lifecycle_skills_limit_branch_names_built_from_issue_text(skill):
     assert re.search(r"(?i)a name built from issue text holds only letters, digits, `-` and `/`", text)
 
 
+@pytest.mark.parametrize("skill", ("github-issue-lifecycle", "gitea-issue-lifecycle", "jira-ticket-lifecycle"))
+def test_git_workflow_has_no_rewrite_of_a_pushed_commit(skill):
+    """Rewriting a pushed commit for its message went with commit-check (ADR-0006)."""
+    text = (ROOT / "config" / "skills" / skill / "references" / "git-workflow.md").read_text()
+    assert "**pushed** commit" not in text
+
+
 def test_adr_records_the_pathway_departure():
     adrs = sorted((ROOT / "docs" / "adr").glob("0004-*.md"))
     assert len(adrs) == 1

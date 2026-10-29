@@ -106,7 +106,6 @@ A hotfix is still an issue with the `hotfix` label, and its spec still needs the
 
 - Undo a merged change with a new commit: `git revert <sha>` (or `git revert -m 1 <merge-sha>` for a merge commit), through a normal PR.
 - Fix the last, **unpushed** commit message with `git commit --amend`.
-- A **pushed** commit on a feature branch with a bad message: rewrite it on the feature branch and push with `--force-with-lease`.
 - History on the default branch is never rewritten.
 
 ## Do and don't
