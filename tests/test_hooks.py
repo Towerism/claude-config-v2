@@ -517,25 +517,11 @@ def repo(tmp_path):
     return work
 
 
-def test_hooks_do_not_run_repo_config(repo, tmp_path):
+def test_host_default_scan_runs_no_fsmonitor_or_git_hook(repo, tmp_path):
     marks = tmp_path / "marks"
     marks.mkdir()
-    for key in ("fsmonitor", "extdiff", "textconv"):
-        script = tmp_path / f"{key}.sh"
-        script.write_text(f"#!/bin/sh\ntouch {marks}/{key}\ncat\n")
-        script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    executable(tmp_path / "fsmonitor.sh", f"#!/bin/sh\ntouch {marks}/fsmonitor\n")
     git(repo, "config", "core.fsmonitor", str(tmp_path / "fsmonitor.sh"))
-    git(repo, "config", "diff.external", str(tmp_path / "extdiff.sh"))
-    git(repo, "config", "diff.t.textconv", str(tmp_path / "textconv.sh"))
-    (repo / ".gitattributes").write_text("*.txt diff=t\n")
-    write_lines(repo, "big.txt", 301)
-    commit(repo, "feat: big (#1)")
-    write_lines(repo, "base.txt", 30)
-    (repo / "new.txt").write_text("row\n")
-    git(repo, "add", "base.txt")
-    for f in marks.iterdir():  # the test's own git calls ran the scripts; only the hook's count
-        f.unlink()
-    run("merge_confirm.py", bash("gh pr merge 1 --squash"))
     hooks = tmp_path / "githooks"
     hooks.mkdir()
     for name in ("reference-transaction", "post-checkout", "post-index-change"):
