@@ -1,5 +1,5 @@
-"""sync-spec --placeholder-file: a distilled summary under the note in the description when the
-spec is too long and is attached instead."""
+"""sync-spec --placeholder-file: when the spec is too long and is attached, the description
+shows the note, then the summary."""
 
 import subprocess
 
@@ -28,7 +28,7 @@ def placeholder(env, text, name="summary.md"):
 
 
 def refused(env, *extra):
-    """A usage error prints no JSON, so run the command without parsing its output."""
+    """Usage errors print no JSON, so this returns the raw process result."""
     return env.run("sync-spec", "--key", "PAY-142", *extra, cwd=repo_dir(env))
 
 
@@ -75,7 +75,7 @@ def test_a_marker_line_in_the_summary_is_refused_before_anything_is_attached(res
     assert env.ticket("PAY-142")["attachments"] == []
     assert env.ticket("PAY-142")["description"] == "Users want CSV."
     assert not [c for c in env.calls("rest") if c["method"] == "POST"]
-    # a longer line that only contains the marker is fine
+    # a line that only mentions the marker is allowed
     ok = placeholder(env, "see the spec:start line\n", "ok.md")
     r, _out = sync(env, "--placeholder-file", ok)
     assert r.returncode == 0, r.stdout

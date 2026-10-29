@@ -17,7 +17,7 @@ The `jira` flags below are the ones `ticket_lifecycle.py` passes to `ankitpokhre
 | `claim` (when `addToActiveSprint`) | `jira sprint list --state active --plain --no-headers --columns ID,NAME`; `jira sprint list <id> --plain --no-headers --columns key`; `jira sprint add <id> KEY` | No board in the CLI's config. No active sprint gives `none`, several give `ambiguous`. |
 | `claim`, `review`, `done` | `jira issue move KEY <state>` | "Invalid transition": the workflow doesn't allow that move from the current state. |
 | `set-mode`, `approve`, `sync-spec` | `jira issue edit KEY --label <add> --label -<remove> --no-input` | A label with a space, which Jira refuses. |
-| `sync-spec` | `jira issue edit KEY -b <description> --no-input` | "too long" or "exceeds": the script attaches the spec instead. With `--placeholder-file <file>` the description then holds a distilled summary (after a first line naming the attachment) in place of the one-line note; it must fit in the description and not contain a `spec:start` or `spec:end` line. |
+| `sync-spec` | `jira issue edit KEY -b <description> --no-input` | "too long" or "exceeds": the script attaches the spec instead. With `--placeholder-file <file>`, the summary in that file follows the attachment note. The summary must fit in the description and must not contain a `spec:start` or `spec:end` line. |
 | `comment`, `approve`, `sync-spec`, `create --link` | `jira issue comment add KEY --template <file> --no-input` | More than 32,767 characters: refused before the call. |
 | `link-pr` | `jira issue comment add KEY <PR URL> --no-input` | |
 
