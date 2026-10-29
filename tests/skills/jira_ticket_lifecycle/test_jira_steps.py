@@ -11,6 +11,10 @@ def steps(out):
     return {s["name"]: s["status"] for s in out["steps"]}
 
 
+def approve(env, key="PAY-142", words="i approve the spec"):
+    return env.json("approve", "--key", key, "--quote-file", env.file("quote.txt", words))
+
+
 # ── auth ─────────────────────────────────────────────────────────────────────
 
 
@@ -119,7 +123,7 @@ def create_input(env, **fields):
     return env.file("create.json", json.dumps(data))
 
 
-def test_create_makes_and_claims_a_ticket(env):
+def test_create_makes_a_ticket_and_only_assigns_it(env):
     env.settings(addToActiveSprint=True)
     env.update(sprints=[{"id": 7, "name": "Sprint 7", "state": "active", "issues": []}])
     r, out = env.json("create", "--input", create_input(env, type="Bug"))
@@ -130,10 +134,10 @@ def test_create_makes_and_claims_a_ticket(env):
         "Add CSV export to the roster page",
         "Bug",
         "owner@example.com",
-        "In Progress",
+        "To Do",
     )
     assert t["description"] == "Users want CSV."
-    assert key in env.state()["sprints"][0]["issues"]
+    assert env.state()["sprints"][0]["issues"] == []
 
 
 def test_create_file_only_makes_no_claim(env):
@@ -192,35 +196,23 @@ def test_shell_text_in_a_summary_reaches_jira_as_one_argument(env):
 # ── claim ────────────────────────────────────────────────────────────────────
 
 
-def test_claim_assigns_adds_to_the_sprint_and_moves_once(rest_env):
+def test_claim_only_assigns(rest_env):
     env = rest_env
     env.settings(addToActiveSprint=True)
     env.update(sprints=[{"id": 7, "name": "Sprint 7", "state": "active", "issues": []}])
     env.add_ticket("PAY-142")
     r, out = env.json("claim", "--key", "PAY-142")
     assert r.returncode == 0, r.stdout
-    assert steps(out) == {"assign": "done", "sprint": "done", "move": "done"}
+    assert steps(out) == {"assign": "done"}
     t = env.ticket("PAY-142")
-    assert (t["assignee"], t["state"]) == ("owner@example.com", "In Progress")
+    assert (t["assignee"], t["state"], t["labels"]) == ("owner@example.com", "To Do", [])
+    assert env.state()["sprints"][0]["issues"] == []
+    calls = [c["argv"] for c in env.calls("jira")]
+    assert not [a for a in calls if a[:1] == ["sprint"] or a[:2] == ["issue", "move"]]
     before = len(env.writes())
     r, out = env.json("claim", "--key", "PAY-142")
-    assert steps(out) == {"assign": "skipped", "sprint": "skipped", "move": "skipped"}
+    assert steps(out) == {"assign": "skipped"}
     assert len(env.writes()) == before
-
-
-def test_claim_leaves_a_later_state_alone(rest_env):
-    rest_env.add_ticket("PAY-142", state="In Review")
-    _, out = rest_env.json("claim", "--key", "PAY-142")
-    assert steps(out)["move"] == "skipped"
-    assert rest_env.ticket("PAY-142")["state"] == "In Review"
-
-
-def test_claim_reports_an_unknown_state_and_exits_1(rest_env):
-    rest_env.add_ticket("PAY-142", state="Blocked")
-    r, out = rest_env.json("claim", "--key", "PAY-142")
-    assert r.returncode == 1
-    assert steps(out)["move"] == "unknown-state"
-    assert rest_env.ticket("PAY-142")["state"] == "Blocked"
 
 
 def test_claim_refuses_someone_elses_ticket_unless_taking_over(rest_env):
@@ -243,38 +235,10 @@ def test_claim_refuses_a_done_ticket_unless_reopening(rest_env):
     assert steps(out) == {"move": "refused"}
     r, out = rest_env.json("claim", "--key", "PAY-142", "--reopen")
     assert rest_env.ticket("PAY-142")["assignee"] == "owner@example.com"
-    assert steps(out)["move"] == "skipped"
-
-
-@pytest.mark.parametrize(
-    ("sprints", "status"),
-    [([], "none"), ([{"id": 1, "name": "A"}, {"id": 2, "name": "B"}], "ambiguous")],
-)
-def test_no_or_several_active_sprints_are_warnings(rest_env, sprints, status):
-    rest_env.settings(addToActiveSprint=True)
-    rest_env.update(sprints=sprints)
-    rest_env.add_ticket("PAY-142")
-    r, out = rest_env.json("claim", "--key", "PAY-142")
-    assert r.returncode == 0
-    assert steps(out)["sprint"] == status
-
-
-def test_a_failing_move_is_reported(rest_env):
-    rest_env.add_ticket("PAY-142")
-    rest_env.update(
-        canned=[{"match": "jira issue move", "rc": 1, "stderr": "transition not allowed"}]
-    )
-    r, out = rest_env.json("claim", "--key", "PAY-142")
-    assert r.returncode == 1
-    assert steps(out)["move"] == "failed"
-    assert "transition not allowed" in out["steps"][-1]["detail"]
+    assert steps(out) == {"assign": "done"}
 
 
 # ── label provenance ─────────────────────────────────────────────────────────
-
-
-def approve(env, key="PAY-142", words="i approve the spec"):
-    return env.json("approve", "--key", key, "--quote-file", env.file("quote.txt", words))
 
 
 def test_label_actor_trusts_only_the_owners_latest_addition(rest_env):
@@ -348,6 +312,80 @@ def test_approve_quotes_the_words_and_swaps_the_labels(env):
     t = env.ticket("PAY-142")
     assert t["labels"] == ["spec-approved"]
     assert "> i approve the spec" in t["comments"][-1]
+
+
+def test_approve_moves_to_in_progress_and_adds_to_the_sprint(env):
+    env.settings(addToActiveSprint=True)
+    env.update(sprints=[{"id": 7, "name": "Sprint 7", "state": "active", "issues": []}])
+    env.add_ticket("PAY-142", labels=["spec-draft"])
+    r, out = approve(env)
+    assert r.returncode == 0, r.stdout
+    assert [x["name"] for x in out["steps"]] == ["comment", "labels", "sprint", "move"]
+    assert steps(out) == {"comment": "done", "labels": "done", "sprint": "done", "move": "done"}
+    t = env.ticket("PAY-142")
+    assert (t["state"], t["labels"]) == ("In Progress", ["spec-approved"])
+    assert "PAY-142" in env.state()["sprints"][0]["issues"]
+    writes = [["issue", "comment"], ["issue", "edit"], ["sprint", "add"], ["issue", "move"]]
+    order = [c["argv"][:2] for c in env.calls("jira") if c["argv"][:2] in writes]
+    assert order == writes
+
+
+def test_approve_rerun_after_a_failed_move_posts_no_second_comment(env):
+    env.add_ticket("PAY-142", labels=["spec-draft"])
+    env.update(
+        canned=[{"match": "jira issue move", "rc": 1, "stderr": "transition not allowed"}]
+    )
+    r, out = approve(env)
+    assert r.returncode == 1
+    assert steps(out)["move"] == "failed"
+    assert "transition not allowed" in out["steps"][-1]["detail"]
+    env.update(canned=[])
+    r, out = approve(env)
+    assert r.returncode == 0, r.stdout
+    assert steps(out) == {"comment": "skipped", "labels": "skipped", "move": "done"}
+    t = env.ticket("PAY-142")
+    assert (len(t["comments"]), t["state"]) == (1, "In Progress")
+
+
+def test_approve_after_a_return_to_draft_records_the_words_again(env):
+    env.add_ticket("PAY-142", labels=["spec-draft"])
+    approve(env)
+    s = env.state()
+    s["tickets"]["PAY-142"]["labels"] = ["spec-draft"]
+    env.write_state(s)
+    r, out = approve(env)
+    assert r.returncode == 0, r.stdout
+    assert steps(out)["comment"] == "done"
+    assert len(env.ticket("PAY-142")["comments"]) == 2
+
+
+def test_approve_leaves_a_later_state_alone(env):
+    env.add_ticket("PAY-142", state="In Review", labels=["spec-draft"])
+    _, out = approve(env)
+    assert steps(out)["move"] == "skipped"
+    assert env.ticket("PAY-142")["state"] == "In Review"
+
+
+def test_approve_reports_an_unknown_state_and_exits_1(env):
+    env.add_ticket("PAY-142", state="Blocked", labels=["spec-draft"])
+    r, out = approve(env)
+    assert r.returncode == 1
+    assert steps(out)["move"] == "unknown-state"
+    t = env.ticket("PAY-142")
+    assert (t["state"], t["labels"]) == ("Blocked", ["spec-approved"])
+
+
+@pytest.mark.parametrize(
+    ("sprints", "status"),
+    [([], "none"), ([{"id": 1, "name": "A"}, {"id": 2, "name": "B"}], "ambiguous")],
+)
+def test_no_or_several_active_sprints_are_warnings(env, sprints, status):
+    env.settings(addToActiveSprint=True)
+    env.update(sprints=sprints)
+    env.add_ticket("PAY-142", labels=["spec-draft"])
+    r, out = approve(env)
+    assert r.returncode == 0
+    assert steps(out)["sprint"] == status
 
 
 def test_approve_needs_the_users_quote(env):

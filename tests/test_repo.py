@@ -282,6 +282,45 @@ def test_lifecycle_skills_carry_no_retired_steps(skill):
             assert needle not in text, f"{path.relative_to(ROOT)}: {needle}"
 
 
+
+def section(text, heading):
+    """The text from a `### ` or `## ` heading up to the next heading of any level."""
+    start = text.index(heading)
+    end = re.search(r"^#{2,3} ", text[start + len(heading):], re.MULTILINE)
+    return text[start:start + len(heading) + end.start()] if end else text[start:]
+
+
+def test_gitea_claim_assigns_only_and_approval_sets_both():
+    """Gitea has no fake tea, so its claim and approval are pinned in the text."""
+    text = (ROOT / "config" / "skills" / "gitea-issue-lifecycle" / "SKILL.md").read_text()
+    claim = section(text, "### 2. Claim it")
+    assert '{"assignees": ["<login>"]}' in claim
+    assert "issues/N/labels" not in claim and "add `in progress`" not in claim
+    approval = section(text, "### 5. Approval and labels")
+    quote = approval.index("POST repos/<o>/<r>/issues/N/comments")
+    labels = approval.index("POST repos/<o>/<r>/issues/N/labels")
+    assert quote < labels
+    assert "`approved` and `in progress` together" in approval
+    assert "remove `draft`" in approval
+
+
+PROMPT_TAG = re.compile(r"\(prompt: (approval|merge|takeover)\)")
+# Built by concatenation so the scan of config/skills never finds this test's own words.
+ASK = re.compile(r"(?i)\b(stop and " + "ask|ask (the user|before|for|if|whether)|then " + "ask)\b")
+
+
+@pytest.mark.parametrize("skill", LIFECYCLE_SKILLS)
+def test_lifecycle_skills_prompt_only_at_the_gates(skill):
+    """The skills ask the user only for spec approval, merge, and takeover or reopen."""
+    folder = ROOT / "config" / "skills" / skill
+    text = (folder / "SKILL.md").read_text()
+    bullets = [l for l in section(text, "## Prompts").splitlines() if l.startswith("- ")]
+    assert [b.split("**")[1] for b in bullets] == ["Spec approval", "Merge", "Takeover or reopen"]
+    for path in [folder / "SKILL.md", *sorted((folder / "references").glob("*.md"))]:
+        for n, line in enumerate(path.read_text().splitlines(), 1):
+            asks = "AskUser" + "Question" in line or ASK.search(line)
+            assert not asks or PROMPT_TAG.search(line), f"{path.relative_to(ROOT)}:{n}: {line}"
+
 def test_adr_records_that_required_steps_bind_omc():
     adrs = sorted((ROOT / "docs" / "adr").glob("0005-*.md"))
     assert len(adrs) == 1

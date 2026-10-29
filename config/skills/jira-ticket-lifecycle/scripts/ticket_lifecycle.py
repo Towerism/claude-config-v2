@@ -851,9 +851,6 @@ def cmd_claim(res, jira, cfg, key, take_over=False, reopen=False):
         if rc != 0:
             return res.step("assign", "failed", error_text(rc, out, err, "jira issue assign"))
         res.step("assign", "done")
-    if cfg["addToActiveSprint"]:
-        add_to_sprint(res, jira, key)
-    move_forward(res, jira, cfg, key, fields, cfg["states"]["inProgress"])
 
 
 def add_to_sprint(res, jira, key):
@@ -975,6 +972,11 @@ def cmd_comment(res, jira, key, text):
     post_comment(res, jira, key, text)
 
 
+def unquoted(text):
+    """Comment text with quote markers and spacing dropped, as Jira may store a quote."""
+    return " ".join(re.sub(r"^\s*>\s?", "", line) for line in text.splitlines()).split()
+
+
 def cmd_approve(res, jira, cfg, key, quote):
     if not quote.strip():
         raise UsageError("--quote-file must hold the user's approval words")
@@ -983,12 +985,25 @@ def cmd_approve(res, jira, cfg, key, quote):
         return res.step("read", "failed", error)
     quoted = "\n".join("> " + line for line in quote.strip().splitlines())
     text = f"Approved by the user, in their words:\n\n{quoted}\n"
-    if post_comment(res, jira, key, text) != "done":
-        return None
     labels = cfg["labels"]
-    return edit_labels(
-        res, jira, key, fields.get("labels", []), add=[labels["approved"]], remove=[labels["draft"]]
+    current = fields.get("labels", [])
+    # A rerun after a failed later step finds the same words recorded and the label set.
+    comments = (fields.get("comment") or {}).get("comments", [])
+    recorded = any(
+        unquoted("\n".join(adf_blocks(c.get("body")))) == unquoted(text) for c in comments
     )
+    if recorded and labels["approved"] in current:
+        res.step("comment", "skipped", "the same approval is already recorded")
+    elif post_comment(res, jira, key, text) != "done":
+        return None
+    swapped = edit_labels(
+        res, jira, key, current, add=[labels["approved"]], remove=[labels["draft"]]
+    )
+    if swapped == "failed":
+        return None
+    if cfg["addToActiveSprint"]:
+        add_to_sprint(res, jira, key)
+    return move_forward(res, jira, cfg, key, fields, cfg["states"]["inProgress"])
 
 
 def cmd_link_pr(res, jira, key, url):
@@ -1338,9 +1353,9 @@ def build_parser():
         metavar="KEY",
         help="related tickets to link and comment on",
     )
-    p.add_argument("--file-only", action="store_true", help="no assignee, sprint or move")
+    p.add_argument("--file-only", action="store_true", help="no assignee")
     p.add_argument("--hotfix", action="store_true", help="add the hotfix label")
-    p = step("claim", "assign, add to the active sprint, move to the in-progress state")
+    p = step("claim", "assign the ticket to you")
     p.add_argument(
         "--take-over", action="store_true", help="the user agreed to take someone else's ticket"
     )
@@ -1355,7 +1370,11 @@ def build_parser():
     step("pull-spec", "find or rebuild the local working copy", repo=True)
     p = step("comment", "post a comment from a file")
     p.add_argument("--body-file", required=True, help="comment file")
-    p = step("approve", "record the user's approval as a comment quoting them, then the labels")
+    p = step(
+        "approve",
+        "record the user's approval (a comment quoting them, then the labels), "
+        "then add to the active sprint and move to the in-progress state",
+    )
     p.add_argument("--quote-file", required=True, help="file holding the user's approval words")
     p = step("link-pr", "comment the PR URL on the ticket")
     p.add_argument("--pr-url", required=True, help="the URL gh pr create printed")
