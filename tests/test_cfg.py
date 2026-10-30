@@ -210,6 +210,32 @@ def test_deploy_without_a_git_checkout_warns_and_records_no_clone(home, tmp_path
     assert "syncClone" not in json.loads((home / "claude-config" / "state.json").read_text())
 
 
+def test_rollback_of_an_interrupted_deploy_restores_settings_whole(home, tmp_path, monkeypatch):
+    run(home, "deploy", "--host", "personal", "--yes")
+    before = {rel: (home / rel).read_bytes() for rel in ("settings.json", "CLAUDE.md", "claude-config/state.json")}
+    # A newer config whose deploy rewrites settings.json, then fails writing CLAUDE.md.
+    newer = tmp_path / "newer"
+    for part in ("config", "hosts"):
+        shutil.copytree(ROOT / part, newer / part, ignore=shutil.ignore_patterns("__pycache__", ".omc"))
+    fragment = newer / "config" / "settings.fragment.json"
+    fragment.write_text(fragment.read_text().replace('"timeout": 10 }', '"timeout": 11 }', 1))
+    (newer / "config" / "CLAUDE.global.md").write_text("## Newer rules\n")
+    monkeypatch.setattr(cfg, "ROOT", newer)
+    real = cfg.write_atomic
+
+    def flaky(path, data, follow=False):
+        if path.name == "CLAUDE.md":
+            raise PermissionError("denied")
+        real(path, data, follow)
+
+    monkeypatch.setattr(cfg, "write_atomic", flaky)
+    assert run(home, "deploy", "--yes") == 3
+    assert (home / "settings.json").read_bytes() != before["settings.json"]
+    monkeypatch.setattr(cfg, "write_atomic", real)
+    assert run(home, "rollback") == 0
+    assert {rel: (home / rel).read_bytes() for rel in before} == before
+
+
 def test_plan_says_when_a_deploy_will_make_the_sync_clone(home, capsys):
     run(home, "plan", "--host", "personal")
     assert "sync clone" in capsys.readouterr().out

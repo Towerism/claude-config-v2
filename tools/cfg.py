@@ -366,6 +366,10 @@ def rollback(home: Path) -> list[str]:
     settings.json and CLAUDE.md are restored whole only if nothing else has changed them since the
     deploy (other tools write to both). Otherwise only our own hook entries and our CLAUDE.md block
     are removed, and everything else in the files stays.
+
+    A deploy that stopped part-way never wrote state.json, whose deployedAt names the backup of the
+    last finished deploy. When the newest backup is not that one, state.json says nothing about the
+    live files, so every backed-up file, settings.json and CLAUDE.md included, is restored whole.
     """
     backups = home / "claude-config" / "backups"
     found = sorted(p for p in backups.iterdir() if p.is_dir() and not p.name.endswith(".partial")) if backups.is_dir() else []
@@ -384,7 +388,8 @@ def rollback(home: Path) -> list[str]:
         "settings.json": (state.get("settingsSha"), lambda text: unmerge_settings(text, state)),
         "CLAUDE.md": (state.get("claudeMdSha"), remove_block),
     }
-    for rel, (digest, strip) in shared.items():
+    finished = latest.name == state.get("deployedAt")
+    for rel, (digest, strip) in shared.items() if finished else ():
         live = home / rel
         if live.exists() and digest and sha(live.read_bytes()) != digest:
             write_atomic(live, strip(read_text(live)).encode(), follow=True)

@@ -43,5 +43,5 @@ A change merged to `main` reached a machine only when someone ran `make deploy` 
 - Changes to `CLAUDE.md` and `settings.json` take effect from the next session: whether Claude Code reloads them in the session that ran the sync is not documented. Skills take effect at once through `reloadSkills`.
 - Offline or behind a slow remote, a session start waits up to the fetch deadline and then starts on the current config with a warning.
 - Because `GIT_SSH_COMMAND` overrides `core.sshCommand` and `PATH` is fixed, a setup that needs a custom ssh command, or a credential helper outside `/usr/local/bin:/usr/bin:/bin`, gets `fetch-failed` at every session start. The warning, `~/.claude/claude-config/sync.log` and `make status` show it; such a machine can opt out.
-- A rollback after a partial deploy uses `cfg.py rollback`, which restores `settings.json` whole only if it still matches the last recorded deploy; otherwise it strips claude-config's hook entries from it, and the next `make deploy YES=1` puts them back.
+- `cfg.py rollback` restores an interrupted deploy whole, `settings.json` and `CLAUDE.md` included, because that deploy never recorded itself in `state.json`.
 - A machine that has not deployed since this change has no clone recorded, so the hook does nothing until the next `make deploy YES=1`.

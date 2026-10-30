@@ -327,6 +327,9 @@ def test_a_deploy_that_fails_midway_is_rolled_back(world, tmp_path):
     w = world
     shelf = read_only_claude_md(w, tmp_path)
     try:
+        # The merged change also alters settings.json, which the deploy rewrites before it fails.
+        fragment = w.seed / "config" / "settings.fragment.json"
+        fragment.write_text(fragment.read_text().replace('"timeout": 10 }', '"timeout": 11 }', 1))
         merge_to_main(w)
         before = snapshot(w)
         code, out, err = hook(w)
@@ -335,6 +338,7 @@ def test_a_deploy_that_fails_midway_is_rolled_back(world, tmp_path):
         assert "current config stays" not in text
         assert last_log_line(w).endswith(" deploy-rolled-back")
         assert {k: v for k, v in snapshot(w).items() if k != "claude-config/sync.log"} == before
+        assert f"{w.claude}/hooks/auto_sync.py" in (w.claude / "settings.json").read_text()
     finally:
         shelf.chmod(0o755)
 
