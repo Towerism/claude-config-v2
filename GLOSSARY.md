@@ -8,9 +8,9 @@ One entry per term: definition, boundaries, one resolved ambiguity. Write here t
 
 ## Auto sync
 - Definition: the deploy `auto_sync.py` runs at the start of each new session: it fetches `main` from `origin` into the sync clone, fast-forwards it and runs its `cfg.py deploy --yes --force` for the recorded host (ADR-0007).
-- Boundary: only `main`, only fast-forwards, only on `startup`; never the user's working checkout. A failure keeps the current config, logs a reason in `sync.log` and warns the user; `"autoSync": false` in `local.json` turns it off.
+- Boundary: only `main`, only fast-forwards, only on `startup`; never the user's working checkout. A failure logs a reason in `sync.log` and warns the user; a deploy that fails midway is rolled back. `"autoSync": false` in `local.json` turns it off.
 - Avoid: "auto-update" (that is Claude Code's plugin update, which it does not replace).
-- Resolved ambiguity: the sync clone is the dedicated clone `cfg.py deploy --yes` makes in `$XDG_DATA_HOME/claude-config` and records as `syncClone` in `state.json`; a manual deploy from any checkout is replaced by `main` at the next session start.
+- Resolved ambiguity: the sync clone is the dedicated clone of `main` that `cfg.py deploy --yes` makes from `origin` in `$XDG_DATA_HOME/claude-config` and records as `syncClone` in `state.json`. A manual deploy, a hand edit or a rollback holds only until the next new session unless auto sync is off; an overwritten hand edit survives only in the last five backups.
 
 ## Default tracker
 - Definition: the issue tracker `host_default.py` names at session start for the current repo, with its source: a `jira.project` key in the repo's git history, then its `origin` remote, then the host profile's `defaultTracker` (ADR-0006).
