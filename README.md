@@ -15,7 +15,7 @@ V1 (`claude-config`) built its own pipeline from 24 skills, overlays and three h
 |---|---|
 | `config/CLAUDE.global.md` | The guardrails: eight lines, deployed into `~/.claude/CLAUDE.md` as a marked block beside OMC's own. They state only what OMC, the lifecycle skills and the hooks don't: the user approves every spec and every merge ([ADR-0006](docs/adr/0006-omc-leads-the-pipeline.md)) |
 | `config/skills/` | `github-issue-lifecycle`, `gitea-issue-lifecycle`, `jira-ticket-lifecycle` (each with a stdlib script for its checks and tracker steps), `fresh-session-handoff`, `linux-troubleshooting`, `architecture-backfill` (docs a repo's architecture and past decisions from code and history, each claim labeled verified or inferred). Prose rules come from OMC's `minimal-prose-discipline` and `agent-doc-discipline` |
-| `config/hooks/` | `merge_confirm.py` (every PR merge waits for your click) and `host_default.py` (states the repo's tracker at session start, from its history, its `origin` and the host profile) |
+| `config/hooks/` | `merge_confirm.py` (every PR merge waits for your click), `host_default.py` (states the repo's tracker at session start, from its history, its `origin` and the host profile) and `auto_sync.py` (deploys `main` from `origin` at the start of each new session, [ADR-0007](docs/adr/0007-auto-sync-at-session-start.md)) |
 | `hosts/` | `personal.json`, `work.json` |
 | `tools/cfg.py` | plan, deploy, status and rollback |
 | `tests/` | repo invariants, hooks, `cfg.py`, and the lifecycle scripts (`tests/skills/`, against a fake `gh` and `jira`) |
@@ -32,9 +32,10 @@ V1 (`claude-config`) built its own pipeline from 24 skills, overlays and three h
    ```
 
    `make deploy` without `YES=1` only prints the plan. Later deploys remember the host, so `HOST` can be left out. `TARGET=DIR` (or `CLAUDE_CONFIG_DIR`) deploys somewhere else, such as a scratch directory. The same runs without make: `python3 -I tools/cfg.py plan --host personal`, then `... deploy --host personal --yes`.
-3. `make status` lists files edited since the last deploy and changes still pending. A deploy stops on an edited file until you pass `FORCE=1` (`--force`; the old copy is backed up). `make rollback` undoes the last deploy. A `HOST` or `TARGET` holding `'` or `$` needs the raw command. Only values typed after `make` count; exported variables are ignored.
+3. After that, deploys also run automatically. The first `make deploy YES=1` makes a clone of `main` in `~/.local/share/claude-config` (`$XDG_DATA_HOME/claude-config`), with this checkout's `origin`. At the start of each new session the `auto_sync.py` hook fetches `main` into it, fast-forwards it and deploys it with `--force`, so files edited by hand in `~/.claude` are overwritten (and backed up; `make rollback` restores them). A manual deploy from a feature branch is replaced by `main` at the next session start. On success it shows only a spinner; on failure the current config stays, the reason goes to `~/.claude/claude-config/sync.log` and you see a one-line warning. To turn it off on a machine, set `"autoSync": false` in `~/.config/claude-config/local.json`.
+4. `make status` lists files edited since the last deploy, changes still pending and the last failed sync. A deploy stops on an edited file until you pass `FORCE=1` (`--force`; the old copy is backed up). `make rollback` undoes the last deploy. A `HOST` or `TARGET` holding `'` or `$` needs the raw command. Only values typed after `make` count; exported variables are ignored.
 
-Per-machine values that never enter the repo live in `~/.config/claude-config/local.json`: the `jira` settings that tailor `jira-ticket-lifecycle` to your Jira project (see its `references/settings.md`). A top-level `defaultTracker` there is ignored; the host profile holds the default.
+Per-machine values that never enter the repo live in `~/.config/claude-config/local.json`: `autoSync` (above), and the `jira` settings that tailor `jira-ticket-lifecycle` to your Jira project (see its `references/settings.md`). A top-level `defaultTracker` there is ignored; the host profile holds the default.
 
 ## Add a second machine, a skill or a hook
 
