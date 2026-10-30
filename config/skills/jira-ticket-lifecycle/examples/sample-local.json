@@ -1,5 +1,4 @@
 {
-  "defaultTracker": "jira",
   "jira": {
     "project": "PAY",
     "site": "https://example.atlassian.net",

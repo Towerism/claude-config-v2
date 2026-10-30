@@ -1,5 +1,4 @@
-"""The text subcommands: settings, branch-name, commit-check and pr-body-check. None of them
-touches Jira."""
+"""The text subcommands: settings and pr-body-check. Neither touches Jira."""
 
 import json
 
@@ -21,8 +20,15 @@ def test_complete_settings_print_with_defaults_filled_in(env):
     assert out["relatedLinkType"] == "Relates"
     assert out["requireApprovedPr"] is False
     assert out["labels"]["draft"] == "spec-draft"
-    assert out["labels"]["noReview"] == "approval-no-review"
     assert out["specDir"] == str(env.state_home / "claude-config" / "jira-specs")
+
+
+def test_old_approval_label_keys_still_load(env):
+    """Approval modes are retired; a local.json written for them still loads."""
+    env.settings(labels={"manual": "approval-manual", "noReview": "approval-no-review"})
+    r, out = env.json("settings", "--json")
+    assert r.returncode == 0, r.stderr
+    assert sorted(out["labels"]) == ["approved", "draft", "hotfix"]
 
 
 @pytest.mark.parametrize(
@@ -87,118 +93,13 @@ def test_text_output_lists_the_settings(env):
     assert "project: PAY" in r.stdout
 
 
-# ── branch-name ──────────────────────────────────────────────────────────────
+# ── pr-body-check ────────────────────────────────────────────────────────────
 
-
-def branch(env, title, *extra):
-    path = env.file("title.txt", title)
-    return env.run("branch-name", "--key", "PAY-142", "--title-file", path, *extra)
-
-
-def test_branch_name_from_a_title(env):
-    r = branch(env, "Add CSV export: roster (v2)!", "--type", "feat")
-    assert r.stdout.strip() == "feature/PAY-142-add-csv-export-roster-v2"
-
-
-@pytest.mark.parametrize(
-    ("args", "prefix"),
-    [
-        (("--type", "fix"), "fix/"),
-        (("--type", "docs"), "docs/"),
-        (("--type", "refactor"), "chore/"),
-        (("--type", "feat", "--hotfix"), "hotfix/"),
-    ],
-)
-def test_branch_prefix_follows_the_type(env, args, prefix):
-    assert branch(env, "Login fails", *args).stdout.startswith(prefix + "PAY-142-")
-
-
-def test_long_title_cut_at_a_hyphen(env):
-    r = branch(
-        env, "Make the export of attendance rosters handle very large files", "--type", "feat"
-    )
-    slug = r.stdout.strip().split("PAY-142-", 1)[1]
-    assert len(slug) <= 40
-    assert not slug.endswith("-")
-    assert "attendance-rosters-handle" in slug or slug.startswith("make-the-export")
-
-
-def test_title_with_nothing_ascii_falls_back(env):
-    assert branch(env, "日本語", "--type", "feat").stdout.strip() == "feature/PAY-142-ticket-142"
-
-
-def test_shell_text_in_a_title_is_just_text(env):
-    r = branch(env, "$(touch pwned) `id`", "--type", "feat")
-    assert r.stdout.strip() == "feature/PAY-142-touch-pwned-id"
-    assert not (env.tmp / "pwned").exists()
-
-
-def test_unknown_type_and_bad_key_are_usage_errors(env):
-    assert branch(env, "x", "--type", "wat").returncode == 2
-    path = env.file("t.txt", "x")
-    assert (
-        env.run("branch-name", "--type", "feat", "--key", "pay-1", "--title-file", path).returncode
-        == 2
-    )
-
-
-# ── commit-check ─────────────────────────────────────────────────────────────
-
-
-def commit(env, message, *extra):
-    return env.run("commit-check", "--message", env.file("msg.txt", message), "--json", *extra)
+TICKET_LINE = "Ticket: https://example.atlassian.net/browse/PAY-142"
 
 
 def codes(result):
     return {p["code"] for p in json.loads(result.stdout)["problems"]}
-
-
-def test_conventional_subjects_with_a_ticket_ref_pass(env):
-    assert commit(env, "feat(roster): add CSV export (PAY-142)").returncode == 0
-    msg = "fix!: drop v1 route (PAY-7)\n\nBREAKING CHANGE: v1 is gone\n"
-    assert commit(env, msg).returncode == 0
-
-
-@pytest.mark.parametrize(
-    ("message", "code"),
-    [
-        ("fix!: drop v1 route (PAY-7)", "breaking-needs-footer"),
-        ("feat: add export", "missing-ticket-ref"),
-        ("feat: add export (#42)", "missing-ticket-ref"),
-        ("feat: add export (PAY-7) ", "missing-ticket-ref"),
-        ("Add export (PAY-7)", "not-conventional"),
-    ],
-)
-def test_bad_subjects_fail_with_a_code(env, message, code):
-    r = commit(env, message)
-    assert r.returncode == 1
-    assert code in codes(r)
-
-
-def test_key_option_requires_that_ticket(env):
-    r = commit(env, "feat: add export (PAY-7)", "--key", "PAY-142")
-    assert r.returncode == 1
-    assert codes(r) == {"wrong-ticket-ref"}
-    assert commit(env, "feat: add export (PAY-142)", "--key", "PAY-142").returncode == 0
-
-
-def test_text_output_and_stdin(env):
-    r = env.run("commit-check", "--message", env.file("m.txt", "feat: x"))
-    assert r.returncode == 1
-    assert "FAIL missing-ticket-ref" in r.stdout
-    ok = env.run("commit-check", "--message", env.file("m2.txt", "feat: x (PAY-1)"))
-    assert ok.stdout.startswith("OK")
-
-
-def test_a_missing_message_file_is_a_usage_error(env):
-    r = env.run("commit-check", "--message", env.tmp / "nope.txt", "--json")
-    assert r.returncode == 2
-    assert "error" in json.loads(r.stdout)
-
-
-# ── pr-body-check ────────────────────────────────────────────────────────────
-
-TICKET_LINE = "Ticket: https://example.atlassian.net/browse/PAY-142"
 
 
 def pr(env, body):
@@ -253,7 +154,7 @@ def test_no_subcommand_is_a_usage_error(env):
 def test_help_lists_only_file_options_for_free_text(env):
     r = env.run("--help")
     assert r.returncode == 0
-    for sub in ("search", "approve", "comment", "create", "branch-name", "sync-spec", "pr-body"):
+    for sub in ("search", "approve", "comment", "create", "sync-spec", "pr-body"):
         h = env.run(sub, "--help").stdout
         for banned in ("--text ", "--quote ", "--title ", "--summary "):
             assert banned not in h, (sub, banned)

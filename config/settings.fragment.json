@@ -4,23 +4,6 @@
       {
         "matcher": "Bash",
         "hooks": [{ "type": "command", "command": "python3 -I {claude_home}/hooks/merge_confirm.py", "timeout": 10 }]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [{ "type": "command", "command": "python3 -I {claude_home}/hooks/bash_guard.py", "timeout": 10 }]
-      },
-      {
-        "matcher": "Skill",
-        "hooks": [{ "type": "command", "command": "python3 -I {claude_home}/hooks/skill_gate.py", "timeout": 10 }]
-      },
-      {
-        "matcher": "Read|Grep|Glob|Bash",
-        "hooks": [{ "type": "command", "command": "python3 -I {claude_home}/hooks/secrets_guard.py", "timeout": 10 }]
-      }
-    ],
-    "UserPromptExpansion": [
-      {
-        "hooks": [{ "type": "command", "command": "python3 -I {claude_home}/hooks/skill_gate.py", "timeout": 10 }]
       }
     ],
     "SessionStart": [

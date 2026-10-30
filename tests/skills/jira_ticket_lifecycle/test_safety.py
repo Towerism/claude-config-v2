@@ -112,7 +112,6 @@ def test_the_script_never_uses_a_shell_and_imports_no_raw_sockets():
         "subprocess",
         "sys",
         "tempfile",
-        "unicodedata",
         "urllib",
         "uuid",
         "datetime",
@@ -127,15 +126,6 @@ def test_metacharacters_in_every_free_text_file_stay_inert(rest_env):
     env.run("search", "--text-file", env.file("w.txt", nasty))
     env.run("comment", "--key", "PAY-142", "--body-file", env.file("c.md", nasty))
     env.run("approve", "--key", "PAY-142", "--quote-file", env.file("q.txt", nasty))
-    env.run(
-        "branch-name",
-        "--type",
-        "feat",
-        "--key",
-        "PAY-142",
-        "--title-file",
-        env.file("t.txt", nasty),
-    )
     env.run(
         "create",
         "--input",

@@ -13,4 +13,4 @@ Spec: PAY-142
 
 ## Review
 
-<The PR-diff review note: each finding, its severity, and how it was handled.>
+<The review note, if a review ran: each finding, its severity, and how it was handled. Otherwise say no review ran.>

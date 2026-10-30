@@ -1,28 +1,44 @@
-"""SessionStart and SubagentStart hook: tell the model which machine this is.
+"""SessionStart and SubagentStart hook: state the issue tracker for the current repo.
 
-The global rules name no tracker. They say to start with the tracker the
-repo's CLAUDE.md names, else the host default stated at session start. This
-hook states that default, on SessionStart for the main session and on
-SubagentStart for each subagent (a subagent doesn't inherit SessionStart
-context).
+A subagent doesn't inherit SessionStart context, so SubagentStart gets the same line. The
+tracker comes from the first of these that names one:
 
-The default comes from, in order:
-1. `defaultTracker` in the machine-local file $XDG_CONFIG_HOME/claude-config/local.json
-   (or ~/.config/claude-config/local.json), which `cfg` never writes;
-2. `defaultTracker` in <claude home>/claude-config/state.json, written by `cfg deploy`
-   from the host profile.
+1. the Jira project key `jira.project` in the machine-local file
+   $XDG_CONFIG_HOME/claude-config/local.json (or ~/.config/claude-config/local.json) appearing in
+   the repo's local history: the last 200 commit subjects of HEAD and the newest 500 branch names
+   hold at least two distinct KEY-N tokens, or one in a conventional form (" (KEY-N)" ending a
+   subject, "KEY-N:" starting one, "/KEY-N-" in a branch name); this gives jira;
+2. the `origin` remote: github.com gives github; a host listed by `tea logins list` gives gitea
+   (tea runs only when a tea config file exists);
+3. `defaultTracker` in <claude home>/claude-config/state.json, written by `cfg deploy` from the
+   host profile.
 
-The Claude home is two levels above this file (<home>/hooks/host_default.py).
-Reads only those two files, prints only checked names (the host, the tracker and its
-skill), always exits 0 and writes nothing to stderr.
+The repo is the payload's absolute `cwd`. The top-level `defaultTracker` in local.json is
+ignored. With none of these, nothing is printed. The repo's own CLAUDE.md wins over all of
+them, and the line says so.
+
+The Claude home is two levels above this file (<home>/hooks/host_default.py). git runs by
+absolute path from a fixed PATH with a fixed argv, with no repo config that runs programs
+(fsmonitor, hooks, external diff, signature checks), no GIT_* variables and no lazy fetch, output
+capped at 64 KiB. Lazy fetch is off twice: GIT_NO_LAZY_FETCH (git >= 2.44) and
+protocol.allow=never, which covers older git by refusing every transport. The repo scan gets 3
+seconds and one 5-second deadline covers the hook. Prints only checked names (the host, the
+tracker and its skill) and fixed words, always exits 0 and writes nothing to stderr.
 """
 
 import contextlib
+import csv
 import json
 import os
 import re
+import select
+import shutil
+import signal
+import subprocess
 import sys
+import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
 # Each tracker has its own lifecycle skill.
@@ -32,6 +48,27 @@ TRACKERS = {
     "jira": "jira-ticket-lifecycle",
 }
 CAP = 64 * 1024
+DEADLINE_SECONDS = 5
+REPO_SECONDS = 3  # under DEADLINE_SECONDS, so a slow repo still leaves time for the host profile line
+TEA_SECONDS = 2
+SAFE_PATH = "/usr/local/bin:/usr/bin:/bin"  # git and tea are looked up here, never on the caller's PATH
+# Override repo config that would run programs; protocol.allow=never refuses every transport
+# (uploadpack, sshCommand), which the scan never needs.
+GIT_FLAGS = [
+    "--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "diff.external=",
+    "-c", "log.showSignature=false", "-c", "protocol.allow=never",
+]
+JIRA_KEY = re.compile(r"[A-Z][A-Z0-9_]{1,9}")
+HOST = re.compile(r"[a-z0-9.-]{1,253}")
+SCP_URL = re.compile(r"(?:[^@/:]+@)?([^/:]+):")
+
+
+class Timeout(Exception):
+    pass
+
+
+def on_deadline(signum, frame):
+    raise Timeout
 
 
 def read_json(path: Path) -> dict:
@@ -55,71 +92,143 @@ def tracker_name(value: object) -> str | None:
     return name if name in TRACKERS else None
 
 
-def message(home: Path, config_home: Path) -> str | None:
-    """The context line for this machine, or None when nothing usable is configured."""
+def run_tool(name: str, args: list[str], env: dict, deadline: float, cwd: str | None = None) -> str | None:
+    """stdout of `name` (found on SAFE_PATH) capped at CAP, or None on failure or past the deadline.
+
+    Tests replace this function to answer for tea.
+    """
+    exe = shutil.which(name, path=SAFE_PATH)
+    if exe is None:
+        return None
+    try:
+        proc = subprocess.Popen(
+            [exe, *args],
+            cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        )
+    except (OSError, ValueError):
+        return None
+    chunks: list[bytes] = []
+    size = 0
+    try:
+        while size < CAP:
+            left = deadline - time.monotonic()
+            if left <= 0 or not select.select([proc.stdout], [], [], left)[0]:
+                return None
+            chunk = os.read(proc.stdout.fileno(), CAP - size)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+    finally:
+        proc.kill()
+        proc.wait()
+        proc.stdout.close()
+    # -9 is our own kill, sent after EOF or at the cap.
+    if size < CAP and proc.returncode not in (0, -9):
+        return None
+    return b"".join(chunks).decode("utf-8", errors="replace")
+
+
+def run_git(cwd: str, args: list[str], deadline: float) -> str | None:
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env["PATH"] = SAFE_PATH
+    env["GIT_NO_LAZY_FETCH"] = "1"
+    return run_tool("git", [*GIT_FLAGS, *args], env, deadline, cwd)
+
+
+def names_jira(key: str, subjects: list[str], branches: list[str]) -> bool:
+    """Whether `key` shows up as two distinct KEY-N tokens, or as one in a conventional form."""
+    token = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(key)}-(\d+)(?![A-Za-z0-9_])")
+    numbers = {m.group(1) for text in (*subjects, *branches) for m in token.finditer(text)}
+    if len(numbers) >= 2:
+        return True
+    key_ref = rf"{re.escape(key)}-\d+"
+    return any(re.search(rf" \({key_ref}\)$", s) or re.match(rf"{key_ref}:", s) for s in subjects) or any(
+        re.search(rf"/{key_ref}-", b) for b in branches
+    )
+
+
+def jira_in_history(key: str, cwd: str, deadline: float) -> bool:
+    log = run_git(cwd, ["log", "-n", "200", "--format=%s", "HEAD", "--"], deadline) or ""
+    refs = run_git(
+        cwd,
+        ["for-each-ref", "--sort=-committerdate", "--count=500", "--format=%(refname:short)", "refs/heads", "refs/remotes"],
+        deadline,
+    ) or ""
+    return names_jira(key, log.splitlines(), refs.splitlines())
+
+
+def url_host(url: str) -> str | None:
+    """The lowercase host of an https, ssh or scp-style URL, if it passes HOST."""
+    url = url.strip()
+    if "://" in url:
+        try:
+            host = urlsplit(url).hostname
+        except ValueError:
+            return None
+    else:
+        match = SCP_URL.match(url)
+        host = match.group(1) if match else None
+    host = host.lower() if host else None
+    return host if host and HOST.fullmatch(host) else None
+
+
+def tea_hosts(config_home: Path, deadline: float) -> set[str]:
+    """Hosts of the tea logins (URL and SSHHost columns); tea runs only when its config exists."""
+    if not any(p.is_file() for p in (config_home / "tea" / "config.yml", Path.home() / ".config" / "tea" / "config.yml")):
+        return set()
+    env = {"PATH": SAFE_PATH, **{k: os.environ[k] for k in ("HOME", "XDG_CONFIG_HOME") if k in os.environ}}
+    out = run_tool("tea", ["logins", "list", "-o", "csv"], env, min(deadline, time.monotonic() + TEA_SECONDS))
+    hosts = set()
+    for row in csv.DictReader((out or "").splitlines()):
+        for key, value in row.items():
+            if isinstance(key, str) and key.lower() in ("url", "sshhost") and isinstance(value, str) and value:
+                host = url_host(value) if "://" in value else url_host(value + ":")
+                if host:
+                    hosts.add(host)
+    return hosts
+
+
+def origin_tracker(cwd: str, config_home: Path, deadline: float) -> str | None:
+    host = url_host(run_git(cwd, ["remote", "get-url", "origin"], deadline) or "")
+    if host is None:
+        return None
+    if host == "github.com":
+        return "github"
+    return "gitea" if host in tea_hosts(config_home, deadline) else None
+
+
+def repo_tracker(cwd: object, local: dict, config_home: Path) -> tuple[str, str] | None:
+    """(tracker, source) from the repo's own signals, or None."""
+    if not isinstance(cwd, str) or "\0" in cwd or not os.path.isabs(cwd) or not os.path.isdir(cwd):
+        return None
+    deadline = time.monotonic() + REPO_SECONDS
+    jira = local.get("jira")
+    key = jira.get("project") if isinstance(jira, dict) else None
+    if isinstance(key, str) and JIRA_KEY.fullmatch(key) and jira_in_history(key, cwd, deadline):
+        return "jira", "jira key in history"
+    tracker = origin_tracker(cwd, config_home, deadline)
+    return (tracker, "origin") if tracker else None
+
+
+def message(home: Path, config_home: Path, cwd: object = None) -> str | None:
+    """The context line for this repo and machine, or None when nothing names a tracker."""
     state = read_json(home / "claude-config" / "state.json")
     local = read_json(config_home / "claude-config" / "local.json")
-    tracker = tracker_name(local.get("defaultTracker")) or tracker_name(state.get("defaultTracker"))
+    profile = tracker_name(state.get("defaultTracker"))
+    found = repo_tracker(cwd, local, config_home)
+    tracker, source = found or (profile, "host profile")
     if tracker is None:
         return None
     host = checked(state.get("host"))
     where = f"Host profile: {host}. " if host else ""
-    return (
+    text = (
         f"{where}Default issue tracker: {tracker}. Use the {TRACKERS[tracker]} skill "
-        "unless the repo's CLAUDE.md names another tracker; the repo's choice wins."
+        f"unless the repo's CLAUDE.md names another tracker; the repo's choice wins. Source: {source}."
     )
-
-
-# A session whose first prompt starts with a skill or holds an OMC keyword runs unguarded (#12, #36).
-BYPASS_PROMPT = re.compile(
-    r"(?i)\s*(?:<command-message>[^<]*</command-message>\s*)?(?:<command-name>)?/(?P<skill>\w[\w.-]*(?::\w[\w.-]*)?)(?=\s|:|<|$)"
-)
-BYPASS_WORD = re.compile(
-    r"(?i)(?<![\w./-])(?:autopilot|ralph|ralplan|deep[\s-]+interview|deslop|anti-slop|deep-analyze|tdd|deepsearch|ultrathink|cancelomc)(?![\w'\u2019/-]|\.\w)"
-)
-# Claude Code's own commands (as of October 2026): a first prompt starting with one of these is not a skill.
-BUILTIN_COMMANDS = frozenset({
-    "add-dir", "agents", "artifacts", "bashes", "branch", "btw", "bug", "checkpoint", "chrome", "clear",
-    "compact", "config", "context", "continue", "copy", "cost", "desktop", "diff", "doctor", "effort", "exit",
-    "export", "extra-usage", "fast", "feedback", "fork", "goal", "help", "hooks", "ide", "init", "insights",
-    "install-github-app", "install-slack-app", "keybindings", "login", "logout", "mcp", "memory", "mobile",
-    "model", "new", "output-style", "permissions", "plan", "plugin", "pr-comments", "privacy-settings", "quit",
-    "release-notes", "reload-plugins", "remote-control", "remote-env", "rename", "reset", "resume", "review",
-    "rewind", "sandbox", "settings", "skills", "stats", "status", "statusline", "tasks", "terminal-setup",
-    "theme", "todos", "upgrade", "usage", "vim", "voice", "web-setup",
-})
-
-
-def session_bypassed(payload: dict) -> bool:
-    """Whether the session's first user prompt starts with a skill or holds an OMC keyword. Reads the first
-    256 KB of the transcript; anything unreadable means no."""
-    with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
-        path = payload["transcript_path"]
-        if not isinstance(path, str) or not os.path.isfile(path):
-            return False
-        with open(path, "rb") as f:
-            lines = f.read(256 * 1024).splitlines()
-        for line in lines:
-            try:
-                entry = json.loads(line)
-                content = entry["message"]["content"]
-                if entry["type"] != "user" or entry.get("isMeta") or entry.get("isSidechain"):
-                    continue
-            except (ValueError, KeyError, TypeError):
-                continue
-            if isinstance(content, list):
-                # Only what the user typed: skip blocks the IDE or harness injected.
-                content = "\n".join(
-                    b.get("text", "")
-                    for b in content
-                    if isinstance(b, dict) and b.get("type") == "text" and not b.get("text", "").lstrip().startswith(("<ide_", "<system-reminder"))
-                )
-            if isinstance(content, str) and content.strip():
-                start = BYPASS_PROMPT.match(content)
-                if start and start.group("skill").lower() not in BUILTIN_COMMANDS:
-                    return True
-                return BYPASS_WORD.search(content) is not None
-    return False
+    if found and profile and profile != tracker:
+        text += f" Host profile default: {profile}."
+    return text
 
 
 def main() -> None:
@@ -130,18 +239,20 @@ def main() -> None:
         parsed = True
     if not parsed:
         return
-    if event not in ("SessionStart", "SubagentStart") or session_bypassed(payload):
+    if event not in ("SessionStart", "SubagentStart"):
         return
-    home = Path(__file__).resolve().parent.parent
-    xdg = os.environ.get("XDG_CONFIG_HOME")
-    config_home = Path(xdg) if xdg else Path.home() / ".config"
-    text = message(home, config_home)
-    if text:
-        print(
-            json.dumps(
-                {"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}
-            )
-        )
+    # Past the deadline, or on any error, nothing is printed.
+    with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
+        signal.signal(signal.SIGALRM, on_deadline)
+        signal.alarm(DEADLINE_SECONDS)
+        home = Path(__file__).resolve().parent.parent
+        xdg = os.environ.get("XDG_CONFIG_HOME")
+        config_home = Path(xdg) if xdg else Path.home() / ".config"
+        text = message(home, config_home, payload.get("cwd"))
+        signal.alarm(0)  # disarm first, so the alarm cannot fire during the print
+        if text:
+            print(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}))
+    signal.alarm(0)
 
 
 if __name__ == "__main__":

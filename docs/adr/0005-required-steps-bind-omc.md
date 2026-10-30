@@ -1,6 +1,6 @@
 # ADR-0005: Required steps bind OMC's lightest-path principle
 
-**Status:** Accepted by the owner on 2026-10-25, issue #14.
+**Status:** Accepted by the owner on 2026-10-25, issue #14. Superseded by ADR-0006.
 
 ## Context
 

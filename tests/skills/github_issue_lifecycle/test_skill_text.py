@@ -1,5 +1,5 @@
-"""The shell blocks in SKILL.md, run as written: the claim block against a fake gh, and the
-temp-folder line."""
+"""The shell blocks in SKILL.md, run as written: the claim and approval blocks against a fake gh,
+and the temp-folder line."""
 
 import os
 import re
@@ -16,15 +16,16 @@ LABELS = [
     "draft",
     "approved",
     "hotfix",
-    "approval: manual",
-    "approval: adversarial",
-    "approval: no-review",
 ]
 
 
-def claim_block():
+def bash_block(needle):
     blocks = re.findall(r"```bash\n(.*?)```", SKILL, re.DOTALL)
-    return next(b for b in blocks if 'gh label create "in progress"' in b)
+    return next(b for b in blocks if needle in b)
+
+
+def claim_block():
+    return bash_block('gh label create "in progress"')
 
 
 def test_claim_is_idempotent_and_assigns(gh):
@@ -35,14 +36,33 @@ def test_claim_is_idempotent_and_assigns(gh):
     calls = gh.calls()
     requested = {c[2] for c in calls if c[:2] == ["label", "create"]}
     assert requested == set(LABELS)
-    claim = ["issue", "edit", "42", "--add-assignee", "@me", "--add-label", "in progress"]
+    claim = ["issue", "edit", "42", "--add-assignee", "@me"]
     assert calls.count(claim) == 2
+    assert [c for c in calls if c[:2] == ["issue", "edit"]] == [claim, claim]
 
 
 def test_claim_on_a_fresh_repo(gh):
     result = gh.run_bash("set -e\n" + claim_block())
     assert result.returncode == 0
     assert sum(1 for c in gh.calls() if c[:2] == ["label", "create"]) == len(LABELS)
+
+
+def test_approval_block_posts_the_quote_then_sets_both_labels(gh):
+    result = gh.run_bash('set -e\ntmp=$(mktemp -d)\n' + bash_block("--add-label approved"))
+    assert result.returncode == 0, result.stderr
+    calls = [c for c in gh.calls() if c[:2] in (["issue", "comment"], ["issue", "edit"])]
+    assert [c[:2] for c in calls] == [["issue", "comment"], ["issue", "edit"]]
+    edit = calls[1]
+    added = [edit[i + 1] for i, a in enumerate(edit) if a == "--add-label"]
+    removed = [edit[i + 1] for i, a in enumerate(edit) if a == "--remove-label"]
+    assert (sorted(added), removed) == (["approved", "in progress"], ["draft"])
+
+
+def test_a_failed_quote_sets_no_label(gh):
+    (gh.state / "fail.json").write_text('{"issue comment": "HTTP 502"}')
+    result = gh.run_bash('set -e\ntmp=$(mktemp -d)\n' + bash_block("--add-label approved"))
+    assert result.returncode != 0
+    assert not [c for c in gh.calls() if c[:2] == ["issue", "edit"]]
 
 
 def temp_line():

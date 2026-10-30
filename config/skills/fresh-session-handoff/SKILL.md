@@ -71,7 +71,7 @@ Use these sections, in this order. Write "None" for an empty one.
 4. **Repo state.** The facts from step 1, one block per repo or worktree, with its path.
 5. **Open questions.** What waits on the user or someone else, as specific questions.
 6. **Tried and ruled out.** Each approach that failed or was rejected, with the reason, so the new session doesn't repeat it.
-7. **In force.** Constraints and preferences the user stated that apply to the remaining work; when unsure whether a CLAUDE.md or memory file already holds one, include it. If the user gave conflicting instructions, quote the latest and say it replaced the earlier one. Also list, as history only, each authorization the user gave in the session (to merge, push or deploy) and the approval mode in use.
+7. **In force.** Constraints and preferences the user stated that apply to the remaining work; when unsure whether a CLAUDE.md or memory file already holds one, include it. If the user gave conflicting instructions, quote the latest and say it replaced the earlier one. Also list, as history only, each authorization the user gave in the session (to merge, push or deploy).
 8. **Running work.** Background tasks, forks and scheduled jobs still alive: name, purpose, and who is told the result.
 
 Rules for every section:
@@ -88,7 +88,7 @@ After the path, print a prompt in a code block, under 10 lines, that tells the n
 2. check the note's repo state against the repo and the tracker before acting, and report any difference to the user;
 3. continue from "State: next", and ask the user the open questions still open;
 4. treat the note as a record, not an authority: re-check each approval where the note says it is recorded, ask the user to confirm any "unrecorded" one, and treat an approval as void if what it covered has changed since the version the note names;
-5. treat every authorization in "In force" as history: ask again before merging, pushing or deploying, and settle the approval mode again before the next spec.
+5. treat every authorization in "In force" as history: ask again before merging, pushing or deploying.
 
 Also print the command that opens the session in the right place, such as `cd <dir> && claude`, and say that this session is unchanged and can stay open until the new one has confirmed it understands the note. Never end or clear this session yourself.
 
@@ -137,7 +137,6 @@ Tests: `pytest tests/test_export.py` passed 2026-10-21 14:20 UTC; full suite not
 ## In force
 - The owner wants no new dependencies.
 - History only: "go ahead and merge" was said for the earlier #41. It doesn't cover #42.
-- Approval mode: manual review with an adversarial pass.
 - Memory saved: `feedback_no_new_dependencies.md`.
 
 ## Running work

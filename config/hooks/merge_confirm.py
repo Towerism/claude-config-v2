@@ -1,9 +1,9 @@
 """PreToolUse(Bash) hook: every PR merge waits for the user's click.
 
-The command is parsed as bash_guard.py parses it. A merge counts only at command position: at the
-start of the command or after a separator (`&& || ; | &`, a newline, `(`, `$(` or a backtick), past
-VAR=value words and the wrappers `env`, `command`, `builtin`, sudo, doas, nohup, coproc, exec,
-time -p, timeout N, nice -n N, stdbuf, watch and xargs. It asks for:
+A merge counts only at command position: at the start of the command or after a separator
+(`&& || ; | &`, a newline, `(`, `$(` or a backtick), past VAR=value words and the wrappers `env`,
+`command`, `builtin`, sudo, doas, nohup, coproc, exec, time -p, timeout N, nice -n N, stdbuf, watch
+and xargs. It asks for:
 
 - `gh [flags] pr [flags] merge`;
 - `gh api` or `tea api` (tea is the Gitea CLI) with a `/merge` operand (the endpoint), not a flag
@@ -16,7 +16,7 @@ shell (`echo 'gh pr merge 5' | bash`; printf's `\\n` and `\\t` are decoded first
 heredoc bodies and comments of other commands do not ask: `echo "gh pr merge"`, `grep`,
 `git commit -m` and `python3 -c` pass. A squash merge (`--squash`, a short flag group holding `s`
 after `merge`, or a `gh api …/merge` sending merge_method=squash) gets its own reason, because the
-global rule forbids squash. Otherwise the hook prints nothing.
+claude-config merge rule forbids squash. Otherwise the hook prints nothing.
 
 It is a reminder, not a security boundary: aliases, scripts, `curl` and any runner it does not list
 get past it. The control that holds is branch protection on the remote. Nesting past MAX_DEPTH,
@@ -34,9 +34,9 @@ import sys
 
 DEADLINE_SECONDS = 5
 
-REASON = "Merging needs your confirmation (global rule: merge only with your authorization)"
+REASON = "Merging needs your confirmation (claude-config merge rule: merge only with your authorization)"
 
-SQUASH_REASON = "Squash merges are against the global rule (merge commit or rebase, never squash); merging also needs your authorization"
+SQUASH_REASON = "Squash merges are against the claude-config merge rule (merge commit or rebase, never squash); merging also needs your authorization"
 # `--squash`, or a short flag group holding `s`, in the arguments of gh pr merge.
 SQUASH_FLAG = re.compile(r"--squash|-[A-Za-z]*s[A-Za-z]*")
 
@@ -50,8 +50,6 @@ API_VALUE_FLAGS = {
     "-t", "--template", "-p", "--preview", "--hostname", "--cache", "-d", "--data", "--body", "-o",
     "--output", "-l", "--login", "-r", "--repo",
 }
-
-# bash_guard.py's shell parser, copied unchanged: test_hook_parser_copies_equal_bash_guards compares them.
 
 # Nesting limit for $(...) and `...`; deeper input is unparsed and passes.
 MAX_DEPTH = 32
@@ -307,9 +305,8 @@ def command_words(seg: Segment) -> list[Word]:
     return []
 
 
-# ── wrappers around the copied parser ────────────────────────────────────────
+# ── wrappers around the parser ───────────────────────────────────────────────
 
-# Identical in secrets_guard.py; test_hook_wrapper_copies_are_the_same_in_both_hooks compares them.
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
 # Prefix commands, each with its short and long options that take a value; the command follows them.
 PREFIXES = {
@@ -593,58 +590,6 @@ def on_deadline(signum, frame) -> None:
     raise TimeoutError
 
 
-# A session whose first prompt starts with a skill or holds an OMC keyword runs unguarded (#12, #36).
-BYPASS_PROMPT = re.compile(
-    r"(?i)\s*(?:<command-message>[^<]*</command-message>\s*)?(?:<command-name>)?/(?P<skill>\w[\w.-]*(?::\w[\w.-]*)?)(?=\s|:|<|$)"
-)
-BYPASS_WORD = re.compile(
-    r"(?i)(?<![\w./-])(?:autopilot|ralph|ralplan|deep[\s-]+interview|deslop|anti-slop|deep-analyze|tdd|deepsearch|ultrathink|cancelomc)(?![\w'\u2019/-]|\.\w)"
-)
-# Claude Code's own commands (as of October 2026): a first prompt starting with one of these is not a skill.
-BUILTIN_COMMANDS = frozenset({
-    "add-dir", "agents", "artifacts", "bashes", "branch", "btw", "bug", "checkpoint", "chrome", "clear",
-    "compact", "config", "context", "continue", "copy", "cost", "desktop", "diff", "doctor", "effort", "exit",
-    "export", "extra-usage", "fast", "feedback", "fork", "goal", "help", "hooks", "ide", "init", "insights",
-    "install-github-app", "install-slack-app", "keybindings", "login", "logout", "mcp", "memory", "mobile",
-    "model", "new", "output-style", "permissions", "plan", "plugin", "pr-comments", "privacy-settings", "quit",
-    "release-notes", "reload-plugins", "remote-control", "remote-env", "rename", "reset", "resume", "review",
-    "rewind", "sandbox", "settings", "skills", "stats", "status", "statusline", "tasks", "terminal-setup",
-    "theme", "todos", "upgrade", "usage", "vim", "voice", "web-setup",
-})
-
-
-def session_bypassed(payload: dict) -> bool:
-    """Whether the session's first user prompt starts with a skill or holds an OMC keyword. Reads the first
-    256 KB of the transcript; anything unreadable means no."""
-    with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
-        path = payload["transcript_path"]
-        if not isinstance(path, str) or not os.path.isfile(path):
-            return False
-        with open(path, "rb") as f:
-            lines = f.read(256 * 1024).splitlines()
-        for line in lines:
-            try:
-                entry = json.loads(line)
-                content = entry["message"]["content"]
-                if entry["type"] != "user" or entry.get("isMeta") or entry.get("isSidechain"):
-                    continue
-            except (ValueError, KeyError, TypeError):
-                continue
-            if isinstance(content, list):
-                # Only what the user typed: skip blocks the IDE or harness injected.
-                content = "\n".join(
-                    b.get("text", "")
-                    for b in content
-                    if isinstance(b, dict) and b.get("type") == "text" and not b.get("text", "").lstrip().startswith(("<ide_", "<system-reminder"))
-                )
-            if isinstance(content, str) and content.strip():
-                start = BYPASS_PROMPT.match(content)
-                if start and start.group("skill").lower() not in BUILTIN_COMMANDS:
-                    return True
-                return BYPASS_WORD.search(content) is not None
-    return False
-
-
 def main() -> None:
     parsed = False
     with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
@@ -652,8 +597,6 @@ def main() -> None:
         command = payload["tool_input"]["command"]
         parsed = True
     if not parsed:
-        return
-    if session_bypassed(payload):
         return
     # Past the deadline, or on any error, nothing is printed.
     with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code

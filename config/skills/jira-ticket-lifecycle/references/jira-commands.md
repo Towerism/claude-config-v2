@@ -14,9 +14,9 @@ The `jira` flags below are the ones `ticket_lifecycle.py` passes to `ankitpokhre
 | `create` | `jira issue create -p <project> -t <type> -s <summary> --template <file> --no-input [-l hotfix]` | An unknown issue type for the project. |
 | `create --link` | `jira issue link KEY OTHER <relatedLinkType>`, then a comment on OTHER | An unknown link type. |
 | `claim`, `create` | `jira issue assign KEY <login from jira me>` | "Unable to find associated user". |
-| `claim` (when `addToActiveSprint`) | `jira sprint list --state active --plain --no-headers --columns ID,NAME`; `jira sprint list <id> --plain --no-headers --columns key`; `jira sprint add <id> KEY` | No board in the CLI's config. No active sprint gives `none`, several give `ambiguous`. |
-| `claim`, `review`, `done` | `jira issue move KEY <state>` | "Invalid transition": the workflow doesn't allow that move from the current state. |
-| `set-mode`, `approve`, `sync-spec` | `jira issue edit KEY --label <add> --label -<remove> --no-input` | A label with a space, which Jira refuses. |
+| `approve` (when `addToActiveSprint`) | `jira sprint list --state active --plain --no-headers --columns ID,NAME`; `jira sprint list <id> --plain --no-headers --columns key`; `jira sprint add <id> KEY` | No board in the CLI's config. No active sprint gives `none`, several give `ambiguous`. |
+| `approve`, `review`, `done` | `jira issue move KEY <state>` | "Invalid transition": the workflow doesn't allow that move from the current state. |
+| `approve`, `sync-spec` | `jira issue edit KEY --label <add> --label -<remove> --no-input` | A label with a space, which Jira refuses. |
 | `sync-spec` | `jira issue edit KEY -b <description> --no-input` | "too long" or "exceeds": the script attaches the spec instead. With `--placeholder-file <file>` the description then holds a distilled summary (after a first line naming the attachment) in place of the one-line note; it must fit in the description and not contain a `spec:start` or `spec:end` line. |
 | `comment`, `approve`, `sync-spec`, `create --link` | `jira issue comment add KEY --template <file> --no-input` | More than 32,767 characters: refused before the call. |
 | `link-pr` | `jira issue comment add KEY <PR URL> --no-input` | |
@@ -36,11 +36,10 @@ The script makes exactly these four calls, only to the configured `site` over HT
 
 | Subcommand or step | Command | Errors to expect |
 |---|---|---|
-| `auth` | `gh auth status` | Not logged in: ask the user to run `! gh auth login`. |
+| `auth` | `gh auth status` | Not logged in: report that the user needs to run `! gh auth login`. |
 | `pr-body`, `review`, `merge-check` | `gh pr view N --json …` | No such PR. |
 | `pr-body` | `gh pr edit N --body-file <file>` | |
 | `review` | `gh pr ready N` | |
-| You, steps 5 and 7 | `declaration-check --author "$me"` (`$me` from `jira me`) over files you write from `view --key` (step 2a); `--stamp` at step 7 | Exit 1 lists problems. |
 | You, step 7 | `gh pr create --draft --base <default> --title … --body-file …` | |
 | You, step 8 | `gh pr merge N --merge --delete-branch` (or `--rebase`) | The confirmation prompt is declined: the merge waits on the user. |
 | You | `gh repo view --json defaultBranchRef` | |

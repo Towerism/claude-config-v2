@@ -13,4 +13,4 @@ The roster page gets an Export button that downloads the visible rows as CSV, wi
 
 ## Review
 
-One adversarial pass on the diff, verdict CLEAN: one NOTE (the button's label could name the file type), fixed.
+One review pass on the diff, verdict CLEAN: one NOTE (the button's label could name the file type), fixed.

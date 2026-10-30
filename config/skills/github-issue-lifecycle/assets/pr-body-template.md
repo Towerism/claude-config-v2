@@ -10,4 +10,4 @@ Spec: #N
 | <criterion, in words> | `<path/to/test file>`: <test name> |
 
 ## Review
-<the PR-diff adversarial review note: each finding, its severity, and how it was handled>
+<the review note, if a review ran: each finding, its severity, and how it was handled; otherwise say no review ran>
