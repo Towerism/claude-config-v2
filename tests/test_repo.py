@@ -199,12 +199,12 @@ def global_bullet(*needles):
     return found[0]
 
 
-def test_global_rules_are_eight_bullets_and_a_title():
+def test_global_rules_are_nine_bullets_and_a_title():
     lines = [l for l in global_text().splitlines() if l.strip()]
     assert lines[0].startswith("## ")
     assert [l for l in lines if l.startswith("#")] == [lines[0]]
     assert lines[1:] == global_bullets()
-    assert len(global_bullets()) == 8
+    assert len(global_bullets()) == 9
 
 
 def test_global_rules_start_with_the_lifecycle_skill_and_cover_no_tracker():
@@ -221,6 +221,10 @@ def test_global_rules_distrust_the_ticket_claims():
 def test_global_rules_state_approval_and_merge():
     global_bullet("No code before the user approves the spec", "explicit, quoted words")
     global_bullet("No merge until the user says so")
+
+
+def test_global_rules_grant_the_feature_branch_push():
+    global_bullet("push the feature branch", "in any mode", "`--force-with-lease`", "autopilot", "ralph")
 
 
 def test_declaration_line_says_what_and_acknowledgement():

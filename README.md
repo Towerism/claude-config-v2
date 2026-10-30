@@ -13,7 +13,7 @@ V1 (`claude-config`) built its own pipeline from 24 skills, overlays and three h
 
 | Path | What it holds |
 |---|---|
-| `config/CLAUDE.global.md` | The guardrails: eight lines, deployed into `~/.claude/CLAUDE.md` as a marked block beside OMC's own. They state only what OMC, the lifecycle skills and the hooks don't: the user approves every spec and every merge ([ADR-0006](docs/adr/0006-omc-leads-the-pipeline.md)) |
+| `config/CLAUDE.global.md` | The guardrails: nine lines, deployed into `~/.claude/CLAUDE.md` as a marked block beside OMC's own. They state only what OMC, the lifecycle skills and the hooks don't: the user approves every spec and every merge ([ADR-0006](docs/adr/0006-omc-leads-the-pipeline.md)), and OMC may push its feature branch in any mode ([ADR-0008](docs/adr/0008-omc-pushes-feature-branches.md)) |
 | `config/skills/` | `github-issue-lifecycle`, `gitea-issue-lifecycle`, `jira-ticket-lifecycle` (each with a stdlib script for its checks and tracker steps), `fresh-session-handoff`, `linux-troubleshooting`, `architecture-backfill` (docs a repo's architecture and past decisions from code and history, each claim labeled verified or inferred). Prose rules come from OMC's `minimal-prose-discipline` and `agent-doc-discipline` |
 | `config/hooks/` | `merge_confirm.py` (every PR merge waits for your click), `host_default.py` (states the repo's tracker at session start, from its history, its `origin` and the host profile) and `auto_sync.py` (deploys `main` from `origin` at the start of each new session, [ADR-0007](docs/adr/0007-auto-sync-at-session-start.md)) |
 | `hosts/` | `personal.json`, `work.json` |
@@ -49,6 +49,8 @@ Per-machine values that never enter the repo live in `~/.config/claude-config/lo
 - **Machine:** copy `hosts/personal.json` to `hosts/<name>.json`, change `name` and `defaultTracker`, deploy with `--host <name>`.
 - **Skill:** add `config/skills/<name>/SKILL.md` (markdown, plus stdlib-only Python under `scripts/` if it needs one), list it in the host profiles, run the tests.
 - **Hook:** add it to `config/hooks/`, wire it in `config/settings.fragment.json`, list it in the host profiles, and test it.
+
+The fragment's `env` keys are set in the deployed `settings.json` on every host; today that is `OMC_GIT_GUARDRAILS=0`, which turns off OMC's `git-guardrails` hook in every mode ([ADR-0008](docs/adr/0008-omc-pushes-feature-branches.md)). Rollback removes only those keys.
 
 ## Develop
 

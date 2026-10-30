@@ -1,6 +1,6 @@
 # ADR-0004: Every OMC agent gets a pathway through the guardrails
 
-**Status:** Accepted by the owner on 2026-10-24, issue #7. Stage 1 set the decision. Stages 2-4 built the hooks; each stage has an addendum below. A review phase followed stage 4 and has its own section. The deviations from the approved spec are listed in one section. Superseded in part by ADR-0006: routing, `skill_gate.py`, `secrets_guard.py`, `bash_guard.py` and the bypass are retired. What survives: `merge_confirm.py` (squash reason, parser and wrappers), the git hardening now in `host_default.py`, and the `host_default.py` notes, as amended.
+**Status:** Accepted by the owner on 2026-10-24, issue #7. Stage 1 set the decision. Stages 2-4 built the hooks; each stage has an addendum below. A review phase followed stage 4 and has its own section. The deviations from the approved spec are listed in one section. Superseded in part by ADR-0006: routing, `skill_gate.py`, `secrets_guard.py`, `bash_guard.py` and the bypass are retired. What survives: `merge_confirm.py` (squash reason, parser and wrappers), the git hardening now in `host_default.py`, and the `host_default.py` notes, as amended. "Layering with OMC" amended by ADR-0008: the host profiles now set `OMC_GIT_GUARDRAILS=0`.
 
 ## Context
 
