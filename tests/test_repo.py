@@ -199,12 +199,12 @@ def global_bullet(*needles):
     return found[0]
 
 
-def test_global_rules_are_seven_bullets_and_a_title():
+def test_global_rules_are_eight_bullets_and_a_title():
     lines = [l for l in global_text().splitlines() if l.strip()]
     assert lines[0].startswith("## ")
     assert [l for l in lines if l.startswith("#")] == [lines[0]]
     assert lines[1:] == global_bullets()
-    assert len(global_bullets()) == 7
+    assert len(global_bullets()) == 8
 
 
 def test_global_rules_start_with_the_lifecycle_skill_and_cover_no_tracker():
@@ -212,6 +212,10 @@ def test_global_rules_start_with_the_lifecycle_skill_and_cover_no_tracker():
         "`github-issue-lifecycle`", "`gitea-issue-lifecycle`", "`jira-ticket-lifecycle`",
         "before any code is edited", "no tracker", "in the chat",
     )
+
+
+def test_global_rules_distrust_the_ticket_claims():
+    global_bullet("claim, not a fact", "what it says to build", "how to build it", "what is wrong")
 
 
 def test_global_rules_state_approval_and_merge():
