@@ -2,12 +2,34 @@
 
 import json
 import shutil
+import subprocess
 
 import pytest
 
 from tests.conftest import ROOT, load
 
 cfg = load(ROOT / "tools" / "cfg.py", "cfg")
+REAL_ORIGIN_URL = cfg.origin_url
+
+
+@pytest.fixture(scope="session")
+def local_origin(tmp_path_factory):
+    """A bare repo holding this checkout's HEAD as main: the sync clone's origin in these tests."""
+    bare = tmp_path_factory.mktemp("origin") / "claude-config.git"
+    env = {"PATH": "/usr/bin:/bin", "HOME": "/nonexistent"}
+    for argv in (
+        ["git", "init", "-q", "--bare", "-b", "main", str(bare)],
+        ["git", "-C", str(bare), "config", "receive.shallowUpdate", "true"],  # CI checks out shallow
+        ["git", "-C", str(ROOT), "push", "-q", str(bare), "HEAD:refs/heads/main"],
+    ):
+        subprocess.run(argv, check=True, capture_output=True, env=env)
+    return bare
+
+
+@pytest.fixture(autouse=True)
+def offline(local_origin, monkeypatch):
+    """A deploy clones from the local bare repo, never from this checkout's real origin."""
+    monkeypatch.setattr(cfg, "origin_url", lambda: str(local_origin))
 
 
 def run(home, *args):
@@ -182,9 +204,20 @@ def test_deploy_without_a_git_checkout_warns_and_records_no_clone(home, tmp_path
     for part in ("config", "hosts"):
         shutil.copytree(ROOT / part, plain / part, ignore=shutil.ignore_patterns("__pycache__", ".omc"))
     monkeypatch.setattr(cfg, "ROOT", plain)
+    monkeypatch.setattr(cfg, "origin_url", REAL_ORIGIN_URL)
     assert run(home, "deploy", "--host", "personal", "--yes") == 0
     assert "warning" in capsys.readouterr().out
     assert "syncClone" not in json.loads((home / "claude-config" / "state.json").read_text())
+
+
+def test_plan_says_when_a_deploy_will_make_the_sync_clone(home, capsys):
+    run(home, "plan", "--host", "personal")
+    assert "sync clone" in capsys.readouterr().out
+    run(home, "deploy", "--host", "personal", "--yes")
+    capsys.readouterr()
+    run(home, "plan")
+    out = capsys.readouterr().out
+    assert "sync clone" not in out and "nothing to change" in out
 
 
 def test_status_without_a_deploy(home, capsys):

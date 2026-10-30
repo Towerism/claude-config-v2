@@ -7,7 +7,9 @@ sync clone). Nothing touches the network or the real home.
 
 import fcntl
 import json
+import os
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -153,6 +155,59 @@ def test_a_later_deploy_reuses_the_clone(world):
     assert state(w)["syncClone"] == str(w.clone)
 
 
+def fresh(w, tmp_path, name="other"):
+    """The same world with an empty Claude home and no sync clone yet."""
+    shutil.rmtree(w.clone)
+    return types.SimpleNamespace(**{**vars(w), "claude": tmp_path / name})
+
+
+def test_the_clone_comes_from_origin_not_from_the_local_main(world, tmp_path):
+    w = world
+    (w.seed / "local.txt").write_text("not pushed")
+    git(w.seed, "add", "-A")
+    git(w.seed, "commit", "-q", "-m", "chore: local only")
+    other = fresh(w, tmp_path)
+    assert cfg(other, w.seed, "deploy", "--host", "personal", "--yes").returncode == 0
+    assert git(w.clone, "rev-parse", "main") == git(w.origin, "rev-parse", "main")
+    assert git(w.clone, "rev-parse", "main") != git(w.seed, "rev-parse", "HEAD")
+    assert not (w.clone / "local.txt").exists()
+
+
+def test_an_unreachable_origin_leaves_no_clone_and_the_next_deploy_retries(world, tmp_path):
+    w = world
+    other = fresh(w, tmp_path)
+    git(w.seed, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+    done = cfg(other, w.seed, "deploy", "--host", "personal", "--yes")
+    assert done.returncode == 0 and "warning" in done.stdout
+    assert "syncClone" not in json.loads((other.claude / "claude-config" / "state.json").read_text())
+    assert not w.clone.exists()
+    git(w.seed, "remote", "set-url", "origin", str(w.origin))
+    assert cfg(other, w.seed, "deploy", "--yes").returncode == 0
+    assert json.loads((other.claude / "claude-config" / "state.json").read_text())["syncClone"] == str(w.clone)
+
+
+def test_a_deploy_reuses_the_recorded_clone_wherever_it_is(world, tmp_path):
+    w = world
+    moved = tmp_path / "elsewhere" / "clone"
+    moved.parent.mkdir()
+    w.clone.rename(moved)
+    data = state(w)
+    data["syncClone"] = str(moved)
+    (w.claude / "claude-config" / "state.json").write_text(json.dumps(data))
+    merge_to_main(w)
+    assert cfg(w, w.seed, "deploy", "--yes").returncode == 0
+    assert state(w)["syncClone"] == str(moved) and not w.clone.exists()
+
+
+def test_a_manual_deploy_that_cannot_fetch_warns_and_still_deploys(world, tmp_path):
+    w = world
+    git(w.clone, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+    merge_to_main(w)
+    done = cfg(w, w.seed, "deploy", "--yes")
+    assert done.returncode == 0 and "warning" in done.stdout
+    assert (w.claude / SKILL).read_text().endswith("\nMerged line.\n")
+
+
 def test_a_checkout_without_origin_still_deploys_and_records_no_clone(world, tmp_path):
     w = world
     plain = tmp_path / "plain"
@@ -246,10 +301,82 @@ def test_a_main_that_cannot_fast_forward_is_not_applied(world):
     before = snapshot(w)
     code, out, err = hook(w)
     assert (code, err) == (0, b"")
-    warned(out, "diverged")
+    assert "make deploy YES=1" in warned(out, "diverged")
     assert last_log_line(w).endswith(" diverged")
     assert git(w.clone, "rev-parse", "main") == old
     assert {k: v for k, v in snapshot(w).items() if k != "claude-config/sync.log"} == before
+    # The repair the warning names: a manual deploy resets the clone's main to origin's.
+    assert cfg(w, w.seed, "deploy", "--yes").returncode == 0
+    assert git(w.clone, "rev-parse", "main") == git(w.origin, "rev-parse", "main")
+    code, out, _ = hook(w)
+    assert code == 0 and b"systemMessage" not in out
+
+
+def read_only_claude_md(w, tmp_path):
+    """CLAUDE.md as a link into a read-only directory: a deploy fails after it has written files."""
+    shelf = tmp_path / "shelf"
+    shelf.mkdir()
+    (shelf / "CLAUDE.md").write_bytes((w.claude / "CLAUDE.md").read_bytes())
+    (w.claude / "CLAUDE.md").unlink()
+    (w.claude / "CLAUDE.md").symlink_to(shelf / "CLAUDE.md")
+    shelf.chmod(0o555)
+    return shelf
+
+
+def test_a_deploy_that_fails_midway_is_rolled_back(world, tmp_path):
+    w = world
+    shelf = read_only_claude_md(w, tmp_path)
+    try:
+        merge_to_main(w)
+        before = snapshot(w)
+        code, out, err = hook(w)
+        assert (code, err) == (0, b"")
+        text = warned(out, "deploy-rolled-back")
+        assert "current config stays" not in text
+        assert last_log_line(w).endswith(" deploy-rolled-back")
+        assert {k: v for k, v in snapshot(w).items() if k != "claude-config/sync.log"} == before
+    finally:
+        shelf.chmod(0o755)
+
+
+def test_a_deploy_that_fails_midway_and_cannot_roll_back_says_so(world, tmp_path):
+    w = world
+    shelf = read_only_claude_md(w, tmp_path)
+    no_rollback = (
+        "real = hook.run\n"
+        "def run(argv, *args, **kwargs):\n"
+        "    return 1 if 'rollback' in argv else real(argv, *args, **kwargs)\n"
+        "hook.run = run\n"
+    )
+    try:
+        merge_to_main(w)
+        code, out, err = hook(w, patch=no_rollback)
+        assert (code, err) == (0, b"")
+        text = warned(out, "deploy-failed-partial")
+        assert "make rollback" in text and "current config stays" not in text
+        assert last_log_line(w).endswith(" deploy-failed-partial")
+    finally:
+        shelf.chmod(0o755)
+
+
+def test_a_clone_others_can_write_to_is_not_run(world):
+    w = world
+    (w.clone / "tools" / "cfg.py").chmod(0o666)
+    merge_to_main(w)
+    before = snapshot(w)
+    code, out, err = hook(w)
+    assert (code, err) == (0, b"")
+    warned(out, "unsafe-clone")
+    assert {k: v for k, v in snapshot(w).items() if k != "claude-config/sync.log"} == before
+
+
+def test_untracked_files_in_the_clone_are_not_deployed(world):
+    w = world
+    (w.clone / "config" / "skills" / "fresh-session-handoff" / "planted.md").write_text("planted")
+    merge_to_main(w)
+    code, out, _ = hook(w)
+    assert code == 0 and json.loads(out) == RELOAD
+    assert not (w.claude / "skills" / "fresh-session-handoff" / "planted.md").exists()
 
 
 def test_a_failed_deploy_is_reported(world):
@@ -260,7 +387,7 @@ def test_a_failed_deploy_is_reported(world):
     before = snapshot(w)
     code, out, err = hook(w)
     assert (code, err) == (0, b"")
-    warned(out, "deploy-failed")
+    assert "current config stays" in warned(out, "deploy-failed")
     assert last_log_line(w).endswith(" deploy-failed")
     assert {k: v for k, v in snapshot(w).items() if k != "claude-config/sync.log"} == before
 
@@ -335,21 +462,68 @@ def test_a_held_lock_makes_it_skip_quietly(world):
     assert not w.mark.exists()
 
 
-def test_two_session_starts_at_once_make_one_deploy(world):
-    w = world
+def slow_deploy(w, tmp_path):
+    """Merges a cfg.py that marks its start, then waits 3 s before it deploys; returns the mark."""
+    started = tmp_path / "deploy-started"
+    cfg_py = w.seed / "tools" / "cfg.py"
+    cfg_py.write_text(cfg_py.read_text().replace(
+        "\nROOT = ", f"\nPath({str(started)!r}).touch()\ntime.sleep(3)\nROOT = ", 1
+    ))
     merge_to_main(w)
+    return started
+
+
+def start_hook(w):
+    proc = subprocess.Popen(
+        [sys.executable, "-I", str(w.claude / "hooks" / "auto_sync.py")],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=w.env,
+    )
+    proc.stdin.write(json.dumps(STARTUP).encode())
+    proc.stdin.close()
+    return proc
+
+
+def finish(proc):
+    """(exit code, stdout, stderr) of a hook started with start_hook."""
+    out, err = proc.stdout.read(), proc.stderr.read()
+    proc.stdout.close()
+    proc.stderr.close()
+    return proc.wait(timeout=60), out, err
+
+
+def wait_for(condition, seconds=30):
+    end = time.monotonic() + seconds
+    while not condition():
+        assert time.monotonic() < end, "timed out"
+        time.sleep(0.05)
+
+
+def test_a_session_start_during_a_deploy_skips_it(world, tmp_path):
+    w = world
+    started = slow_deploy(w, tmp_path)
     backups = w.claude / "claude-config" / "backups"
     count = len(list(backups.iterdir()))
-    script = str(w.claude / "hooks" / "auto_sync.py")
-    procs = [
-        subprocess.Popen([sys.executable, "-I", script], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                         stderr=subprocess.PIPE, env=w.env)
-        for _ in range(2)
-    ]
-    results = [p.communicate(json.dumps(STARTUP).encode(), timeout=60) for p in procs]
-    assert all(p.returncode == 0 for p in procs) and all(err == b"" for _, err in results)
-    assert sorted(out for out, _ in results) == [b"", (json.dumps(RELOAD) + "\n").encode()]
+    first = start_hook(w)
+    wait_for(started.exists)
+    begin = time.monotonic()
+    assert hook(w) == (0, b"", b"")
+    assert time.monotonic() - begin < 2  # it skipped; it did not run a deploy of its own
+    code, out, err = finish(first)
+    assert (code, err) == (0, b"") and json.loads(out) == RELOAD
     assert len(list(backups.iterdir())) == count + 1
+
+
+def test_a_deploy_keeps_the_lock_after_its_hook_is_killed(world, tmp_path):
+    w = world
+    started = slow_deploy(w, tmp_path)
+    before = state(w)["deployedAt"]
+    first = start_hook(w)
+    wait_for(started.exists)
+    os.kill(first.pid, signal.SIGKILL)
+    finish(first)
+    assert hook(w, patch=no_git(w)) == (0, b"", b"")
+    assert not w.mark.exists()
+    wait_for(lambda: state(w)["deployedAt"] != before)  # the deploy still finishes
 
 
 def test_git_runs_without_repo_hooks_or_fsmonitor(world, tmp_path):

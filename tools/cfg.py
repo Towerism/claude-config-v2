@@ -11,12 +11,14 @@ rules in a marked block of CLAUDE.md (OMC keeps its own block in the same file).
 Everything it owns is listed, with hashes, in <home>/claude-config/state.json.
 Without --yes, deploy only prints the plan.
 
-A deploy with --yes also keeps the sync clone: a clone of this repo's main, made once in
-$XDG_DATA_HOME/claude-config (default ~/.local/share/claude-config) from this checkout, with
-origin set to this checkout's origin, and recorded as syncClone in state.json. The auto_sync
-hook fetches main into it at each new session and deploys it from there (ADR-0007). Without an
-origin the deploy still runs, with a warning, and auto sync stays off. status also shows the
-last line of <home>/claude-config/sync.log, where the hook logs a failed sync.
+A deploy with --yes also keeps the sync clone: a clone of main from this checkout's origin,
+made once in $XDG_DATA_HOME/claude-config (default ~/.local/share/claude-config) and recorded as
+syncClone in state.json. The auto_sync hook fetches main into it at each new session and deploys
+it from there (ADR-0007). A deploy run by hand from another checkout fetches main into the clone
+and resets the clone's main to origin's if they diverged. Without an origin, or offline, the
+deploy still runs with a warning, auto sync stays off, and the next deploy tries again. plan
+names a clone still to be made; status shows the last line of <home>/claude-config/sync.log,
+where the hook logs a failed sync.
 
 The Claude home is --target, else $CLAUDE_CONFIG_DIR, else ~/.claude.
 Standard library only: it runs on a machine with nothing installed but Python.
@@ -276,6 +278,8 @@ class Plan:
             self.state.get("host"), self.state.get("defaultTracker")
         ):
             out.append("  record  host and default tracker in state.json")
+        if recorded_clone(self.state) is None:
+            out.append("  clone  main from origin into the sync clone, for auto sync")
         if len(out) == 1:
             out.append("  nothing to change")
         return out
@@ -447,47 +451,82 @@ def status(home: Path) -> list[str]:
     return out
 
 
-def sync_clone() -> str | None:
-    """The path of the clone auto sync deploys from, made from this checkout on first use.
+# --- the sync clone that auto_sync deploys from (ADR-0007) ---------------------
 
-    None, after a warning, when it can't be made: the deploy goes on without auto sync.
+
+def git(*args: str) -> subprocess.CompletedProcess:
+    """git without the caller's GIT_* variables, never prompting; files it writes are not group- or
+    world-writable, which auto_sync checks before it runs the clone's cfg.py."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return subprocess.run(["git", *args], env=env, capture_output=True, text=True, check=False, umask=0o022)
+
+
+def origin_url() -> str:
+    """This checkout's origin URL, or "" when it has none or is not a git checkout."""
+    if not (ROOT / ".git").exists():
+        return ""
+    return git("-C", str(ROOT), "remote", "get-url", "origin").stdout.strip()
+
+
+def recorded_clone(state: dict) -> Path | None:
+    clone = state.get("syncClone")
+    if isinstance(clone, str) and os.path.isabs(clone) and (Path(clone) / ".git").is_dir():
+        return Path(clone)
+    return None
+
+
+def repair_clone(clone: Path) -> None:
+    """Fetch main into the clone and reset its main to origin's if they diverged.
+
+    Only a deploy someone runs by hand does this; auto_sync reports a diverged main instead.
     """
-    data = os.environ.get("XDG_DATA_HOME")
-    base = Path(data) if data and os.path.isabs(data) else Path.home() / ".local" / "share"
-    clone = base / "claude-config"
-    if ROOT.resolve() == clone.resolve() or (clone / ".git").is_dir():
+    where = ["-C", str(clone)]
+    if git(*where, "fetch", "--quiet", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main").returncode:
+        print(f"warning: could not fetch main into the sync clone {clone}; it stays as it is")
+        return
+    if git(*where, "merge-base", "--is-ancestor", "refs/heads/main", "refs/remotes/origin/main").returncode == 0:
+        return
+    reset = git(*where, "checkout", "--quiet", "--force", "-B", "main", "refs/remotes/origin/main")
+    print(f"sync clone: main reset to origin/main in {clone}" if reset.returncode == 0
+          else f"warning: could not reset main in the sync clone {clone}")
+
+
+def sync_clone(state: dict) -> str | None:
+    """The path of the clone auto sync deploys from: the recorded one, else one made from origin.
+
+    None, after a warning, when it can't be made: the deploy goes on without auto sync, and the
+    next deploy tries again.
+    """
+    clone = recorded_clone(state)
+    if clone is None:
+        data = os.environ.get("XDG_DATA_HOME")
+        base = Path(data) if data and os.path.isabs(data) else Path.home() / ".local" / "share"
+        clone = base / "claude-config"
+    if ROOT.resolve() == clone.resolve():
+        return str(clone)  # auto_sync runs this deploy from the clone itself
+    if (clone / ".git").is_dir():
+        repair_clone(clone)
         return str(clone)
     warning = "warning: auto sync stays off on this machine:"
     if clone.exists():
         print(f"{warning} {clone} exists and is not a git clone")
         return None
-    if not (ROOT / ".git").exists():
-        print(f"{warning} {ROOT} is not a git checkout")
-        return None
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    env["GIT_TERMINAL_PROMPT"] = "0"
-
-    def git(*args: str) -> subprocess.CompletedProcess:
-        return subprocess.run(["git", *args], env=env, capture_output=True, text=True, check=False)
-
-    url = git("-C", str(ROOT), "remote", "get-url", "origin").stdout.strip()
+    url = origin_url()
     if not url:
         print(f"{warning} this checkout has no origin remote")
         return None
     clone.parent.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(dir=clone.parent, prefix=".claude-config."))
     try:
-        made = (
-            git("clone", "--quiet", "--branch", "main", "--", str(ROOT), str(work)).returncode == 0
-            and git("-C", str(work), "remote", "set-url", "origin", url).returncode == 0
-        )
+        made = git("clone", "--quiet", "--branch", "main", "--", url, str(work)).returncode == 0
         if made:
             work.rename(clone)  # the clone appears whole or not at all
     finally:
         if work.exists():
             shutil.rmtree(work)
     if not made:
-        print(f"{warning} could not clone this checkout's main branch to {clone}")
+        print(f"{warning} could not clone main from origin to {clone}")
         return None
     print(f"sync clone: {clone}")
     return str(clone)
@@ -522,7 +561,7 @@ def main(argv: list[str] | None = None) -> int:
         if plan.conflicts and not args.force:
             print("stopped: conflicts above; pass --force to overwrite them (they are backed up)")
             return 1
-        plan.clone = sync_clone()
+        plan.clone = sync_clone(plan.state)
         if not plan.changes():
             return 0  # no backup for a deploy that changes nothing
         deploy(plan)

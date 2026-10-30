@@ -2,25 +2,34 @@
 
 `cfg.py deploy --yes` keeps a dedicated clone of claude-config and records it as `syncClone` in
 <claude home>/claude-config/state.json (ADR-0007). At each new session this hook fetches main
-into that clone, fast-forwards it, and runs the clone's `cfg.py deploy --yes --force` for the
-recorded host. A file edited by hand in the Claude home is overwritten and backed up first;
-`cfg.py rollback` restores it.
+into that clone, fast-forwards it, removes untracked files from it, and runs the clone's
+`cfg.py deploy --yes --force` for the recorded host. A file edited by hand in the Claude home is
+overwritten and backed up first; `cfg.py rollback` restores it.
 
 It does nothing, and runs no git, when $XDG_CONFIG_HOME/claude-config/local.json (or
 ~/.config/claude-config/local.json) sets "autoSync": false, or when no clone is recorded. It
-skips quietly while another run holds <home>/claude-config/sync.lock. The fetch has
-FETCH_SECONDS; a deploy that has started always runs to the end, in its own session.
+skips quietly while another run holds <home>/claude-config/sync.lock; the deploy inherits the
+lock, so it stays held until the deploy ends even if this hook is killed. The fetch has
+FETCH_SECONDS and each local git step LOCAL_SECONDS; a deploy that has started always runs to
+the end, in its own session. The clone, its tools/ and tools/cfg.py must belong to this user and
+not be group- or world-writable, or nothing is run.
 
 On success it prints nothing, or only reloadSkills when the deploy changed something, so nothing
-enters the model's context. On failure the config stays as it was, a line with the UTC time and
-a fixed reason goes to <home>/claude-config/sync.log (the last LOG_LINES are kept), and the user
-sees a fixed one-line systemMessage.
+enters the model's context. On failure a line with the UTC time and a fixed reason goes to
+<home>/claude-config/sync.log (the last LOG_LINES are kept), and the user sees a fixed one-line
+systemMessage. Before the deploy writes anything, the current config stays. A deploy that fails
+after its backup is rolled back with the clone's `cfg.py rollback`; if that fails too, the
+message says the config may be partly updated.
 
 The Claude home is two levels above this file (<home>/hooks/auto_sync.py). git runs by absolute
-path from a fixed PATH with a fixed argv, with no GIT_* variables and no repo config that runs
-programs (fsmonitor, hooks, a custom upload-pack, the ext transport). It never prompts
-(GIT_TERMINAL_PROMPT=0, ssh in BatchMode) but can still use the user's ssh-agent or credential
-helper. Prints only fixed words, always exits 0 and writes nothing to stderr.
+path from a fixed PATH with a fixed argv and environment: no GIT_* variables from the session,
+no SSH_ASKPASS, GIT_TERMINAL_PROMPT=0, ssh in BatchMode (GIT_SSH_COMMAND, which overrides
+core.sshCommand), and GIT_ATTR_NOSYSTEM=1. These settings are overridden on the command line:
+core.fsmonitor, core.hooksPath, core.gitProxy, core.askPass, core.attributesFile,
+protocol.ext.allow, remote.origin.uploadpack, submodule.recurse, fetch.recurseSubmodules, gc.auto
+and maintenance.auto. The user's ssh-agent and credential helper still work if they are found on
+that PATH. Filters named by the repo's own .gitattributes are not overridden; claude-config has
+none. Prints only fixed words, always exits 0 and writes nothing to stderr.
 """
 
 import contextlib
@@ -36,21 +45,30 @@ import time
 from pathlib import Path
 
 FETCH_SECONDS = 15
-LOCAL_SECONDS = 30  # each local git step, so a stuck clone cannot hold the session start
+LOCAL_SECONDS = 10  # each local git step, so a stuck clone cannot hold the session start
 LOG_LINES = 200
 CAP = 64 * 1024
 SAFE_PATH = "/usr/local/bin:/usr/bin:/bin"  # git is looked up here, never on the caller's PATH
 NAME = re.compile(r"[a-z0-9][a-z0-9_.-]{0,63}")  # a host name, as cfg.py checks it
 GIT_FLAGS = [
-    "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "protocol.ext.allow=never",
-    "-c", "remote.origin.uploadpack=git-upload-pack",
+    "--no-optional-locks",
+    "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "core.gitProxy=",
+    "-c", "core.askPass=", "-c", "core.attributesFile=/dev/null", "-c", "protocol.ext.allow=never",
+    "-c", "remote.origin.uploadpack=git-upload-pack", "-c", "submodule.recurse=false",
+    "-c", "fetch.recurseSubmodules=false", "-c", "gc.auto=0", "-c", "maintenance.auto=false",
 ]
 MAIN = "+refs/heads/main:refs/remotes/origin/main"
 RELOAD = {"hookSpecificOutput": {"hookEventName": "SessionStart", "reloadSkills": True}}
-WARNING = (
-    "claude-config auto sync failed ({reason}); the current config stays. "
-    "The reason is logged in claude-config/sync.log in the Claude home."
-)
+LOGGED = " The reason is logged in claude-config/sync.log in the Claude home."
+STAYS = "claude-config auto sync failed ({reason}); the current config stays." + LOGGED
+MESSAGES = {
+    "diverged": STAYS + " To repair the sync clone, run make deploy YES=1 in a claude-config checkout.",
+    "deploy-rolled-back": "claude-config auto sync failed during the deploy ({reason}); the deploy was rolled back." + LOGGED,
+    "deploy-failed-partial": (
+        "claude-config auto sync failed during the deploy ({reason}) and could not roll it back; the config "
+        "may be partly updated. Run make rollback in a claude-config checkout." + LOGGED
+    ),
+}
 
 
 class Failure(Exception):
@@ -69,20 +87,23 @@ def read_json(path: Path) -> dict:
 
 
 def environment() -> dict:
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    env.update(PATH=SAFE_PATH, GIT_TERMINAL_PROMPT="0", GIT_SSH_COMMAND="ssh -o BatchMode=yes")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_") and k != "SSH_ASKPASS"}
+    env.update(
+        PATH=SAFE_PATH, GIT_TERMINAL_PROMPT="0", GIT_SSH_COMMAND="ssh -o BatchMode=yes", GIT_ATTR_NOSYSTEM="1"
+    )
     return env
 
 
-def run(argv: list[str], cwd: str, seconds: float | None) -> int | None:
+def run(argv: list[str], cwd: str, seconds: float | None, keep: tuple[int, ...] = ()) -> int | None:
     """The exit code of `argv`, or None once `seconds` pass; its output is discarded.
 
     It runs in its own session: past the deadline the whole group (git and its ssh) is killed,
-    and a kill aimed at this hook's group never reaches a deploy under way.
+    and a kill aimed at this hook's group never reaches a deploy under way. `keep` are file
+    descriptors it inherits (the lock). Files it writes are not group- or world-writable.
     """
     proc = subprocess.Popen(
         argv, cwd=cwd, env=environment(), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL, start_new_session=True,
+        stderr=subprocess.DEVNULL, start_new_session=True, pass_fds=keep, umask=0o022,
     )
     try:
         return proc.wait(timeout=seconds)
@@ -103,6 +124,17 @@ def git(clone: str, args: list[str], seconds: float, reason: str) -> int:
     if code != 0 and reason:
         raise Failure(reason)
     return code
+
+
+def safe(path: str) -> bool:
+    """Whether `path` belongs to this user and no one else can write to it."""
+    info = os.stat(path)
+    return info.st_uid == os.getuid() and not info.st_mode & 0o022
+
+
+def backups(home: Path) -> set[str]:
+    root = home / "claude-config" / "backups"
+    return {p.name for p in root.iterdir() if p.is_dir() and not p.name.endswith(".partial")} if root.is_dir() else set()
 
 
 def sync(home: Path, config_home: Path) -> bool:
@@ -129,11 +161,20 @@ def sync(home: Path, config_home: Path) -> bool:
         if ahead != 0:
             raise Failure("git-failed")
         git(clone, ["checkout", "--quiet", "--force", "-B", "main", "refs/remotes/origin/main"], LOCAL_SECONDS, "git-failed")
-        before = state_file.read_bytes()
-        cfg = os.path.join(clone, "tools", "cfg.py")
-        argv = [sys.executable, "-I", cfg, "deploy", "--host", host, "--yes", "--force", "--target", str(home)]
-        if run(argv, clone, None) != 0:  # no deadline: a started deploy always finishes
-            raise Failure("deploy-failed")
+        # cfg.py collects files by walking the disk, so nothing untracked may ship.
+        git(clone, ["clean", "-ffdxq"], LOCAL_SECONDS, "git-failed")
+        tools = os.path.join(clone, "tools")
+        cfg = os.path.join(tools, "cfg.py")
+        if not all(safe(path) for path in (clone, tools, cfg)):
+            raise Failure("unsafe-clone")
+        before, saved = state_file.read_bytes(), backups(home)
+        keep = (lock.fileno(),)
+        deploy = [sys.executable, "-I", cfg, "deploy", "--host", host, "--yes", "--force", "--target", str(home)]
+        if run(deploy, clone, None, keep) != 0:  # no deadline: a started deploy always finishes
+            if backups(home) == saved:
+                raise Failure("deploy-failed")  # it stopped before its backup, so before any write
+            undo = [sys.executable, "-I", cfg, "rollback", "--target", str(home)]
+            raise Failure("deploy-rolled-back" if run(undo, clone, None, keep) == 0 else "deploy-failed-partial")
         return state_file.read_bytes() != before
 
 
@@ -164,7 +205,7 @@ def main() -> None:
             reason = failure.args[0]
             with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
                 log(home, reason)
-            print(json.dumps({"systemMessage": WARNING.format(reason=reason)}))
+            print(json.dumps({"systemMessage": MESSAGES.get(reason, STAYS).format(reason=reason)}))
             return
         if changed:
             print(json.dumps(RELOAD))

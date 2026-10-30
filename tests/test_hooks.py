@@ -592,8 +592,10 @@ def test_every_hook_entry_outlasts_the_hooks_own_deadline():
         for group in groups:
             for hook in group["hooks"]:
                 if hook["command"].endswith("/auto_sync.py"):
-                    # The fetch deadline, then a full deploy, which is never cut short.
-                    assert hook["timeout"] >= hook_module("auto_sync.py").FETCH_SECONDS + 60
+                    # The fetch deadline, three local git steps, then a full deploy, never cut short.
+                    sync = hook_module("auto_sync.py")
+                    assert sync.LOCAL_SECONDS == 10
+                    assert hook["timeout"] >= sync.FETCH_SECONDS + 3 * sync.LOCAL_SECONDS + 60
                 else:
                     assert hook["timeout"] == 10, hook["command"]
     for name in ("merge_confirm.py", "host_default.py"):
