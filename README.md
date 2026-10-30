@@ -13,7 +13,7 @@ V1 (`claude-config`) built its own pipeline from 24 skills, overlays and three h
 
 | Path | What it holds |
 |---|---|
-| `config/CLAUDE.global.md` | The guardrails: seven lines, deployed into `~/.claude/CLAUDE.md` as a marked block beside OMC's own. They state only what OMC, the lifecycle skills and the hooks don't: the user approves every spec and every merge ([ADR-0006](docs/adr/0006-omc-leads-the-pipeline.md)) |
+| `config/CLAUDE.global.md` | The guardrails: eight lines, deployed into `~/.claude/CLAUDE.md` as a marked block beside OMC's own. They state only what OMC, the lifecycle skills and the hooks don't: the user approves every spec and every merge ([ADR-0006](docs/adr/0006-omc-leads-the-pipeline.md)) |
 | `config/skills/` | `github-issue-lifecycle`, `gitea-issue-lifecycle`, `jira-ticket-lifecycle` (each with a stdlib script for its checks and tracker steps), `fresh-session-handoff`, `linux-troubleshooting`, `architecture-backfill` (docs a repo's architecture and past decisions from code and history, each claim labeled verified or inferred). Prose rules come from OMC's `minimal-prose-discipline` and `agent-doc-discipline` |
 | `config/hooks/` | `merge_confirm.py` (every PR merge waits for your click) and `host_default.py` (states the repo's tracker at session start, from its history, its `origin` and the host profile) |
 | `hosts/` | `personal.json`, `work.json` |
