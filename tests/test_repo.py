@@ -223,8 +223,9 @@ def test_global_rules_state_approval_and_merge():
     global_bullet("No merge until the user says so")
 
 
-def test_global_rules_grant_the_feature_branch_push():
-    global_bullet("push the feature branch", "in any mode", "`--force-with-lease`", "autopilot", "ralph")
+def test_global_rules_grant_the_feature_branch_push_and_draft_pr():
+    global_bullet("push the feature branch", "open a draft PR", "in any mode", "`--force-with-lease`",
+                  "publishing and draft-PR creation", "autopilot", "ralph", "ready and merging still wait")
 
 
 def test_declaration_line_says_what_and_acknowledgement():
