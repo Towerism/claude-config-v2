@@ -129,12 +129,16 @@ def load_host(name: str) -> dict:
     return host
 
 
+# Path parts that never ship: bytecode caches and OMC runtime state.
+SKIP_PARTS = frozenset({"__pycache__", ".omc"})
+
+
 def desired_files(host: dict) -> dict[str, bytes]:
     """Relative path under the Claude home -> content, for every copied file."""
     files: dict[str, bytes] = {}
     for skill in host.get("skills", []):
         base = ROOT / "config" / "skills" / skill
-        for path in sorted(p for p in base.rglob("*") if p.is_file() and "__pycache__" not in p.parts):
+        for path in sorted(p for p in base.rglob("*") if p.is_file() and SKIP_PARTS.isdisjoint(p.relative_to(base).parts)):
             files[f"skills/{skill}/{path.relative_to(base).as_posix()}"] = path.read_bytes()
     for hook in host.get("hooks", []):
         files[f"hooks/{hook}"] = (ROOT / "config" / "hooks" / hook).read_bytes()

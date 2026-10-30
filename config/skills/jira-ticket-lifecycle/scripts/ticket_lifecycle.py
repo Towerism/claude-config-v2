@@ -1149,6 +1149,30 @@ def spec_attachments(fields, key):
     ]
 
 
+def placeholder_description(header, key, text):
+    """The description for a spec that lives in the attachment: a note, plus an optional
+    distilled summary the user asked for. The first block always says where the spec is."""
+    note = f"The spec is too long for the ticket description, so it is attached as {key}-spec.md."
+    text = (text or "").strip()
+    if text:
+        if any(line.strip() in (START, END) for line in text.splitlines()):
+            raise UsageError(f"the placeholder text must not contain a {START} or {END} line")
+        note += " Below is a distilled summary; the attachment is the full spec."
+        note = f"{note}\n\n{text}"
+    description = f"{header}\n\n{START}\n\n{note}\n\n{END}\n"
+    if len(description) > MAX_DESCRIPTION:
+        raise UsageError(
+            f"the placeholder is {len(description)} characters; the description holds "
+            f"{MAX_DESCRIPTION}. Shorten it."
+        )
+    return description
+
+
+def is_attachment_placeholder(inner, key):
+    """True when the blocks between the markers are an attachment note, not the spec."""
+    return bool(inner) and f"attached as {key}-spec.md" in inner[0]
+
+
 def cmd_sync_spec(res, jira, cfg, key, args):
     folder = spec_folder(cfg, args.repo_dir)
     record_path = os.path.join(folder, f"{key}.synced.json")
@@ -1196,17 +1220,16 @@ def cmd_sync_spec(res, jira, cfg, key, args):
         return res.step("description", "failed", error_text(rc, out, err, "jira issue edit"))
     rest = None
     if rc != 0:
+        placeholder_file = getattr(args, "placeholder_file", None)
+        placeholder = placeholder_description(
+            header, key, read_text(placeholder_file) if placeholder_file else None
+        )
         rest = Rest(cfg)
         attachment_id, error = rest.upload(key, f"{key}-spec.md", new)
         if error:
             return res.step("attachment", "failed", f"{error}; the description is unchanged")
         res.step("attachment", "done", f"{key}-spec.md attached as id {attachment_id}")
-        note = (
-            f"The spec is too long for the ticket description, so it is attached as {key}-spec.md."
-        )
-        rc, out, err = jira.run(
-            "issue", "edit", key, "-b", f"{header}\n\n{START}\n\n{note}\n\n{END}\n", "--no-input"
-        )
+        rc, out, err = jira.run("issue", "edit", key, "-b", placeholder, "--no-input")
         if rc != 0:
             return res.step(
                 "description",
@@ -1255,7 +1278,7 @@ def cmd_pull_spec(res, jira, cfg, key, repo_dir):
     if not span:
         return res.step("working-copy", "none", path)
     inner = blocks[span[0] + 1 : span[1]]
-    if len(inner) == 1 and f"attached as {key}-spec.md" in inner[0]:
+    if is_attachment_placeholder(inner, key):
         # The description holds only the note, never the spec, whether or not the file is there.
         where = (
             ""
@@ -1365,6 +1388,10 @@ def build_parser():
     p.add_argument("--label", required=True, help="label name")
     p = step("sync-spec", "publish the spec into the ticket description", repo=True)
     p.add_argument("--spec", help="spec file (default: the working copy)")
+    p.add_argument(
+        "--placeholder-file",
+        help="a distilled summary to show in the description when the spec is attached",
+    )
     p.add_argument(
         "--replace", action="store_true", help="the user agreed to overwrite the description"
     )
