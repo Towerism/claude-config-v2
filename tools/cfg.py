@@ -11,6 +11,13 @@ rules in a marked block of CLAUDE.md (OMC keeps its own block in the same file).
 Everything it owns is listed, with hashes, in <home>/claude-config/state.json.
 Without --yes, deploy only prints the plan.
 
+A deploy with --yes also keeps the sync clone: a clone of this repo's main, made once in
+$XDG_DATA_HOME/claude-config (default ~/.local/share/claude-config) from this checkout, with
+origin set to this checkout's origin, and recorded as syncClone in state.json. The auto_sync
+hook fetches main into it at each new session and deploys it from there (ADR-0007). Without an
+origin the deploy still runs, with a warning, and auto sync stays off. status also shows the
+last line of <home>/claude-config/sync.log, where the hook logs a failed sync.
+
 The Claude home is --target, else $CLAUDE_CONFIG_DIR, else ~/.claude.
 Standard library only: it runs on a machine with nothing installed but Python.
 """
@@ -23,6 +30,7 @@ import os
 import re
 import shlex
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -255,6 +263,7 @@ class Plan:
         self.settings = dump(settings)
         old_md = read_text(home / "CLAUDE.md") if (home / "CLAUDE.md").exists() else ""
         self.claude_md = merge_claude_md(old_md).encode()
+        self.clone = self.state.get("syncClone")  # main() sets it before a deploy
         self.settings_changed = self.settings != _read(home / "settings.json")
         self.claude_md_changed = self.claude_md != _read(home / "CLAUDE.md")
 
@@ -275,6 +284,8 @@ class Plan:
         identity = (self.host["name"], self.host.get("defaultTracker"))
         if identity != (self.state.get("host"), self.state.get("defaultTracker")):
             return True  # same files, different machine role: state.json must still be rewritten
+        if self.clone != self.state.get("syncClone"):
+            return True  # a new sync clone must still be recorded
         return bool(self.add or self.update or self.remove or self.settings_changed or self.claude_md_changed)
 
 
@@ -331,6 +342,7 @@ def deploy(plan: Plan) -> None:
         "settingsSha": sha(plan.settings),
         "claudeMdSha": sha(plan.claude_md),
         "deployedAt": final.name,
+        **({"syncClone": plan.clone} if plan.clone else {}),
     }
     write_atomic(plan.state_dir / "state.json", dump(state))
     old = sorted(p for p in (plan.state_dir / "backups").iterdir() if p.is_dir())
@@ -428,7 +440,57 @@ def status(home: Path) -> list[str]:
     out += [f"  pending   {line.strip()}" for line in pending.lines()[1:] if "nothing to change" not in line]
     if len(out) == 1:
         out.append("  in sync")
+    log = home / "claude-config" / "sync.log"
+    lines = read_text(log).splitlines() if log.is_file() else []
+    if lines:
+        out.append(f"  last sync failure: {lines[-1]}")
     return out
+
+
+def sync_clone() -> str | None:
+    """The path of the clone auto sync deploys from, made from this checkout on first use.
+
+    None, after a warning, when it can't be made: the deploy goes on without auto sync.
+    """
+    data = os.environ.get("XDG_DATA_HOME")
+    base = Path(data) if data and os.path.isabs(data) else Path.home() / ".local" / "share"
+    clone = base / "claude-config"
+    if ROOT.resolve() == clone.resolve() or (clone / ".git").is_dir():
+        return str(clone)
+    warning = "warning: auto sync stays off on this machine:"
+    if clone.exists():
+        print(f"{warning} {clone} exists and is not a git clone")
+        return None
+    if not (ROOT / ".git").exists():
+        print(f"{warning} {ROOT} is not a git checkout")
+        return None
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env["GIT_TERMINAL_PROMPT"] = "0"
+
+    def git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", *args], env=env, capture_output=True, text=True, check=False)
+
+    url = git("-C", str(ROOT), "remote", "get-url", "origin").stdout.strip()
+    if not url:
+        print(f"{warning} this checkout has no origin remote")
+        return None
+    clone.parent.mkdir(parents=True, exist_ok=True)
+    work = Path(tempfile.mkdtemp(dir=clone.parent, prefix=".claude-config."))
+    try:
+        made = (
+            git("clone", "--quiet", "--branch", "main", "--", str(ROOT), str(work)).returncode == 0
+            and git("-C", str(work), "remote", "set-url", "origin", url).returncode == 0
+        )
+        if made:
+            work.rename(clone)  # the clone appears whole or not at all
+    finally:
+        if work.exists():
+            shutil.rmtree(work)
+    if not made:
+        print(f"{warning} could not clone this checkout's main branch to {clone}")
+        return None
+    print(f"sync clone: {clone}")
+    return str(clone)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -460,6 +522,7 @@ def main(argv: list[str] | None = None) -> int:
         if plan.conflicts and not args.force:
             print("stopped: conflicts above; pass --force to overwrite them (they are backed up)")
             return 1
+        plan.clone = sync_clone()
         if not plan.changes():
             return 0  # no backup for a deploy that changes nothing
         deploy(plan)

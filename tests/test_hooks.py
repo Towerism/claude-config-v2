@@ -1,4 +1,6 @@
-"""The two hooks: merge_confirm asks before a PR merge; host_default states the tracker for the repo."""
+"""The hooks: merge_confirm asks before a PR merge; host_default states the tracker for the repo.
+
+auto_sync's behaviour is in test_auto_sync.py; here it shares the wiring and input checks."""
 
 import ast
 import io
@@ -556,7 +558,7 @@ def test_hooks_print_only_checked_values(repo, machine):
 # wiring
 
 FRAGMENT = json.loads((ROOT / "config" / "settings.fragment.json").read_text())
-HOOK_NAMES = ["merge_confirm.py", "host_default.py"]
+HOOK_NAMES = ["merge_confirm.py", "host_default.py", "auto_sync.py"]
 
 
 def entries(event, name):
@@ -568,15 +570,19 @@ def entries(event, name):
     ]
 
 
-def test_two_hooks_are_registered_and_listed():
-    def hook(name):
-        return {"type": "command", "command": f"python3 -I {{claude_home}}/hooks/{name}", "timeout": 10}
+def test_the_hooks_are_registered_and_listed():
+    def hook(name, timeout=10, **extra):
+        return {"type": "command", "command": f"python3 -I {{claude_home}}/hooks/{name}", "timeout": timeout, **extra}
 
     assert entries("PreToolUse", "merge_confirm.py") == [("Bash", hook("merge_confirm.py"))]
     assert entries("SessionStart", "host_default.py") == [(None, hook("host_default.py"))]
     assert entries("SubagentStart", "host_default.py") == [(None, hook("host_default.py"))]
+    # A new session only, with a spinner, blocking until the sync is done.
+    assert entries("SessionStart", "auto_sync.py") == [
+        ("startup", hook("auto_sync.py", 120, statusMessage="Syncing claude-config…"))
+    ]
     assert sorted(FRAGMENT["hooks"]) == ["PreToolUse", "SessionStart", "SubagentStart"]
-    assert sum(len(groups) for groups in FRAGMENT["hooks"].values()) == 3
+    assert sum(len(groups) for groups in FRAGMENT["hooks"].values()) == 4
     for host in ("personal", "work"):
         assert json.loads((ROOT / "hosts" / f"{host}.json").read_text())["hooks"] == HOOK_NAMES
 
@@ -585,8 +591,12 @@ def test_every_hook_entry_outlasts_the_hooks_own_deadline():
     for groups in FRAGMENT["hooks"].values():
         for group in groups:
             for hook in group["hooks"]:
-                assert hook["timeout"] == 10, hook["command"]
-    for name in HOOK_NAMES:
+                if hook["command"].endswith("/auto_sync.py"):
+                    # The fetch deadline, then a full deploy, which is never cut short.
+                    assert hook["timeout"] >= hook_module("auto_sync.py").FETCH_SECONDS + 60
+                else:
+                    assert hook["timeout"] == 10, hook["command"]
+    for name in ("merge_confirm.py", "host_default.py"):
         assert hook_module(name).DEADLINE_SECONDS == 5, name
 
 
@@ -696,6 +706,7 @@ def hook_module(name):
 EVENT_ONLY = {
     "merge_confirm.py": {"hook_event_name": "PreToolUse", "tool_name": "Bash"},
     "host_default.py": {"hook_event_name": "SessionStart"},
+    "auto_sync.py": {"hook_event_name": "SessionStart", "source": "startup"},
 }
 HOST_CONTEXT = (
     b'{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "Host profile: work. '
