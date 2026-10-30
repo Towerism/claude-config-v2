@@ -1,6 +1,6 @@
 # ADR-0004: Every OMC agent gets a pathway through the guardrails
 
-**Status:** Accepted by the owner on 2026-10-24, issue #7. Stage 1 set the decision. Stages 2-4 built the hooks; each stage has an addendum below. A review phase followed stage 4 and has its own section. The deviations from the approved spec are listed in one section. Superseded in part by ADR-0006: routing, `skill_gate.py`, `secrets_guard.py`, `bash_guard.py` and the bypass are retired. What survives: `merge_confirm.py` (squash reason, parser and wrappers), the git hardening now in `host_default.py`, and the `host_default.py` notes, as amended.
+**Status:** Accepted by the owner on 2026-10-24, issue #7. Stage 1 set the decision. Stages 2-4 built the hooks; each stage has an addendum below. A review phase followed stage 4 and has its own section. The deviations from the approved spec are listed in one section. Superseded in part by ADR-0006: routing, `skill_gate.py`, `secrets_guard.py`, `bash_guard.py` and the bypass are retired. What survives: `merge_confirm.py` (squash reason, parser and wrappers), the git hardening now in `host_default.py`, and the `host_default.py` notes, as amended. "Layering with OMC" amended by ADR-0008: the host profiles now set `OMC_GIT_GUARDRAILS=0`.
 
 ## Context
 
@@ -155,7 +155,7 @@ A Grep regex `pattern` is never scanned. Searching for `process.env.API_KEY` pas
 - In-process tests cover a missing git and a git that outlives the deadline, through the `run_git` seam. This closes the deadline gap that stage 2 left.
 - 916 tests pass after the review fixes (see the review section).
 
-**Layering with OMC.** OMC's `git-guardrails` hook blocks every push, `branch -D`, `reset --hard`, `clean -f` and `checkout .` while ralph, autopilot, team or ultragoal is active, or when `OMC_GIT_GUARDRAILS=1`. `bash_guard` covers interactive sessions, default-branch commits, force-pushes and deletes of the default branch, subjects, branch names and tokens. The host profiles do not set `OMC_GIT_GUARDRAILS=1`, because it would block the lifecycle's own pushes. OMC's opt-in code-simplifier Stop hook stays off (item 6 below).
+**Layering with OMC.** OMC's `git-guardrails` hook blocks every push, `branch -D`, `reset --hard`, `clean -f` and `checkout .` while ralph, autopilot, team or ultragoal is active, or when `OMC_GIT_GUARDRAILS=1`. `bash_guard` covers interactive sessions, default-branch commits, force-pushes and deletes of the default branch, subjects, branch names and tokens. The host profiles do not set `OMC_GIT_GUARDRAILS=1`, because it would block the lifecycle's own pushes. (ADR-0008 later set it to `0`, which turns the hook off in every mode.) OMC's opt-in code-simplifier Stop hook stays off (item 6 below).
 
 **Latency.** 20 direct runs in a temp repo with a bare origin:
 
@@ -187,7 +187,7 @@ Bar: p95 under 500 ms. Met.
 2. V1's "never blocks" bar is amended. Hooks may ask: `skill_gate`'s autopilot ask is the first example. `secrets_guard` may deny reads of secret files. Asks in headless runs are denials. Stage 2 (asks), stage 3 (deny) and stage 4 (asks on commits, pushes and labels) are built.
 3. The 500 ms p95 latency bar per hook stays: 20 direct runs, p95 under 500 ms, recorded per hook. Stages 2, 3 and 4 measured (see the addenda). Met at each stage.
 4. `secrets_guard` is a hook, not a `permissions.deny` rule. `cfg.py` deploys hooks, plugins and marketplaces only. A `Grep` over a directory that holds a `.env` is not covered. Stage 3 built and measured: the real-harness `Grep` passed and listed the `.env` file name (see the `secrets_guard` addendum). Open.
-5. `bash_guard` layers on OMC's own `git-guardrails.mjs`. OMC blocks pushes while ralph, autopilot, team or ultragoal is active, or when `OMC_GIT_GUARDRAILS=1`. The host profiles do not set that variable. `bash_guard` adds interactive asks and the default-branch rules. Stage 4, built (see the `bash_guard` addendum).
+5. `bash_guard` layers on OMC's own `git-guardrails.mjs`. OMC blocks pushes while ralph, autopilot, team or ultragoal is active, or when `OMC_GIT_GUARDRAILS=1`. The host profiles do not set that variable (until ADR-0008 set it to `0`). `bash_guard` adds interactive asks and the default-branch rules. Stage 4, built (see the `bash_guard` addendum).
 6. OMC's opt-in `code-simplifier` Stop hook is not enabled. It simplifies changed files at every Stop. The rule is a size gate at review. Stage 2, built: `skill_gate` prints the review size check.
 7. Issue #7 link: the commits that carried each stage. Stage 2: `764407d`, `0b03e95`, `f3032e7`. Stage 3: `c768eba`, `f3b9138`. Stage 4: `de39985`, `9f82222`. Its PR number is recorded when the PR opens.
 
@@ -283,7 +283,7 @@ When the session's first prompt starts `ralph` or `autopilot` (`/ralph`, `/oh-my
 
 - `CLAUDE.global.md` opens with a rule telling the model to ignore the whole block, including the host-default tracker line.
 - All five hooks print nothing in such a session. Each reads the first user message from `transcript_path` (first 256 KB, stdlib) and treats anything unreadable as "not bypassed". The check is one function copied into each hook, because a hook runs with `python3 -I` and cannot import a sibling; a test asserts the copies are identical.
-- This includes `secrets_guard`: in such a session `.env` and `deny-terms` reads are not denied. That follows the request for a complete bypass. OMC's own `git-guardrails` still blocks pushes while ralph or autopilot is active.
+- This includes `secrets_guard`: in such a session `.env` and `deny-terms` reads are not denied. That follows the request for a complete bypass. OMC's own `git-guardrails` still blocks pushes while ralph or autopilot is active (no longer, since ADR-0008).
 - The bare word must be followed by whitespace, a colon or the end of the text, in any case, so `ralph's loop is broken` and `ralph.py crashes` do not trigger. A first prompt that is another command (`/model`, `! git status`) or a compact summary is the first prompt; entries marked `isSidechain` are skipped.
 - A subagent's hook payload carries the parent session's `transcript_path` (checked with a throwaway headless run), so a subagent prompt the model writes cannot trigger the bypass, and a bypassed session's subagents stay bypassed.
 - Limits: `host_default` on a fresh SessionStart (`source: startup`) runs before any prompt exists, so only the rule text covers it. A trigger past the first 256 KB of the transcript is missed by the hooks while the model still applies the rule.

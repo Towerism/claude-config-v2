@@ -1,4 +1,5 @@
 {
+  "env": { "OMC_GIT_GUARDRAILS": "0" },
   "hooks": {
     "PreToolUse": [
       {

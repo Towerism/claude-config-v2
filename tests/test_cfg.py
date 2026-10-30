@@ -323,6 +323,73 @@ def test_rollback_keeps_settings_changed_after_the_deploy(home):
     assert "oh-my-claudecode@omc" in after["enabledPlugins"]  # plugins are only ever added
 
 
+def test_deploy_sets_the_fragment_env_and_keeps_other_keys(home, capsys):
+    home.mkdir()
+    (home / "settings.json").write_text('{"env": {"KEEP": "1"}}\n')
+    run(home, "deploy", "--host", "personal", "--yes")
+    assert json.loads((home / "settings.json").read_text())["env"] == {"KEEP": "1", "OMC_GIT_GUARDRAILS": "0"}
+    assert json.loads((home / "claude-config" / "state.json").read_text())["envKeys"] == ["OMC_GIT_GUARDRAILS"]
+    capsys.readouterr()
+    run(home, "deploy", "--yes")
+    assert "nothing to change" in capsys.readouterr().out
+
+
+def test_deploy_overwrites_a_fragment_env_key(home):
+    home.mkdir()
+    (home / "settings.json").write_text('{"env": {"OMC_GIT_GUARDRAILS": "1"}}\n')
+    run(home, "deploy", "--host", "personal", "--yes")
+    assert json.loads((home / "settings.json").read_text())["env"] == {"OMC_GIT_GUARDRAILS": "0"}
+
+
+def test_rollback_removes_only_our_env_keys(home):
+    home.mkdir()
+    (home / "settings.json").write_text('{"env": {"KEEP": "1"}}\n')
+    run(home, "deploy", "--host", "personal", "--yes")
+    settings = json.loads((home / "settings.json").read_text())
+    settings["theme"] = "dark"  # changed after the deploy, so rollback strips our part instead of restoring
+    (home / "settings.json").write_text(json.dumps(settings))
+    run(home, "rollback")
+    after = json.loads((home / "settings.json").read_text())
+    assert after["env"] == {"KEEP": "1"} and after["theme"] == "dark"
+
+
+def test_deploy_removes_an_env_key_the_fragment_no_longer_sets(home):
+    run(home, "deploy", "--host", "personal", "--yes")
+    state_path = home / "claude-config" / "state.json"
+    state = json.loads(state_path.read_text())
+    state["envKeys"].append("GONE")
+    state_path.write_text(json.dumps(state))
+    settings = json.loads((home / "settings.json").read_text())
+    settings["env"].update({"GONE": "1", "KEEP": "1"})
+    (home / "settings.json").write_text(json.dumps(settings))
+    run(home, "deploy", "--yes")
+    assert json.loads((home / "settings.json").read_text())["env"] == {"KEEP": "1", "OMC_GIT_GUARDRAILS": "0"}
+
+
+def test_a_non_object_env_is_reported(home, capsys):
+    home.mkdir()
+    (home / "settings.json").write_text('{"env": null}\n')
+    assert run(home, "deploy", "--host", "personal", "--yes") == 2
+    assert "'env' must be an object" in capsys.readouterr().err
+
+
+def test_rollback_of_unchanged_settings_restores_an_overwritten_env_value(home):
+    home.mkdir()
+    (home / "settings.json").write_text('{"env": {"OMC_GIT_GUARDRAILS": "1"}}\n')
+    run(home, "deploy", "--host", "personal", "--yes")
+    run(home, "rollback")
+    assert (home / "settings.json").read_text() == '{"env": {"OMC_GIT_GUARDRAILS": "1"}}\n'
+
+
+def test_rollback_drops_an_env_left_empty(home):
+    run(home, "deploy", "--host", "personal", "--yes")
+    settings = json.loads((home / "settings.json").read_text())
+    settings["theme"] = "dark"
+    (home / "settings.json").write_text(json.dumps(settings))
+    run(home, "rollback")
+    assert "env" not in json.loads((home / "settings.json").read_text())
+
+
 def test_rollback_keeps_an_omc_block_added_after_a_first_deploy(home):
     run(home, "deploy", "--host", "personal", "--yes")
     md = home / "CLAUDE.md"

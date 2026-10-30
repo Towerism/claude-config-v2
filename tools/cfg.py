@@ -155,8 +155,10 @@ def desired_files(host: dict) -> dict[str, bytes]:
     return files
 
 
-def merge_settings(old: dict, host: dict, home: Path, previous: list[str]) -> tuple[dict, list[str]]:
-    """The settings with our hook entries replaced, plus the commands we own now."""
+def merge_settings(
+    old: dict, host: dict, home: Path, previous: list[str], previous_env: list[str]
+) -> tuple[dict, list[str], list[str]]:
+    """The settings with our hook entries and env keys replaced, plus the commands and env keys we own now."""
     fragment = json.loads((ROOT / "config" / "settings.fragment.json").read_text(encoding="utf-8"))
     new = copy.deepcopy(old)
     hooks = new.setdefault("hooks", {})
@@ -192,11 +194,22 @@ def merge_settings(old: dict, host: dict, home: Path, previous: list[str]) -> tu
         hooks.setdefault(event, []).append({**group, "hooks": entries})
     if not hooks:
         del new["hooks"]
+    if not isinstance(new.get("env", {}), dict):
+        raise CfgError("settings.json: 'env' must be an object")
+    wanted_env = fragment.get("env", {})
+    if wanted_env or previous_env:  # leave an env we have never touched exactly as it is
+        env = new.setdefault("env", {})
+        for key in previous_env:
+            if key not in wanted_env:
+                env.pop(key, None)
+        env.update(wanted_env)
+        if not env:
+            del new["env"]
     for plugin in host.get("plugins", []):
         new.setdefault("enabledPlugins", {})[plugin] = True
     for name, market in host.get("marketplaces", {}).items():
         new.setdefault("extraKnownMarketplaces", {}).setdefault(name, market)
-    return new, commands
+    return new, commands, list(wanted_env)
 
 
 def find_block(text: str) -> tuple[int, int] | None:
@@ -259,8 +272,9 @@ class Plan:
                 self.remove.append(rel)
                 if sha((home / rel).read_bytes()) != self.recorded[rel]:
                     self.conflicts.append(rel)
-        settings, self.commands = merge_settings(
-            read_json(home / "settings.json"), host, home, self.state.get("hookCommands", [])
+        settings, self.commands, self.env_keys = merge_settings(
+            read_json(home / "settings.json"), host, home,
+            self.state.get("hookCommands", []), self.state.get("envKeys", []),
         )
         self.settings = dump(settings)
         old_md = read_text(home / "CLAUDE.md") if (home / "CLAUDE.md").exists() else ""
@@ -343,6 +357,7 @@ def deploy(plan: Plan) -> None:
         "defaultTracker": plan.host.get("defaultTracker"),
         "files": {rel: sha(data) for rel, data in plan.want.items()},
         "hookCommands": plan.commands,
+        "envKeys": plan.env_keys,
         "settingsSha": sha(plan.settings),
         "claudeMdSha": sha(plan.claude_md),
         "deployedAt": final.name,
@@ -409,13 +424,18 @@ def rollback(home: Path) -> list[str]:
 
 
 def unmerge_settings(text: str, state: dict) -> str:
-    """The settings text without the hook entries the last deploy added."""
+    """The settings text without the hook entries and env keys the last deploy added."""
     try:
         data = json.loads(text) if text.strip() else {}
     except ValueError as err:
         raise CfgError(f"settings.json is not valid JSON: {err}") from err
-    if not isinstance(data, dict) or not isinstance(data.get("hooks", {}), dict):
-        raise CfgError("settings.json must hold an object with an object under 'hooks'")
+    if not isinstance(data, dict) or not all(isinstance(data.get(k, {}), dict) for k in ("hooks", "env")):
+        raise CfgError("settings.json must hold an object with objects under 'hooks' and 'env'")
+    env = data.get("env", {})
+    for key in state.get("envKeys", []):
+        env.pop(key, None)
+    if not env:
+        data.pop("env", None)
     ours = set(state.get("hookCommands", []))
     hooks = data.get("hooks", {})
     for event in list(hooks):
