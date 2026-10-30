@@ -9,6 +9,17 @@
     "SessionStart": [
       {
         "hooks": [{ "type": "command", "command": "python3 -I {claude_home}/hooks/host_default.py", "timeout": 10 }]
+      },
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I {claude_home}/hooks/auto_sync.py",
+            "timeout": 120,
+            "statusMessage": "Syncing claude-config…"
+          }
+        ]
       }
     ],
     "SubagentStart": [

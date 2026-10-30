@@ -15,7 +15,7 @@ V1 (`claude-config`) built its own pipeline from 24 skills, overlays and three h
 |---|---|
 | `config/CLAUDE.global.md` | The guardrails: eight lines, deployed into `~/.claude/CLAUDE.md` as a marked block beside OMC's own. They state only what OMC, the lifecycle skills and the hooks don't: the user approves every spec and every merge ([ADR-0006](docs/adr/0006-omc-leads-the-pipeline.md)) |
 | `config/skills/` | `github-issue-lifecycle`, `gitea-issue-lifecycle`, `jira-ticket-lifecycle` (each with a stdlib script for its checks and tracker steps), `fresh-session-handoff`, `linux-troubleshooting`, `architecture-backfill` (docs a repo's architecture and past decisions from code and history, each claim labeled verified or inferred). Prose rules come from OMC's `minimal-prose-discipline` and `agent-doc-discipline` |
-| `config/hooks/` | `merge_confirm.py` (every PR merge waits for your click) and `host_default.py` (states the repo's tracker at session start, from its history, its `origin` and the host profile) |
+| `config/hooks/` | `merge_confirm.py` (every PR merge waits for your click), `host_default.py` (states the repo's tracker at session start, from its history, its `origin` and the host profile) and `auto_sync.py` (deploys `main` from `origin` at the start of each new session, [ADR-0007](docs/adr/0007-auto-sync-at-session-start.md)) |
 | `hosts/` | `personal.json`, `work.json` |
 | `tools/cfg.py` | plan, deploy, status and rollback |
 | `tests/` | repo invariants, hooks, `cfg.py`, and the lifecycle scripts (`tests/skills/`, against a fake `gh` and `jira`) |
@@ -32,9 +32,17 @@ V1 (`claude-config`) built its own pipeline from 24 skills, overlays and three h
    ```
 
    `make deploy` without `YES=1` only prints the plan. Later deploys remember the host, so `HOST` can be left out. `TARGET=DIR` (or `CLAUDE_CONFIG_DIR`) deploys somewhere else, such as a scratch directory. The same runs without make: `python3 -I tools/cfg.py plan --host personal`, then `... deploy --host personal --yes`.
-3. `make status` lists files edited since the last deploy and changes still pending. A deploy stops on an edited file until you pass `FORCE=1` (`--force`; the old copy is backed up). `make rollback` undoes the last deploy. A `HOST` or `TARGET` holding `'` or `$` needs the raw command. Only values typed after `make` count; exported variables are ignored.
+3. After that, deploys also run automatically ([ADR-0007](docs/adr/0007-auto-sync-at-session-start.md)). The first `make deploy YES=1` clones `main` from this checkout's `origin` into `~/.local/share/claude-config` (`$XDG_DATA_HOME/claude-config`); offline, it warns and the next deploy tries again. At the start of each new session the `auto_sync.py` hook fetches `main` into that clone, fast-forwards it and deploys it with `--force`.
+   - Files edited by hand in `~/.claude` are overwritten. They are backed up, but only the last five backups are kept. `make rollback` restores the last one, and like a hand edit it holds only until the next new session, unless auto sync is off.
+   - A manual deploy from a feature branch is replaced by `main` at the next session start.
+   - On success you see only a spinner. On failure the reason goes to `~/.claude/claude-config/sync.log`, `make status` shows it, and you see a one-line warning. Most failures leave the current config as it was; a deploy that fails midway is rolled back, and if that fails too the warning says to run `make rollback`.
+   - A `diverged` warning (`main` on `origin` was rewritten, for example by a force-push) is repaired by running `make deploy YES=1` in a checkout: it resets the clone's `main` to `origin`'s.
+   - The fetch runs git with a fixed `PATH` (`/usr/local/bin:/usr/bin:/bin`) and its own ssh command (`ssh -o BatchMode=yes`, which replaces a `core.sshCommand`). A setup that needs a custom ssh command, or a credential helper outside that `PATH`, gets `fetch-failed` every time.
+   - To turn auto sync off on a machine, set `"autoSync": false` in `~/.config/claude-config/local.json`.
+   - Anyone who can push to `main` changes every synced machine at its next session start, so protect `main` with branch protection.
+4. `make status` lists files edited since the last deploy, changes still pending and the last failed sync. A deploy stops on an edited file until you pass `FORCE=1` (`--force`; the old copy is backed up). `make rollback` undoes the last deploy. A `HOST` or `TARGET` holding `'` or `$` needs the raw command. Only values typed after `make` count; exported variables are ignored.
 
-Per-machine values that never enter the repo live in `~/.config/claude-config/local.json`: the `jira` settings that tailor `jira-ticket-lifecycle` to your Jira project (see its `references/settings.md`). A top-level `defaultTracker` there is ignored; the host profile holds the default.
+Per-machine values that never enter the repo live in `~/.config/claude-config/local.json`: `autoSync` (above), and the `jira` settings that tailor `jira-ticket-lifecycle` to your Jira project (see its `references/settings.md`). A top-level `defaultTracker` there is ignored; the host profile holds the default.
 
 ## Add a second machine, a skill or a hook
 

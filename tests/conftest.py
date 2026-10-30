@@ -9,10 +9,12 @@ ROOT = Path(__file__).resolve().parent.parent
 
 @pytest.fixture(autouse=True)
 def fresh_home(tmp_path_factory, monkeypatch):
-    """No test reads the real ~/.config: HOME and XDG_CONFIG_HOME point at an empty temp dir."""
+    """No test reads the real ~/.config or writes the real ~/.local/share: HOME, XDG_CONFIG_HOME
+    and XDG_DATA_HOME (where a deploy keeps the sync clone) point at an empty temp dir."""
     home = tmp_path_factory.mktemp("home")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(home / ".local" / "share"))
     return home
 
 

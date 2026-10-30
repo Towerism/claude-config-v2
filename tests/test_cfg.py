@@ -2,12 +2,34 @@
 
 import json
 import shutil
+import subprocess
 
 import pytest
 
 from tests.conftest import ROOT, load
 
 cfg = load(ROOT / "tools" / "cfg.py", "cfg")
+REAL_ORIGIN_URL = cfg.origin_url
+
+
+@pytest.fixture(scope="session")
+def local_origin(tmp_path_factory):
+    """A bare repo holding this checkout's HEAD as main: the sync clone's origin in these tests."""
+    bare = tmp_path_factory.mktemp("origin") / "claude-config.git"
+    env = {"PATH": "/usr/bin:/bin", "HOME": "/nonexistent"}
+    for argv in (
+        ["git", "init", "-q", "--bare", "-b", "main", str(bare)],
+        ["git", "-C", str(bare), "config", "receive.shallowUpdate", "true"],  # CI checks out shallow
+        ["git", "-C", str(ROOT), "push", "-q", str(bare), "HEAD:refs/heads/main"],
+    ):
+        subprocess.run(argv, check=True, capture_output=True, env=env)
+    return bare
+
+
+@pytest.fixture(autouse=True)
+def offline(local_origin, monkeypatch):
+    """A deploy clones from the local bare repo, never from this checkout's real origin."""
+    monkeypatch.setattr(cfg, "origin_url", lambda: str(local_origin))
 
 
 def run(home, *args):
@@ -130,7 +152,9 @@ def test_deploy_removes_a_hook_the_profile_no_longer_lists(home, tmp_path, monke
     settings = json.loads((home / "settings.json").read_text())
     assert "bash_guard.py" not in json.dumps(settings)
     commands = [h["command"] for groups in settings["hooks"].values() for g in groups for h in g["hooks"]]
-    assert sorted(c.split("/")[-1] for c in commands) == ["host_default.py", "host_default.py", "merge_confirm.py"]
+    assert sorted(c.split("/")[-1] for c in commands) == [
+        "auto_sync.py", "host_default.py", "host_default.py", "merge_confirm.py"
+    ]
 
 
 def test_locally_edited_file_is_a_conflict(home, capsys):
@@ -155,6 +179,71 @@ def test_status_reports_modified_missing_and_sync(home, capsys):
     run(home, "status")
     out = capsys.readouterr().out
     assert "modified  hooks/merge_confirm.py" in out and "missing   skills/fresh-session-handoff/SKILL.md" in out
+
+
+def test_deploy_wires_auto_sync_for_new_sessions_only(home):
+    run(home, "deploy", "--host", "personal", "--yes")
+    settings = json.loads((home / "settings.json").read_text())
+    [group] = [g for g in settings["hooks"]["SessionStart"] if g.get("matcher") == "startup"]
+    [entry] = group["hooks"]
+    assert entry["command"] == f"python3 -I {home}/hooks/auto_sync.py"
+    assert entry["statusMessage"] == "Syncing claude-config…" and entry["timeout"] == 120
+
+
+def test_status_shows_the_last_sync_log_line(home, capsys):
+    run(home, "deploy", "--host", "personal", "--yes")
+    (home / "claude-config" / "sync.log").write_text("2026-01-01T00:00:00Z timeout\n2026-01-02T00:00:00Z diverged\n")
+    capsys.readouterr()
+    run(home, "status")
+    out = capsys.readouterr().out
+    assert "last sync failure: 2026-01-02T00:00:00Z diverged" in out and "timeout" not in out
+
+
+def test_deploy_without_a_git_checkout_warns_and_records_no_clone(home, tmp_path, monkeypatch, capsys):
+    plain = tmp_path / "plain"
+    for part in ("config", "hosts"):
+        shutil.copytree(ROOT / part, plain / part, ignore=shutil.ignore_patterns("__pycache__", ".omc"))
+    monkeypatch.setattr(cfg, "ROOT", plain)
+    monkeypatch.setattr(cfg, "origin_url", REAL_ORIGIN_URL)
+    assert run(home, "deploy", "--host", "personal", "--yes") == 0
+    assert "warning" in capsys.readouterr().out
+    assert "syncClone" not in json.loads((home / "claude-config" / "state.json").read_text())
+
+
+def test_rollback_of_an_interrupted_deploy_restores_settings_whole(home, tmp_path, monkeypatch):
+    run(home, "deploy", "--host", "personal", "--yes")
+    before = {rel: (home / rel).read_bytes() for rel in ("settings.json", "CLAUDE.md", "claude-config/state.json")}
+    # A newer config whose deploy rewrites settings.json, then fails writing CLAUDE.md.
+    newer = tmp_path / "newer"
+    for part in ("config", "hosts"):
+        shutil.copytree(ROOT / part, newer / part, ignore=shutil.ignore_patterns("__pycache__", ".omc"))
+    fragment = newer / "config" / "settings.fragment.json"
+    fragment.write_text(fragment.read_text().replace('"timeout": 10 }', '"timeout": 11 }', 1))
+    (newer / "config" / "CLAUDE.global.md").write_text("## Newer rules\n")
+    monkeypatch.setattr(cfg, "ROOT", newer)
+    real = cfg.write_atomic
+
+    def flaky(path, data, follow=False):
+        if path.name == "CLAUDE.md":
+            raise PermissionError("denied")
+        real(path, data, follow)
+
+    monkeypatch.setattr(cfg, "write_atomic", flaky)
+    assert run(home, "deploy", "--yes") == 3
+    assert (home / "settings.json").read_bytes() != before["settings.json"]
+    monkeypatch.setattr(cfg, "write_atomic", real)
+    assert run(home, "rollback") == 0
+    assert {rel: (home / rel).read_bytes() for rel in before} == before
+
+
+def test_plan_says_when_a_deploy_will_make_the_sync_clone(home, capsys):
+    run(home, "plan", "--host", "personal")
+    assert "sync clone" in capsys.readouterr().out
+    run(home, "deploy", "--host", "personal", "--yes")
+    capsys.readouterr()
+    run(home, "plan")
+    out = capsys.readouterr().out
+    assert "sync clone" not in out and "nothing to change" in out
 
 
 def test_status_without_a_deploy(home, capsys):
@@ -272,7 +361,7 @@ def test_retrying_after_a_failed_deploy_does_not_duplicate_hooks(home, monkeypat
     settings = json.loads((home / "settings.json").read_text())
     assert [len(g["hooks"]) for g in settings["hooks"]["PreToolUse"]] == [1]
     assert "UserPromptExpansion" not in settings["hooks"]
-    assert len(settings["hooks"]["SessionStart"]) == 1
+    assert len(settings["hooks"]["SessionStart"]) == 2  # host_default, and auto_sync on startup
 
 
 def test_host_switch_leaves_one_entry_per_hook_and_rolls_back(home, monkeypatch):
@@ -281,7 +370,7 @@ def test_host_switch_leaves_one_entry_per_hook_and_rolls_back(home, monkeypatch)
     state = json.loads((home / "claude-config" / "state.json").read_text())
     assert state["host"] == "work" and state["defaultTracker"] == "jira"
     settings = json.loads((home / "settings.json").read_text())
-    assert sum(len(g["hooks"]) for g in settings["hooks"]["SessionStart"]) == 1
+    assert sum(len(g["hooks"]) for g in settings["hooks"]["SessionStart"]) == 2
     run(home, "rollback")
     assert json.loads((home / "claude-config" / "state.json").read_text())["host"] == "personal"
 
