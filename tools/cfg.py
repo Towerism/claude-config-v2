@@ -194,16 +194,17 @@ def merge_settings(
         hooks.setdefault(event, []).append({**group, "hooks": entries})
     if not hooks:
         del new["hooks"]
-    env = new.setdefault("env", {})
-    if not isinstance(env, dict):
+    if not isinstance(new.get("env", {}), dict):
         raise CfgError("settings.json: 'env' must be an object")
     wanted_env = fragment.get("env", {})
-    for key in previous_env:
-        if key not in wanted_env:
-            env.pop(key, None)
-    env.update(wanted_env)
-    if not env:
-        del new["env"]
+    if wanted_env or previous_env:  # leave an env we have never touched exactly as it is
+        env = new.setdefault("env", {})
+        for key in previous_env:
+            if key not in wanted_env:
+                env.pop(key, None)
+        env.update(wanted_env)
+        if not env:
+            del new["env"]
     for plugin in host.get("plugins", []):
         new.setdefault("enabledPlugins", {})[plugin] = True
     for name, market in host.get("marketplaces", {}).items():
