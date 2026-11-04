@@ -4,7 +4,7 @@
 
 ## Context
 
-`config/CLAUDE.global.md` is read by Anthropic models and by less capable open-weight models, such as Qwen3.6-35B-A3B (about 3B active parameters), running in Claude Code or a compatible harness. `cfg.py` deploys it after OMC's block, so it is the last text in `~/.claude/CLAUDE.md`. That file arrives after the harness's own long system prompt and tool schemas.
+`config/CLAUDE.global.md` is read by Anthropic models and by less capable open-weight models, such as Qwen3.6-35B-A3B (about 3B active parameters), running in Claude Code or a compatible harness. `cfg.py` appends it after OMC's block on the first deploy and replaces it in place after that, so it is normally the last text in `~/.claude/CLAUDE.md`. That file arrives after the harness's own long system prompt and tool schemas.
 
 The nine lines of ADR-0006 and ADR-0008 were dense, and a small model can misread or skip them:
 - Each line held several rules, and some lines ended with a condition after the action.
@@ -38,17 +38,17 @@ Two critic passes on the rewrite found this. One checked that each rule keeps it
 
 ## Sources the review cited
 
-The Qwen critic labelled each source as verified, inferred or unverified. This ADR repeats what it reported and does not re-measure it.
-- **Model facts:** the Hugging Face model card for `Qwen/Qwen3.6-35B-A3B` gives the architecture, thinking on by default, and "keep at least 128K tokens".
+Each label is the one the Qwen critic gave. This ADR repeats what it reported and does not re-measure it; recheck a source before relying on it.
+- **Model facts:** the Hugging Face model card for `Qwen/Qwen3.6-35B-A3B` gives the architecture, thinking on by default, and "keep at least 128K tokens" (verified).
 - **Benchmarks:**
-  - Red Hat's NVFP4 card (`RedHatAI/Qwen3.6-35B-A3B-NVFP4`), from its runs of the unquantized base model: IFEval about 93, BFCLv4 agentic about 50.
-  - The Qwen3 Technical Report (arXiv 2505.09388): thinking mode beats non-thinking mode on IFEval and BFCL.
+  - Red Hat's NVFP4 card (`RedHatAI/Qwen3.6-35B-A3B-NVFP4`), from its runs of the unquantized base model: IFEval about 93, BFCLv4 agentic about 50 (verified; Red Hat marks them preliminary).
+  - The Qwen3 Technical Report (arXiv 2505.09388): thinking mode beats non-thinking mode on IFEval and BFCL, measured on Qwen3-30B-A3B (verified; that it carries to 3.6 is inferred).
 - **Instruction-following research:**
-  - IFScale (arXiv 2507.11538): earlier instructions are followed more.
-  - arXiv 2607.19257: rule lists collapse past about 40 rules, and a 35B Qwen did better with rules in the user turn.
-  - NAFBench (arXiv 2609.27517) and arXiv 2601.08070: open models handle negation and rule order poorly.
-  - arXiv 2605.01771: models agree to a process rule, then skip it.
-- **User reports** from people running Qwen3.6-35B-A3B in coding agents: it is too proactive, ignores short AGENTS.md rules, and claims tool calls it did not make.
+  - IFScale (arXiv 2507.11538): earlier instructions are followed more (verified).
+  - arXiv 2607.19257: rule lists collapse past about 40 rules, and a 35B Qwen did better with rules in the user turn (verified; which Qwen 35B is inferred).
+  - NAFBench (arXiv 2609.27517) and arXiv 2601.08070: open models handle negation and rule order poorly (verified; 2601.08070 tested Qwen2.5-7B only).
+  - arXiv 2605.01771: models agree to a process rule, then skip it (verified; no Qwen model tested).
+- **User reports** on r/LocalLLaMA and the model's Hugging Face discussions, from people running Qwen3.6-35B-A3B in coding agents: it is too proactive, ignores short AGENTS.md rules, and claims tool calls it did not make (anecdotal).
 
 ## Residual risks
 
@@ -59,10 +59,10 @@ The Qwen critic labelled each source as verified, inferred or unverified. This A
 
 ## Deployment notes that wording cannot fix
 
-- Run Qwen3.x A3B models with thinking on, and with `preserve_thinking` for agent use.
-- Use a Q6 or higher quantization. At Q4, users report broken tool-call formatting.
-- Give it a context window of 128K or more. Claude Code's own prompt alone is far larger than Ollama's 4K default.
-- Serve it with `--tool-call-parser qwen3_coder`.
+- Run Qwen3.x A3B models with thinking on, and with the chat template's `preserve_thinking` option for agent use, as the model card advises.
+- Use a Q6 or higher quantization. At Q4, users report broken tool-call formatting (anecdotal).
+- Give it a context window of 128K or more. Ollama's 4K default is too small: one user measured Claude Code's own system prompt at about 20K tokens (anecdotal).
+- With vLLM or SGLang, serve it with `--tool-call-parser qwen3_coder`.
 
 ## Scenarios to run against a weaker model
 
@@ -83,6 +83,5 @@ Run each five times in a scratch repo; expect variance.
 
 ## Consequences
 
-- "Guardrails" in `GLOSSARY.md` and the README now describe three sections of short bullets, not nine lines.
 - Adding a rule still needs an ADR. A new bullet goes in the section where it applies, and the gate bullets stay first.
 - Recheck the verbatim push-grant phrase against OMC's `autopilot` and `ralph` skills on each OMC upgrade, as ADR-0008 says.
