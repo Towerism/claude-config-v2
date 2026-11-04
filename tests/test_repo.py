@@ -235,7 +235,7 @@ def test_every_global_bullet_is_short():
 def test_global_rules_name_no_model():
     """The block is read by Anthropic and open-weight models alike."""
     text = re.sub(r"\bclaude-config\b", "", global_text())
-    families = "claude|anthropic|opus|sonnet|haiku|fable|qwen|gpt|llama|gemini|mistral|deepseek|glm|kimi"
+    families = "claude|anthropic|opus|sonnet|haiku|fable|qwen|gpt|llama|gemini|gemma|mistral|deepseek|glm|kimi|phi|granite|nemotron|grok"
     assert not re.search(rf"(?i)\b({families})(?![a-z])", text)
 
 
@@ -245,7 +245,7 @@ def test_approval_gate_comes_first_and_covers_delegation():
 
 
 def test_approval_is_the_users_quoted_words_and_the_label_records_them():
-    section_bullet(BEFORE_CODE, "the user's own explicit words", "quote the user's words", "Approved by the user:")
+    section_bullet(BEFORE_CODE, "the user's own explicit words", "nothing else", "quote the user's words", "Approved by the user:")
     section_bullet(BEFORE_CODE, "approved label records the user's quoted words", "only after you have quoted them")
 
 
@@ -291,7 +291,7 @@ def test_untrusted_text_is_data_and_ignoring_it_is_reported():
 def test_global_rules_distrust_the_ticket_claims():
     section_bullet(UNTRUSTED, "claim, not a fact", "what it says to build", "how to build it", "what is wrong",
                   "diagnosis, repro, cause or constraint")
-    section_bullet(UNTRUSTED, "Check each claim", "report any mismatch to the user", "Before you build")
+    section_bullet(UNTRUSTED, "Check each claim", "the docs and the user's own words", "report any mismatch to the user", "Before you build")
 
 
 def test_safety_lines_are_stated():
