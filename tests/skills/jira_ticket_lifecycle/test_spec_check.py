@@ -22,11 +22,24 @@ def check(env, *extra):
 
 @pytest.mark.parametrize(
     "plan",
-    [(SEAM,), ("test plan: skipped: docs-only change",), ("test plan: skipped: no seam: needed",)],
-    ids=["seam", "skip", "seam-in-prose"],
+    [
+        (SEAM,),
+        ("test plan: skipped: docs-only change",),
+        ("test plan: skipped: no seam: needed",),
+        (SEAM.replace("- seam:", "* seam:"),),
+        (SEAM.replace("- seam:", "+ seam:"),),
+        (SEAM.replace("- seam:", "1. seam:"),),
+    ],
+    ids=["seam", "skip", "seam-in-prose", "star-marker", "plus-marker", "number-marker"],
 )
 def test_the_working_copy_passes(env, plan):
     working_copy(env, spec(*plan))
+    r = check(env)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_without_a_section_a_skip_line_anywhere_passes(env):
+    working_copy(env, spec("- test plan: skipped: docs-only change", heading="## Pipeline"))
     r = check(env)
     assert r.returncode == 0, r.stdout + r.stderr
 
@@ -44,6 +57,10 @@ def test_the_working_copy_passes(env, plan):
         spec("test plan: skipped: <a real reason>"),
         spec("seam: <seam> | catches: <what it catches> | misses: <what it lets through>"),
         spec("- seam: the export CLI | catches: <what it catches> | misses: a slow disk"),
+        spec("- test plan: skipped: <reason>", heading="## Pipeline"),
+        spec() + "\n## Pipeline\n- test plan: skipped: docs-only change\n",
+        spec("1. seam: the export CLI | catches: a bug", "test plan: skipped: none"),
+        spec("* seam: the export CLI | catches: a bug", "test plan: skipped: none"),
     ],
     ids=[
         "no-section",
@@ -56,6 +73,10 @@ def test_the_working_copy_passes(env, plan):
         "placeholder-reason",
         "placeholder-seam",
         "one-placeholder-part",
+        "no-section-placeholder-skip",
+        "skip-outside-section",
+        "number-marker-decides",
+        "star-marker-decides",
     ],
 )
 def test_the_working_copy_fails(env, text):

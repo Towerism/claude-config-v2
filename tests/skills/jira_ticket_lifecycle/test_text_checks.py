@@ -119,6 +119,12 @@ def test_valid_bodies_pass(env):
     assert pr(env, good_body("spec: pay-142")).returncode == 0
 
 
+def test_the_missing_spec_check_message_names_the_review_heading(env):
+    r = pr(env, good_body().replace("Spec check: every item built, nothing more.\n", ""))
+    problems = json.loads(r.stdout)["problems"]
+    assert any("## Review" in p["detail"] for p in problems if p["code"] == "missing-spec-check")
+
+
 def test_a_subheading_inside_review_keeps_the_section_open(env):
     assert pr(env, good_body().replace("## Review\n", "## Review\n### Notes\n")).returncode == 0
 
@@ -151,6 +157,13 @@ def test_the_filled_in_template_passes(env):
             "missing-spec-check",
         ),
         (good_body().replace("## Review\n", "## Notes\n### Pre-review notes\n"), "missing-spec-check"),
+        (
+            good_body().replace(
+                "every item built, nothing more.",
+                "<Every spec item built; nothing outside the spec or under its Non-Goals.>",
+            ),
+            "missing-spec-check",
+        ),
     ],
 )
 def test_bad_bodies_fail_with_a_code(env, body, code):

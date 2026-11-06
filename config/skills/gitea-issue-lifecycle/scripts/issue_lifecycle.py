@@ -121,7 +121,8 @@ def replace_spec(body, spec):
 
 # ── spec check ───────────────────────────────────────────────────────────────
 
-SEAM_RE = re.compile(r"(?:- )?seam:(.*?)catches:(.*?)misses:(.*)")
+SEAM_START = r"(?:(?:[-*+]|\d+\.) +)?seam:"
+SEAM_RE = re.compile(SEAM_START + r"(.*?)catches:(.*?)misses:(.*)")
 SKIP_RE = re.compile(r"test plan: skipped:(.*)")
 
 
@@ -135,16 +136,23 @@ def _good_seam(line):
     return bool(match) and all(_filled(part.strip().rstrip("|").strip()) for part in match.groups())
 
 
+def _good_skip(line):
+    match = SKIP_RE.search(line)
+    return bool(match) and _filled(match.group(1).strip())
+
+
 def check_spec(spec):
     lines = spec.replace("\r\n", "\n").split("\n")
     if "## Test plan" not in lines:
+        if any(_good_skip(line) for line in lines):
+            return []
         return [("no-test-plan", "needs a '## Test plan' section")]
     section = []
     for line in lines[lines.index("## Test plan") + 1 :]:
         if line.startswith("## "):
             break
         section.append(line)
-    seams = [line for line in section if line.lstrip().startswith(("seam:", "- seam:"))]
+    seams = [line for line in section if re.match(SEAM_START, line.lstrip())]
     if seams:
         if all(_good_seam(line) for line in seams):
             return []
@@ -154,10 +162,8 @@ def check_spec(spec):
                 "every seam line needs 'seam:', 'catches:' and 'misses:', each followed by real text",
             )
         ]
-    for line in section:
-        match = SKIP_RE.search(line)
-        if match and _filled(match.group(1).strip()):
-            return []
+    if any(_good_skip(line) for line in section):
+        return []
     return [("no-seams", "the Test plan needs a seam line or 'test plan: skipped: <a real reason>'")]
 
 
@@ -181,10 +187,10 @@ def check_pr_body(body, issue, repo=None):
         line = line.rstrip()
         if line.startswith("## "):
             in_review = line == "## Review"
-        elif in_review and re.match(r"Spec check: *\S", line.strip()):
-            spec_check = True
+        elif in_review and (match := re.match(r"Spec check:(.*)", line.strip())):
+            spec_check = spec_check or _filled(match.group(1).strip())
     if not spec_check:
-        problems.append(("missing-spec-check", "the Review section needs a 'Spec check:' line"))
+        problems.append(("missing-spec-check", "needs a 'Spec check:' line under the '## Review' heading"))
     return problems
 
 

@@ -1,5 +1,7 @@
 """spec-check: a spec is stored only when its Test plan has a seam list or a reasoned skip."""
 
+import pytest
+
 from tests.skills.github_issue_lifecycle.conftest import run, write
 
 SEAM = "- seam: the export CLI | catches: a wrong exit code | misses: a slow disk"
@@ -78,3 +80,30 @@ def test_placeholder_seam_parts_fail(tmp_path):
 def test_one_placeholder_seam_part_fails(tmp_path):
     plan = "- seam: the export CLI | catches: <what it catches> | misses: a slow disk"
     assert check(tmp_path, spec(plan)).returncode == 1
+
+
+def test_without_a_section_a_skip_line_anywhere_passes(tmp_path):
+    text = spec("- test plan: skipped: docs-only change", heading="## Pipeline")
+    assert check(tmp_path, text).returncode == 0
+
+
+def test_without_a_section_a_placeholder_skip_line_fails(tmp_path):
+    text = spec("- test plan: skipped: <reason>", heading="## Pipeline")
+    assert check(tmp_path, text).returncode == 1
+
+
+def test_with_a_section_a_skip_line_outside_it_does_not_count(tmp_path):
+    text = spec() + "\n## Pipeline\n- test plan: skipped: docs-only change\n"
+    assert check(tmp_path, text).returncode == 1
+
+
+@pytest.mark.parametrize("marker", ["* ", "+ ", "1. ", "12. "])
+def test_a_seam_line_may_start_with_a_list_marker(tmp_path, marker):
+    line = SEAM.replace("- seam:", marker + "seam:")
+    assert check(tmp_path, spec(line)).returncode == 0
+
+
+@pytest.mark.parametrize("marker", ["* ", "+ ", "1. "])
+def test_an_incomplete_marked_seam_line_still_decides(tmp_path, marker):
+    plan = (marker + "seam: the export CLI | catches: a wrong exit code", "test plan: skipped: none")
+    assert check(tmp_path, spec(*plan)).returncode == 1

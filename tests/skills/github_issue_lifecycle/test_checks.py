@@ -54,6 +54,14 @@ class TestPrBodyCheck:
         r = self.check(tmp_path, body)
         assert r.returncode == 1
         assert "Spec check:" in r.stdout
+        assert "## Review" in r.stdout
+
+    def test_the_unfilled_template_spec_check_line_fails(self, tmp_path):
+        body = self.GOOD.replace(
+            "every item built, nothing outside the spec",
+            "<every spec item built; nothing outside the spec or under its Non-Goals>",
+        )
+        assert self.check(tmp_path, body).returncode == 1
 
     def test_an_empty_spec_check_line_fails(self, tmp_path):
         body = self.GOOD.replace("every item built, nothing outside the spec", "")
