@@ -128,6 +128,8 @@ def test_switching_host_removes_what_the_new_host_lacks(home, tmp_path, monkeypa
     assert not (home / "hooks" / "auto_sync.py").exists()
     settings = json.loads((home / "settings.json").read_text())
     assert "auto_sync.py" not in json.dumps(settings)
+    commands = [h["command"] for g in settings["hooks"]["SessionStart"] for h in g["hooks"]]
+    assert commands == [f"python3 -I {home}/hooks/host_default.py"]
 
 
 def test_deploy_removes_a_hook_the_profile_no_longer_lists(home, tmp_path, monkeypatch):
@@ -152,6 +154,7 @@ def test_deploy_removes_a_hook_the_profile_no_longer_lists(home, tmp_path, monke
     assert not (home / "hooks" / "bash_guard.py").exists()
     settings = json.loads((home / "settings.json").read_text())
     assert "bash_guard.py" not in json.dumps(settings)
+    assert "PreToolUse" not in settings["hooks"]
     commands = [h["command"] for groups in settings["hooks"].values() for g in groups for h in g["hooks"]]
     assert sorted(c.split("/")[-1] for c in commands) == ["auto_sync.py", "host_default.py", "host_default.py"]
 

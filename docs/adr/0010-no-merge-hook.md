@@ -21,4 +21,5 @@ The owner asked: "remove all guards. they interfere with some of OMC's workflows
 ## Consequences
 
 - No hook asks before a merge. "Merge only when the user says so" and "never squash" are text only: the guardrails block and step 8 of each lifecycle skill. Branch protection on the remote remains the control that holds.
-- The lifecycle skills still say "the merge-confirm hook asks again" (Prompts, step 8). That line is now stale; the skills were out of scope for #57.
+- Rows in ADR-0006's tables that named `merge_confirm.py` keep step 8 of the lifecycle skills as their stater, so the block needs no new line.
+- The lifecycle skills still describe the hook, and that text is now stale; the skills were out of scope for #57. The lines: the Prompts "Merge" line and step 8 of `github-issue-lifecycle` and `jira-ticket-lifecycle`, and the intro and step 8 of `gitea-issue-lifecycle`.
