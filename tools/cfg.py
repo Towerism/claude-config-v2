@@ -123,7 +123,7 @@ def gate_config(target: str | None) -> Path:
     """OMC's user config, which holds the quality gates. A --target deploy keeps it under the
     target, so a trial deploy never writes the real one."""
     if target:
-        return Path(target) / ".config" / "claude-omc" / "config.jsonc"
+        return Path(target).resolve() / ".config" / "claude-omc" / "config.jsonc"
     xdg = os.environ.get("XDG_CONFIG_HOME")
     base = Path(xdg) if xdg and os.path.isabs(xdg) else Path.home() / ".config"
     return base / "claude-omc" / "config.jsonc"
@@ -427,7 +427,7 @@ def rollback_gates(state: dict) -> list[str]:
     try:
         live = read_gate_config(path)
     except CfgError:
-        live = None
+        return [f"{path}: not plain JSON: left as it is"]
     if live is None or live.get("qualityGates") != record.get("deployed"):
         return [f"{path}: qualityGates changed after the deploy: left as it is"]
     if record.get("hadKey"):
@@ -536,16 +536,22 @@ def status(home: Path, gates: Path) -> list[str]:
         elif sha(live.read_bytes()) != digest:
             out.append(f"  modified  {rel}")
     found = recorded_gates(state)
+    unreadable = False
     if found:
         path, record = found
-        live = read_gate_config(path)
-        if live is None:
-            out.append(f"  missing   {path}")
-        elif live.get("qualityGates") != record.get("deployed"):
-            out.append(f"  modified  {path}")
-    host = load_host(state.get("host", ""))
-    pending = Plan(home, host, gates)
-    out += [f"  pending   {line.strip()}" for line in pending.lines()[1:] if "nothing to change" not in line]
+        try:
+            live = read_gate_config(path)
+        except CfgError:
+            unreadable = True
+            out.append(f"  unreadable {path}")
+        else:
+            if live is None:
+                out.append(f"  missing   {path}")
+            elif live.get("qualityGates") != record.get("deployed"):
+                out.append(f"  modified  {path}")
+    if not unreadable:  # a deploy stops on an unreadable gate config, so there is no plan to show
+        pending = Plan(home, load_host(state.get("host", "")), gates)
+        out += [f"  pending   {line.strip()}" for line in pending.lines()[1:] if "nothing to change" not in line]
     if len(out) == 1:
         out.append("  in sync")
     log = home / "claude-config" / "sync.log"

@@ -696,3 +696,24 @@ def test_without_a_target_the_gate_config_follows_xdg_config_home(tmp_path, monk
     path = tmp_path / "xdg" / "claude-omc" / "config.jsonc"
     assert json.loads(path.read_text()) == {"qualityGates": GATES}
     assert not (fresh_home / ".config" / "claude-omc").exists()
+
+
+def test_a_relative_target_deploy_can_be_checked_and_rolled_back(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    assert cfg.main(["deploy", "--host", "personal", "--target", "rel", "--yes"]) == 0
+    assert cfg.main(["status", "--target", "rel"]) == 0
+    assert "in sync" in capsys.readouterr().out
+    assert cfg.main(["rollback", "--target", "rel"]) == 0
+    assert json.loads((tmp_path / "rel" / ".config" / "claude-omc" / "config.jsonc").read_text()) == {}
+
+
+def test_status_and_rollback_name_a_gate_config_that_is_not_plain_json(home, capsys):
+    run(home, "deploy", "--host", "personal", "--yes")
+    text = '// mine\n{"qualityGates": {}}\n'
+    gate_config(home).write_text(text)
+    capsys.readouterr()
+    assert run(home, "status") == 0
+    assert f"unreadable {gate_config(home)}" in capsys.readouterr().out
+    assert run(home, "rollback") == 0
+    assert f"{gate_config(home)}: not plain JSON: left as it is" in capsys.readouterr().out
+    assert gate_config(home).read_text() == text
