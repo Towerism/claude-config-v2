@@ -299,7 +299,7 @@ def check_pr_body(body, key, site):
 
 SEAM_START = r"(?:(?:[-*+]|\d+\.) +)?seam:"
 SEAM_RE = re.compile(SEAM_START + r"(.*?)catches:(.*?)misses:(.*)")
-SKIP_RE = re.compile(r"test plan: skipped:(.*)")
+SKIP_RE = re.compile(r"(?:(?:[-*+]|\d+\.) +)?test plan: skipped:(.*)")
 
 
 def _filled(text):
@@ -313,7 +313,7 @@ def _good_seam(line):
 
 
 def _good_skip(line):
-    match = SKIP_RE.search(line)
+    match = SKIP_RE.match(line.strip())  # a line of its own, not one quoted in prose
     return bool(match) and _filled(match.group(1).strip())
 
 

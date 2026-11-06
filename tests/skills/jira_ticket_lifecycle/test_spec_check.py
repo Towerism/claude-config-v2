@@ -106,3 +106,8 @@ def test_spec_needs_no_jira_settings(env):
     (env.config / "claude-config" / "local.json").unlink()
     r = check(env, "--spec", env.file("spec.md", spec(SEAM)))
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_a_skip_line_quoted_in_prose_does_not_count(env):
+    working_copy(env, spec("The rule says `test plan: skipped: <reason>` is required.", heading="## Notes"))
+    assert check(env).returncode == 1

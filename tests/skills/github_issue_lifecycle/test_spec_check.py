@@ -107,3 +107,8 @@ def test_a_seam_line_may_start_with_a_list_marker(tmp_path, marker):
 def test_an_incomplete_marked_seam_line_still_decides(tmp_path, marker):
     plan = (marker + "seam: the export CLI | catches: a wrong exit code", "test plan: skipped: none")
     assert check(tmp_path, spec(*plan)).returncode == 1
+
+
+def test_a_skip_line_quoted_in_prose_does_not_count(tmp_path):
+    text = spec("The rule says `test plan: skipped: <reason>` is required.", heading="## Notes")
+    assert check(tmp_path, text).returncode == 1

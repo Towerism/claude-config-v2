@@ -450,7 +450,7 @@ def rollback_gates(state: dict) -> list[str]:
     try:
         live = read_gate_config(path)
     except CfgError:
-        return [f"{path}: not plain JSON: left as it is"]
+        return [f"{path}: not valid JSON: left as it is"]
     if live is None or live.get("qualityGates") != record.get("deployed"):
         return [f"{path}: qualityGates changed after the deploy: left as it is"]
     if record.get("hadKey"):
@@ -575,8 +575,12 @@ def status(home: Path, gates: Path) -> list[str]:
             elif live.get("qualityGates") != record.get("deployed"):
                 out.append(f"  modified  {path}")
     if not unreadable:  # a deploy stops on an unreadable gate config, so there is no plan to show
-        pending = Plan(home, load_host(state.get("host", "")), gates)
-        out += [f"  pending   {line.strip()}" for line in pending.lines()[1:] if "nothing to change" not in line]
+        try:
+            pending = Plan(home, load_host(state.get("host", "")), gates)
+        except CfgError:  # a state from before the gates records no gate path, so the plan reads it first
+            out.append(f"  unreadable {gates}")
+        else:
+            out += [f"  pending   {line.strip()}" for line in pending.lines()[1:] if "nothing to change" not in line]
     if len(out) == 1:
         out.append("  in sync")
     log = home / "claude-config" / "sync.log"

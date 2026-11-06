@@ -707,7 +707,7 @@ def test_a_relative_target_deploy_can_be_checked_and_rolled_back(tmp_path, monke
     assert json.loads((tmp_path / "rel" / ".config" / "claude-omc" / "config.jsonc").read_text()) == {}
 
 
-def test_status_and_rollback_name_a_gate_config_that_is_not_plain_json(home, capsys):
+def test_status_and_rollback_name_a_gate_config_that_is_not_valid_json(home, capsys):
     run(home, "deploy", "--host", "personal", "--yes")
     text = '{"qualityGates": \n'
     gate_config(home).write_text(text)
@@ -715,7 +715,7 @@ def test_status_and_rollback_name_a_gate_config_that_is_not_plain_json(home, cap
     assert run(home, "status") == 0
     assert f"unreadable {gate_config(home)}" in capsys.readouterr().out
     assert run(home, "rollback") == 0
-    assert f"{gate_config(home)}: not plain JSON: left as it is" in capsys.readouterr().out
+    assert f"{gate_config(home)}: not valid JSON: left as it is" in capsys.readouterr().out
     assert gate_config(home).read_text() == text
 
 
@@ -773,3 +773,15 @@ def test_rollback_leaves_an_unchanged_gate_config_byte_for_byte(home):
     before = gate_config(home).read_text()
     run(home, "rollback")
     assert gate_config(home).read_text() == before
+
+
+def test_status_names_an_unreadable_gate_config_on_a_state_from_before_the_gates(home, capsys):
+    run(home, "deploy", "--host", "personal", "--yes")
+    state_file = home / "claude-config" / "state.json"
+    state = json.loads(state_file.read_text())
+    del state["omcGates"]
+    state_file.write_text(json.dumps(state))
+    gate_config(home).write_text("{bad")
+    capsys.readouterr()
+    assert run(home, "status") == 0
+    assert f"unreadable {gate_config(home)}" in capsys.readouterr().out
