@@ -1,18 +1,14 @@
-"""The hooks: merge_confirm asks before a PR merge; host_default states the tracker for the repo.
+"""The hooks: host_default states the tracker for the repo.
 
 auto_sync's behaviour is in test_auto_sync.py; here it shares the wiring and input checks."""
 
 import ast
-import io
 import json
 import os
 import pathlib
-import signal
 import stat
 import subprocess
 import sys
-import time
-import types
 
 import pytest
 
@@ -31,117 +27,6 @@ def run(name, payload, env=None):
     )
     assert done.returncode == 0 and done.stderr == b""
     return done.stdout.decode()
-
-
-def bash(command):
-    return {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": command}}
-
-
-@pytest.mark.parametrize("command", [
-    "gh pr merge 42 --merge",
-    "gh -R o/r pr merge 42",
-    "cd x && gh pr merge --rebase",
-    "gh api repos/o/r/pulls/3/merge -X PUT",
-    "gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {}) { clientMutationId } }'",
-    "tea api --login x -X POST repos/o/r/pulls/3/merge -d @m.json",
-    "gh api graphql -f query='mutation { mergePullRequest(input: {}) { clientMutationId } }'",
-    "gh pr merge 5",
-    "gh api -X PUT repos/o/r/pulls/3/merge",
-    "gh api --paginate -XPUT -H 'Accept: x' repos/o/r/pulls/3/merge -f body=/x",
-    "tea api repos/o/r/pulls/3/merge",
-    "gh api graphql <<'EOF'\nmutation { mergePullRequest(input: {}) { clientMutationId } }\nEOF",
-    'bash -c "gh pr merge 5"',
-    'eval "gh pr merge"',
-    "echo 5 | xargs gh pr merge",
-    "echo $(gh pr merge 5)",
-])
-def test_merges_ask(command):
-    out = json.loads(run("merge_confirm.py", bash(command)))
-    assert out["hookSpecificOutput"]["permissionDecision"] == "ask"
-
-
-@pytest.mark.parametrize("command", [
-    'echo "run gh pr merge 5 when ready"',
-    'grep -n "gh pr merge" docs/notes.md',
-    'git commit -m "docs: say when gh pr merge is allowed (#7)"',
-    "cat > note.md <<'EOF'\nrun gh pr merge --merge\nEOF",
-    "python3 -c \"print('gh api /merge')\"",
-])
-def test_merge_confirm_ignores_commands_that_only_mention_a_merge(command):
-    assert run("merge_confirm.py", bash(command)) == ""
-
-
-@pytest.mark.parametrize("command", [
-    "gh pr view 42", "git merge main", "gh pr create --title merge", "ls",
-    # Only the endpoint operand of gh api or tea api counts as a /merge path, not a flag value.
-    'gh api repos/o/r/issues/5/comments -f body="see /merge docs"',
-    "gh api repos/o/r/issues/5/comments -F 'body=/merge'", "gh api repos/o/r/issues/5/comments --raw-field=body=/merge",
-    "gh api repos/o/r/issues -H 'X-Note: /merge' --input ./merge/body.json",
-    "tea api repos/o/r/issues/5/comments -d 'see /merge'",
-])
-def test_other_commands_pass_silently(command):
-    assert run("merge_confirm.py", bash(command)) == ""
-
-
-@pytest.mark.parametrize("payload", [b"", b"not json", b"[]", b'{"tool_input": {"command": 7}}'])
-def test_merge_confirm_never_fails(payload):
-    assert run("merge_confirm.py", payload) == ""
-
-
-def test_merge_confirm_is_linear_on_dash_heavy_commands():
-    run("merge_confirm.py", bash("gh pr " + "-a " * 20000))
-
-
-@pytest.mark.parametrize("command", [
-    "sudo gh pr merge 5", "sudo -u root -E -n gh pr merge 5", "doas gh pr merge 5", "nohup gh pr merge 5",
-    "exec gh pr merge 5", "time -p gh pr merge 5", "timeout 5 gh pr merge 5", "nice -n 5 gh pr merge 5",
-    "stdbuf -oL gh pr merge 5", "/usr/bin/gh pr merge 5", "GIT_DIR=x gh pr merge 5", "env -C x gh pr merge 5",
-    "env -S 'gh pr merge 5'", "bash -lc 'gh pr merge 5'", "sh -ec 'gh pr merge 5'", "/bin/bash -c 'gh pr merge 5'",
-    "zsh -c 'gh pr merge 5'", "bash -c 'bash -c \"gh pr merge 5\"'", "echo 'gh pr merge 5' | bash",
-    "bash -s <<'EOF'\ngh pr merge 5\nEOF", "sudo bash -c 'gh pr merge 5'", "`gh pr merge 5`",
-    "echo 5 | xargs -n 1 gh pr merge", "eval eval 'gh pr merge 5'",
-    "gh api graphql -f query=\"$(cat <<'EOF'\nmutation { mergePullRequest(input: {}) { clientMutationId } }\nEOF\n)\"",
-    "cat <<E | bash\ngh pr merge 5\nE",
-    "watch -n 5 gh pr merge 5", "coproc gh pr merge 5", "builtin eval 'gh pr merge 5'", "dash -c 'gh pr merge 5'",
-    "ksh -c 'gh pr merge 5'", 'printf "gh pr merge\\n" | sh', "printf '\\tgh pr merge 5' | sh",
-    "echo gh pr merge 5; bash",  # accepted false ask: the parser records no separator, so `;` acts like `|`
-])
-def test_merges_behind_prefixes_and_shell_runners_ask(command):
-    out = json.loads(run("merge_confirm.py", bash(command)))
-    assert out["hookSpecificOutput"]["permissionDecision"] == "ask"
-
-
-@pytest.mark.parametrize("command", [
-    "bash -c 'echo \"gh pr merge 5\"'", "sh -c 'grep \"gh pr merge\" notes.md'", "bash merge.sh gh pr merge 5",
-    "printf 'gh pr merge 5'", "xargs echo gh pr merge 5", "cat <<E\ngh pr merge\nE", "sudo echo gh pr merge 5", "command -v gh pr merge",
-    'bash -c "$CMD"',
-    "tea pulls merge 5",  # known gap: `tea pulls merge` does not ask; a rule for it is out of scope
-    "cat <<EOF\n$(gh pr merge 5)\nEOF",  # accepted miss: bash expands $(...) in an unquoted heredoc, the parser reads the body as data
-    "echo " + "$(" * 40 + "gh pr merge 5" + ")" * 40,  # nesting past MAX_DEPTH is unparsed and passes
-    "eval " * 40 + "gh pr merge 5",  # same for a chain of eval re-parses past MAX_DEPTH
-])
-def test_merge_confirm_ignores_text_no_shell_runs(command):
-    assert run("merge_confirm.py", bash(command)) == ""
-
-
-@pytest.mark.parametrize("command", [
-    'bash -c "gh pr merge 5 --squash"', "sudo gh pr merge 5 -s", "echo 'gh pr merge 5 -s' | sh",
-])
-def test_squash_through_prefixes_and_shell_runners_gets_the_squash_reason(command):
-    text = reason(command)
-    assert "squash" in text.lower() and text != PLAIN_REASON
-
-
-@pytest.mark.parametrize("command", [
-    "bash -c '" * 20000 + "gh pr merge 5",
-    "eval " * 20000 + "gh pr merge 5",
-    "$(" * 20000 + "gh pr merge 5",
-    "gh pr view 5;" * 100000,
-], ids=["bash-c-nesting", "eval-eval", "substitution-nesting", "long"])
-def test_merge_confirm_stays_linear_on_nested_and_long_commands(command):
-    start = time.monotonic()
-    run("merge_confirm.py", bash(command))
-    assert time.monotonic() - start < 5
 
 
 @pytest.fixture
@@ -426,59 +311,6 @@ def test_an_unchecked_host_or_key_is_never_printed(machine, repo, project):
     assert from_profile(text) and "LEAK" not in text
 
 
-# merge_confirm: the squash reason
-
-PLAIN_REASON = "Merging needs your confirmation (claude-config merge rule: merge only with your authorization)"
-
-
-def reason(command):
-    return json.loads(run("merge_confirm.py", bash(command)))["hookSpecificOutput"]["permissionDecisionReason"]
-
-
-@pytest.mark.parametrize("command", [
-    "gh pr merge 42 --squash",
-    "gh pr merge 42 -s",
-    "gh pr merge -s 42 --delete-branch",
-    "gh -R o/r pr merge 42 -ds",
-])
-def test_squash_merge_gets_the_squash_reason(command):
-    text = reason(command)
-    assert "squash" in text.lower() and "against" in text and text != PLAIN_REASON
-
-
-@pytest.mark.parametrize("command", [
-    "gh pr merge 42 --merge",
-    "gh pr merge 42 --rebase --delete-branch",
-    "gh pr merge 42 --subject sq",
-    "git merge --squash x && gh pr merge 42",
-    "gh api repos/o/r/pulls/3/merge -X PUT -f merge_method=merge",
-])
-def test_plain_merge_keeps_the_usual_reason(command):
-    assert reason(command) == PLAIN_REASON
-
-
-@pytest.mark.parametrize("command", [
-    "gh pr merge 5 --merge && ls -sh",
-    "gh pr merge 5 --merge; ls -s",
-    "gh pr merge 5 --merge || ls -s",
-    "gh pr merge 5 --merge | tee -s",
-    "gh pr merge 5 --merge\nls -s",
-])
-def test_squash_flags_of_later_commands_do_not_count(command):
-    assert reason(command) == PLAIN_REASON
-
-
-@pytest.mark.parametrize("command", [
-    "gh api repos/o/r/pulls/3/merge -X PUT -f merge_method=squash",
-    "gh api -X PUT repos/o/r/pulls/3/merge --field merge_method=squash",
-    "gh api repos/o/r/pulls/3/merge -X PUT --raw-field=merge_method=squash",
-    "gh api repos/o/r/pulls/3/merge -X PUT -F 'merge_method=squash'",
-])
-def test_an_api_squash_merge_gets_the_squash_reason(command):
-    text = reason(command)
-    assert "squash" in text.lower() and "against" in text and text != PLAIN_REASON
-
-
 # git repos for the host_default tests
 
 GIT_ENV = {
@@ -543,9 +375,6 @@ def host_default_scans(repo, project="PAY"):
 
 def test_hooks_print_only_checked_values(repo, machine):
     word = "LEAKCANARY"
-    for command in (f"gh pr merge 1 --squash --body {word}", f"gh pr merge {word} -s", f"gh pr merge {word}"):
-        out = run("merge_confirm.py", bash(command))
-        assert out and word not in out
     home, env, tmp = machine
     (tmp / "xdg" / "claude-config").mkdir(parents=True)
     (tmp / "xdg" / "claude-config" / "local.json").write_text(json.dumps({"jira": {"project": "PAY"}, "note": word}))
@@ -558,7 +387,7 @@ def test_hooks_print_only_checked_values(repo, machine):
 # wiring
 
 FRAGMENT = json.loads((ROOT / "config" / "settings.fragment.json").read_text())
-HOOK_NAMES = ["merge_confirm.py", "host_default.py", "auto_sync.py"]
+HOOK_NAMES = ["host_default.py", "auto_sync.py"]
 
 
 def entries(event, name):
@@ -574,15 +403,14 @@ def test_the_hooks_are_registered_and_listed():
     def hook(name, timeout=10, **extra):
         return {"type": "command", "command": f"python3 -I {{claude_home}}/hooks/{name}", "timeout": timeout, **extra}
 
-    assert entries("PreToolUse", "merge_confirm.py") == [("Bash", hook("merge_confirm.py"))]
     assert entries("SessionStart", "host_default.py") == [(None, hook("host_default.py"))]
     assert entries("SubagentStart", "host_default.py") == [(None, hook("host_default.py"))]
     # A new session only, with a spinner, blocking until the sync is done.
     assert entries("SessionStart", "auto_sync.py") == [
         ("startup", hook("auto_sync.py", 120, statusMessage="Syncing claude-config…"))
     ]
-    assert sorted(FRAGMENT["hooks"]) == ["PreToolUse", "SessionStart", "SubagentStart"]
-    assert sum(len(groups) for groups in FRAGMENT["hooks"].values()) == 4
+    assert sorted(FRAGMENT["hooks"]) == ["SessionStart", "SubagentStart"]
+    assert sum(len(groups) for groups in FRAGMENT["hooks"].values()) == 3
     for host in ("personal", "work"):
         assert json.loads((ROOT / "hosts" / f"{host}.json").read_text())["hooks"] == HOOK_NAMES
 
@@ -598,8 +426,7 @@ def test_every_hook_entry_outlasts_the_hooks_own_deadline():
                     assert hook["timeout"] >= sync.FETCH_SECONDS + 3 * sync.LOCAL_SECONDS + 60
                 else:
                     assert hook["timeout"] == 10, hook["command"]
-    for name in ("merge_confirm.py", "host_default.py"):
-        assert hook_module(name).DEADLINE_SECONDS == 5, name
+    assert hook_module("host_default.py").DEADLINE_SECONDS == 5
 
 
 # repo config that runs programs
@@ -685,8 +512,6 @@ def test_a_keyword_first_prompt_does_not_silence_it(machine, tmp_path):
     payload = {"hook_event_name": "SessionStart", "transcript_path": str(transcript)}
     out = json.loads(run_installed(home, payload, env))["hookSpecificOutput"]
     assert out["additionalContext"].startswith("Host profile: work. Default issue tracker: jira.")
-    merge = json.loads(run("merge_confirm.py", bash("gh pr merge 42") | {"transcript_path": str(transcript)}))
-    assert merge["hookSpecificOutput"]["permissionDecision"] == "ask"
 
 
 def module(path, name):
@@ -706,7 +531,6 @@ def hook_module(name):
 # Exact output on malformed input, on an error and past the deadline (#3)
 
 EVENT_ONLY = {
-    "merge_confirm.py": {"hook_event_name": "PreToolUse", "tool_name": "Bash"},
     "host_default.py": {"hook_event_name": "SessionStart"},
     "auto_sync.py": {"hook_event_name": "SessionStart", "source": "startup"},
 }
@@ -772,30 +596,9 @@ def driven(name, patch, payload):
 
 @pytest.mark.parametrize("name,patch,payload", [
     ("host_default.py", RAISE + "hook.message = boom", {"hook_event_name": "SessionStart"}),
-    ("merge_confirm.py", RAISE + "hook.merging_commands = boom", bash("gh pr merge 5")),
 ])
 def test_an_error_in_the_last_step_writes_nothing(name, patch, payload):
     assert driven(name, patch, payload) == (0, b"", b"")
-
-
-def test_merge_confirm_parses_the_command_once_for_both_checks(monkeypatch, capsys):
-    hook = hook_module("merge_confirm.py")
-    walk, parses = hook.walk, []
-
-    def counted(text, depth, visit):
-        parses.append(depth)
-        return walk(text, depth, visit)
-
-    monkeypatch.setattr(hook, "walk", counted)
-    monkeypatch.setattr(hook.sys, "stdin", types.SimpleNamespace(buffer=io.BytesIO(json.dumps(bash("gh pr merge 5 -s")).encode())))
-    handler = signal.getsignal(signal.SIGALRM)
-    try:
-        hook.main()
-    finally:
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, handler)
-    assert parses == [0]
-    assert json.loads(capsys.readouterr().out)["hookSpecificOutput"]["permissionDecisionReason"] == hook.SQUASH_REASON
 
 
 def test_a_slow_repo_scan_still_prints_the_host_profile_line(machine, repo):
@@ -815,8 +618,3 @@ def test_a_slow_repo_scan_still_prints_the_host_profile_line(machine, repo):
     )
     assert (done.returncode, done.stderr) == (0, b"")
     assert from_profile(json.loads(done.stdout)["hookSpecificOutput"]["additionalContext"])
-
-
-def test_merge_confirm_past_its_deadline_writes_nothing():
-    patch = "import time\nhook.DEADLINE_SECONDS = 1\nhook.merges_a_pr = lambda command: time.sleep(5)\n"
-    assert driven("merge_confirm.py", patch, bash("gh pr merge 5")) == (0, b"", b"")

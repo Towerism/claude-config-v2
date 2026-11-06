@@ -1,6 +1,6 @@
 # ADR-0006: OMC leads the pipeline; the user approves and merges
 
-**Status:** Accepted by the owner on 2026-10-29, issue #42. Decision 2 amended by ADR-0008 (the feature-branch push grant) and ADR-0009 (the block's shape).
+**Status:** Accepted by the owner on 2026-10-29, issue #42. Decision 2 amended by ADR-0008 (the feature-branch push grant) and ADR-0009 (the block's shape). Decision 6 amended by ADR-0010 (`merge_confirm.py` removed).
 
 ## Context
 

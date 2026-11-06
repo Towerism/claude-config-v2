@@ -12,13 +12,13 @@ Compared on 2026-10-24 against V1 (`claude-config`, 24 skills, 9 overlays, 3 hoo
 | Test plan | `senior-qa`, `api-test-suite-builder`, `ci-cd-pipeline-builder` | `/tdd`, test-engineer agent | Covered |
 | Implement | `tdd-guide` | `/tdd`, `/execute` | Covered |
 | Review | `adversarial-reviewer` | `/review`, critic and code-reviewer agents | Covered; OMC chooses the review depth (ADR-0006) |
-| Merge | `ship-gate` | `/verify`, `/pr` | Covered; the merge hook kept |
+| Merge | `ship-gate` | `/verify`, `/pr` | Covered; the merge hook removed ([ADR-0010](adr/0010-no-merge-hook.md)) |
 
 ## Everything else
 
 | V1 piece | Decision | Why |
 |---|---|---|
-| `merge_confirm.py` hook | Kept unchanged | A merge once happened without the owner's click; OMC has no equivalent |
+| `merge_confirm.py` hook | Kept, then removed ([ADR-0010](adr/0010-no-merge-hook.md)) | Kept because a merge once happened without the owner's click; removed because it got in the way of OMC's workflows. The merge rule is text only |
 | `lifecycle_default.py` hook | Replaced by `host_default.py` | Same job (state the machine's default tracker), simpler state, renamed for trackers (rewritten in ADR-0006: repo signals first) |
 | `skill_overlay.py` hook, 9 overlays | Dropped | Overlays existed to bend vendored skills; V2 has none. Guardrails live in `CLAUDE.global.md` |
 | Approval modes, git conventions, split rules | Retired or dropped (ADR-0006) | Approval and merge on the user's word are fixed rules; the approved label, default-branch, secret and naming rules are text-only or unenforced |
@@ -41,6 +41,6 @@ These guesses stand in for answers nobody was available to give. Veto any of the
 2. **Git hooks not ported.** V1's commit and push checks (private-word list, secrets, noreply identity) aren't in V2. If you want them, they belong in `tools/` with `gitleaks` as the dependency.
 3. **Jira unverified live.** As in V1, `jira-ticket-lifecycle` drives Jira through its script; the tests run it against a fake `jira` CLI and a local REST server. V2 has not run it against a live Jira.
 4. **Copy, not symlink.** V1 recorded evidence on symlinked deploys; V2 copies files, which costs a re-deploy after each edit but avoids that question.
-5. **Merge guard is best-effort.** `merge_confirm.py` catches `gh pr merge`, `gh api` and `tea api` merges; aliases, quoting tricks and `curl` get past it. Use branch protection for a hard stop.
+5. **No merge guard.** The merge hook is gone ([ADR-0010](adr/0010-no-merge-hook.md)); "merge only when the user says so" is text only. Use branch protection for a hard stop.
 6. **Plugins are only added.** A deploy enables a host's plugins; it never disables one removed from a profile.
 7. **OMC is not version-pinned.** Both machines track the marketplace's default branch; V1's `plugins.lock.json` is dropped. Add a git `ref` to the marketplace source in the host profiles to pin.
