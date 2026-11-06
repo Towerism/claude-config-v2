@@ -78,11 +78,12 @@ The spec is the deep-interview spec or the ralplan plan. It lives in the issue b
 ...spec...
 <!-- spec:end -->
 ```
-No spec file goes in the repo, unless the repo's CLAUDE.md says its specs live there. Always re-pull the body right before replacing, since people edit issues:
+No spec file goes in the repo, unless the repo's CLAUDE.md says its specs live there. If the spec changes code and has no seam list, have `oh-my-claudecode:test-engineer` write one (plan only, no files): a `## Test plan` section with one `seam: … | catches: … | misses: …` line per seam. Always re-pull the body right before replacing, since people edit issues:
 ```bash
 gh issue view 42 --json body > "$tmp/issue.json"
 python3 -I -c 'import json,sys; sys.stdout.write(json.load(open(sys.argv[1]))["body"])' "$tmp/issue.json" > "$tmp/body.md"
 python3 -I <skill-dir>/scripts/issue_lifecycle.py extract --body "$tmp/body.md" > "$tmp/spec.md"      # exit 3: no spec yet
+python3 -I <skill-dir>/scripts/issue_lifecycle.py spec-check --spec "$tmp/new-spec.md"   # exit 1: fix the Test plan, store nothing
 python3 -I <skill-dir>/scripts/issue_lifecycle.py replace --body "$tmp/body.md" --spec "$tmp/new-spec.md" --out "$tmp/new-body.md"
 gh issue edit 42 --body-file "$tmp/new-body.md"
 gh issue edit 42 --add-label draft --remove-label approved
@@ -130,7 +131,7 @@ python3 -I <skill-dir>/scripts/issue_lifecycle.py diff-check --base origin/<defa
 
 ### 7. Open the PR
 
-Draft the body with `/oh-my-claudecode:pr`, shaped by [assets/pr-body-template.md](assets/pr-body-template.md). Write it to a file with: `Closes #42` alone on its line (`Closes owner/repo#42` across repos, one keyword per issue), `Spec: #42`, a map from each acceptance criterion to the test that covers it, and a `## Review` section with the PR-diff review note, if a review ran. Then:
+Draft the body with `/oh-my-claudecode:pr`, shaped by [assets/pr-body-template.md](assets/pr-body-template.md). Write it to a file with: `Closes #42` alone on its line (`Closes owner/repo#42` across repos, one keyword per issue), `Spec: #42`, a map from each acceptance criterion to the test that covers it, and a `## Review` section with the PR-diff review note, if a review ran, and a `Spec check:` line under `## Review` (every spec item built; nothing outside the spec or under its Non-Goals), even when no review ran. Then:
 ```bash
 python3 -I <skill-dir>/scripts/issue_lifecycle.py pr-body-check --body "$tmp/pr.md" --issue 42
 gh pr create --base <default> --title "feat(roster): add CSV export (#42)" --body-file "$tmp/pr.md"   # add --label hotfix for hotfixes

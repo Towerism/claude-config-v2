@@ -62,7 +62,7 @@ def test_subcommands_are_fast_on_a_64kb_body(tmp_path):
 def test_help_lists_every_subcommand_with_an_example():
     r = run("--help")
     assert r.returncode == 0
-    subs = ("extract", "replace", "pr-body-check", "diff-check")
+    subs = ("extract", "replace", "spec-check", "pr-body-check", "diff-check")
     for sub in subs:
         assert sub in r.stdout
     assert "spec-status" not in r.stdout

@@ -2,7 +2,8 @@
 
 Text checks, which never touch Jira:
   settings       validate the `jira` settings in local.json and print them resolved
-  pr-body-check  validate a PR body (Ticket line, Spec line, Review section)
+  pr-body-check  validate a PR body (Ticket line, Spec line, Review section, Spec check line)
+  spec-check     check the working copy's Test plan holds a seam list or a reasoned skip
   diff-check     scan `git diff <base>...HEAD` for requirement IDs in code and stray spec files
 
 Jira and GitHub steps, through the `jira` and `gh` CLIs and four Jira REST calls:
@@ -275,6 +276,15 @@ def check_pr_body(body, key, site):
         problems.append(("missing-spec-line", f"needs a 'Spec: {key}' line"))
     if not any(line.startswith("#") and "review" in line.lower() for line in lines):
         problems.append(("missing-review", "needs a Review section with the PR-diff review note"))
+    in_review = spec_check = False
+    for line in text.split("\n"):
+        line = line.rstrip()
+        if line.startswith("## "):
+            in_review = line == "## Review"
+        elif in_review and (match := re.match(r"Spec check:(.*)", line.strip())):
+            spec_check = spec_check or _filled(match.group(1).strip())
+    if not spec_check:
+        problems.append(("missing-spec-check", "needs a 'Spec check:' line under the '## Review' heading"))
     if SPEC_TEXT_RE.search(text):
         problems.append(
             (
@@ -283,6 +293,54 @@ def check_pr_body(body, key, site):
             )
         )
     return problems
+
+
+# ── spec check (the same rules as the GitHub lifecycle skill's script) ──────
+
+SEAM_START = r"(?:(?:[-*+]|\d+\.) +)?seam:"
+SEAM_RE = re.compile(SEAM_START + r"(.*?)catches:(.*?)misses:(.*)")
+SKIP_RE = re.compile(r"(?:(?:[-*+]|\d+\.) +)?test plan: skipped:(.*)")
+
+
+def _filled(text):
+    """Real text: not empty and not a template placeholder such as <reason>."""
+    return bool(text) and not re.fullmatch(r"<.*>", text)
+
+
+def _good_seam(line):
+    match = SEAM_RE.fullmatch(line.strip())
+    return bool(match) and all(_filled(part.strip().rstrip("|").strip()) for part in match.groups())
+
+
+def _good_skip(line):
+    match = SKIP_RE.match(line.strip())  # a line of its own, not one quoted in prose
+    return bool(match) and _filled(match.group(1).strip())
+
+
+def check_spec(spec):
+    lines = spec.replace("\r\n", "\n").split("\n")
+    if "## Test plan" not in lines:
+        if any(_good_skip(line) for line in lines):
+            return []
+        return [("no-test-plan", "needs a '## Test plan' section")]
+    section = []
+    for line in lines[lines.index("## Test plan") + 1 :]:
+        if line.startswith("## "):
+            break
+        section.append(line)
+    seams = [line for line in section if re.match(SEAM_START, line.lstrip())]
+    if seams:
+        if all(_good_seam(line) for line in seams):
+            return []
+        return [
+            (
+                "bad-seam",
+                "every seam line needs 'seam:', 'catches:' and 'misses:', each followed by real text",
+            )
+        ]
+    if any(_good_skip(line) for line in section):
+        return []
+    return [("no-seams", "the Test plan needs a seam line or 'test plan: skipped: <a real reason>'")]
 
 
 # ── diff hygiene (the same rules as the GitHub lifecycle skill's script) ─────
@@ -1318,6 +1376,7 @@ EPILOG = """Examples (every free-text input is a file written with the Write too
   ticket_lifecycle.py view --key PAY-142
   ticket_lifecycle.py search --text-file words.txt
   ticket_lifecycle.py pr-body-check --body pr.md --key PAY-142
+  ticket_lifecycle.py spec-check --key PAY-142
   ticket_lifecycle.py diff-check --base origin/main
 
 Exit codes: 0 ok, 1 a check or step failed, 2 usage error, 3 no spec markers, 4 malformed
@@ -1347,6 +1406,10 @@ def build_parser():
     p = add("pr-body-check", "validate a PR body")
     p.add_argument("--body", required=True, help="PR body file")
     p.add_argument("--key", required=True, help="the ticket the PR is for")
+    p = add("spec-check", "check the spec's Test plan")
+    p.add_argument("--key", required=True, help="ticket key: PAY-142, a bare number, or a browse URL")
+    p.add_argument("--spec", help="spec file (default: the working copy)")
+    p.add_argument("--repo-dir", default=".", help="the repo the spec belongs to")
     p = add("diff-check", "scan the branch diff")
     p.add_argument("--base", required=True, help="base ref, such as origin/main")
     p.add_argument("--repo-dir", default=".", help="repository to scan")
@@ -1483,6 +1546,15 @@ def run(argv):
         raise UsageError("a subcommand is required")
     if args.cmd == "diff-check":
         return report(diff_check(args.base, args.repo_dir), args.json)
+    if args.cmd == "spec-check":
+        spec_path = args.spec
+        if not spec_path:  # only the default working copy needs the settings
+            cfg = load_settings()
+            key = normalize_key(args.key, cfg)
+            spec_path = os.path.join(spec_folder(cfg, args.repo_dir), f"{key}.md")
+        if not os.path.exists(spec_path):
+            raise UsageError(f"no spec at {spec_path}; write the working copy there, or run pull-spec")
+        return report(check_spec(read_text(spec_path)), args.json)
     cfg = load_settings()
     if args.cmd not in ("settings", "pr-body-check"):
         return run_step(args, cfg)

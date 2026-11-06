@@ -9,7 +9,7 @@ Compared on 2026-10-24 against V1 (`claude-config`, 24 skills, 9 overlays, 3 hoo
 | Design | `senior-architect` | `/drydock`, `/ralplan`, architect agent | Covered |
 | Start | `github-`, `gitea-`, `jira-…lifecycle` | Partial: `launch`, `harbor`, `drydock` (GitHub only), `project-session-manager` (worktrees for GitHub, Jira, Gitea issues), `ask-navigator`. None claims an issue, records the user's spec approval, stores the spec on the issue or merges and closes out | **Kept** as `github-issue-lifecycle`, `gitea-issue-lifecycle` and `jira-ticket-lifecycle`, with V1's stdlib scripts for the checks, spec-marker edits and Jira steps (ADR-0003, amended); the first guardrail line makes them the start of every code change ([ADR-0006](adr/0006-omc-leads-the-pipeline.md)) |
 | Spec | `spec-driven-workflow` | `/deep-interview`, `/ralplan` | Covered; the user's quoted approval kept as a guardrail |
-| Test plan | `senior-qa`, `api-test-suite-builder`, `ci-cd-pipeline-builder` | `/tdd`, test-engineer agent | Covered |
+| Test plan | `senior-qa`, `api-test-suite-builder`, `ci-cd-pipeline-builder` | `/tdd`, test-engineer agent; no planning skill calls it | A guardrail: `test-engineer` plans the seams before the spec is shown; the lifecycle `spec-check` and the `spec-test-plan` gate enforce it ([ADR-0011](adr/0011-scope-dependencies-and-spec-time-test-plans.md)) |
 | Implement | `tdd-guide` | `/tdd`, `/execute` | Covered |
 | Review | `adversarial-reviewer` | `/review`, critic and code-reviewer agents | Covered; OMC chooses the review depth (ADR-0006) |
 | Merge | `ship-gate` | `/verify`, `/pr` | Covered; the merge hook removed ([ADR-0010](adr/0010-no-merge-hook.md)) |

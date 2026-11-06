@@ -17,8 +17,8 @@ One entry per term: definition, boundaries, one resolved ambiguity. Write here t
 - Boundary: the repo's own CLAUDE.md overrides it; a top-level `defaultTracker` in `local.json` is ignored.
 
 ## Guardrails
-- Definition: the marked block in `config/CLAUDE.global.md`, shaped as ADR-0009 records; each rule states something no OMC text, lifecycle skill or hook already states (ADR-0006, ADR-0008, ADR-0009).
-- Boundary: a rule already stated by OMC, a skill or a hook is not repeated there; the guardrails never choose OMC's stages, agents or runner.
+- Definition: the marked block in `config/CLAUDE.global.md`, shaped as ADR-0009 records; each rule states something no OMC text, lifecycle skill or hook already states (ADR-0006, ADR-0008, ADR-0009, ADR-0011).
+- Boundary: a rule already stated by OMC, a skill or a hook is not repeated there; the guardrails never choose OMC's stages, agents or runner. OMC text counts as coverage only if the skill runs; otherwise the guardrails name when to load it (ADR-0011).
 - Resolved ambiguity: ADR-0006 amends ADR-0001's gap list; approving the spec, marking a PR ready and merging, each on the user's word, are the only fixed rules (ADR-0008).
 
 ## Host profile
@@ -30,3 +30,12 @@ One entry per term: definition, boundaries, one resolved ambiguity. Write here t
 ## Pipeline declaration
 - Definition: the list shown with a spec at approval of every OMC stage that could run for the change, each marked `will run` or `skipped: <reason>`; approving the spec acknowledges it (ADR-0006).
 - Boundary: an instruction only; nothing checks it, and it asks no separate question.
+
+## Scope finding
+- Definition: a review or verify finding, marked `scope:`, for work in the diff that is outside the approved spec or under its Non-Goals; the `spec-scope` diff gate reports them too (ADR-0011).
+- Boundary: not a defect. It asks to remove the work or move it to a follow-up issue, and never to grow the spec.
+
+## Seam list
+- Definition: the per-seam test plan `test-engineer` puts in a spec before it is shown, without writing any file; the lifecycle `spec-check` refuses a spec without one (ADR-0011).
+- Boundary: sized to the risk, not to a ratio. A spec that changes no code has none and marks the test plan `skipped:` in the pipeline list.
+- Resolved ambiguity: approving the spec approves its seams, which are the seams OMC's `tdd` agrees with the user before the first test.

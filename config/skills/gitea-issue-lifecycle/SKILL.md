@@ -71,18 +71,19 @@ Hand over to `/oh-my-claudecode:deep-interview` or `/oh-my-claudecode:ralplan`; 
 
 ### 4. Store the spec on the issue
 
-The spec is the deep-interview spec or the ralplan plan. No spec file goes in the repo, unless the repo's CLAUDE.md says its specs live there. It lives in the issue body, below the original description, between two whole-line markers, `<!-- spec:start -->` and `<!-- spec:end -->`. Always re-read the body right before replacing it:
+The spec is the deep-interview spec or the ralplan plan. No spec file goes in the repo, unless the repo's CLAUDE.md says its specs live there. It lives in the issue body, below the original description, between two whole-line markers, `<!-- spec:start -->` and `<!-- spec:end -->`. If the spec changes code and has no seam list, have `oh-my-claudecode:test-engineer` write one (plan only, no files): a `## Test plan` section with one `seam: … | catches: … | misses: …` line per seam. Always re-read the body right before replacing it:
 
 ```bash
 tea api --login <login> -X GET repos/<o>/<r>/issues/N > "$tmp/issue.json"
 python3 -I -c 'import json,sys; sys.stdout.write(json.load(open(sys.argv[1]))["body"])' "$tmp/issue.json" > "$tmp/body.md"
 python3 -I <skill-dir>/scripts/issue_lifecycle.py extract --body "$tmp/body.md" > "$tmp/spec.md"
+python3 -I <skill-dir>/scripts/issue_lifecycle.py spec-check --spec "$tmp/new-spec.md"
 python3 -I <skill-dir>/scripts/issue_lifecycle.py replace --body "$tmp/body.md" --spec "$tmp/new-spec.md" --out "$tmp/new-body.md"
 python3 -I -c 'import json,sys; json.dump({"body": open(sys.argv[1]).read()}, open(sys.argv[2], "w"))' "$tmp/new-body.md" "$tmp/patch.json"
 tea api --login <login> -X PATCH repos/<o>/<r>/issues/N -d @"$tmp/patch.json"
 ```
 
-`extract` exits 3 when there is no spec yet; `replace` then appends the block. Exit 4 means broken markers: show the user, don't guess. After posting, set `draft` and remove `approved`; the two are never on the issue together.
+`spec-check` exits 1 when the spec's `## Test plan` has no seam list or reasoned skip: fix it, and store nothing until it passes. `extract` exits 3 when there is no spec yet; `replace` then appends the block. Exit 4 means broken markers: show the user, don't guess. After posting, set `draft` and remove `approved`; the two are never on the issue together.
 
 ### 5. Approval and labels
 
@@ -96,7 +97,7 @@ Reuse an open branch or PR for the issue if one exists. Otherwise cut a branch f
 
 ### 7. Open the PR
 
-Draft the body with `/oh-my-claudecode:pr`, shaped by [assets/pr-body-template.md](assets/pr-body-template.md): `Closes #42` alone on its line, `Spec: #42`, a map from each acceptance criterion to its test, and a `## Review` section with the PR-diff review note, if a review ran. Check it with `pr-body-check --body "$tmp/pr.md" --issue 42` on the script. Read the default branch from `GET repos/<o>/<r>` (`default_branch`), then `POST repos/<o>/<r>/pulls` with `{"title": ..., "body": ..., "head": ..., "base": ...}` in a file. Give a hotfix PR the `hotfix` label.
+Draft the body with `/oh-my-claudecode:pr`, shaped by [assets/pr-body-template.md](assets/pr-body-template.md): `Closes #42` alone on its line, `Spec: #42`, a map from each acceptance criterion to its test, and a `## Review` section with the PR-diff review note, if a review ran, and a `Spec check:` line under `## Review` (every spec item built; nothing outside the spec or under its Non-Goals), even when no review ran. Check it with `pr-body-check --body "$tmp/pr.md" --issue 42` on the script. Read the default branch from `GET repos/<o>/<r>` (`default_branch`), then `POST repos/<o>/<r>/pulls` with `{"title": ..., "body": ..., "head": ..., "base": ...}` in a file. Give a hotfix PR the `hotfix` label.
 
 Gitea doesn't report which issues a PR will close, so don't claim a link you can't read. The body check plus step 8's close check stand in for it. If the PR can't target the default branch, warn that the issue won't close on merge.
 

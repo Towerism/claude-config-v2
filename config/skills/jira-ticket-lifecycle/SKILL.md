@@ -75,7 +75,7 @@ Hand over to `/oh-my-claudecode:deep-interview` or `/oh-my-claudecode:ralplan`; 
 
 ### 4. Publish the spec
 
-The spec is the deep-interview spec or the ralplan plan. No spec file goes in the repo, unless the repo's CLAUDE.md says its specs live there. Jira changes text on the way in and out, so the spec is edited in a local working copy and the ticket holds the published copy. Run `pull-spec --key <key>` first: its step detail is the working copy's path (`skipped` means it exists, `none` means there is no spec yet, `done` means it was rebuilt from the ticket; say that text rebuilt from Jira may differ in formatting). Write and edit the spec in that file, then run `sync-spec --key <key>`. It moves any original description to a comment, writes the spec between `spec:start` and `spec:end` paragraphs, attaches a spec too long for the description as `<KEY>-spec.md`, and sets the draft label.
+The spec is the deep-interview spec or the ralplan plan. No spec file goes in the repo, unless the repo's CLAUDE.md says its specs live there. Jira changes text on the way in and out, so the spec is edited in a local working copy and the ticket holds the published copy. Run `pull-spec --key <key>` first: its step detail is the working copy's path (`skipped` means it exists, `none` means there is no spec yet, `done` means it was rebuilt from the ticket; say that text rebuilt from Jira may differ in formatting). Write and edit the spec in that file. If the spec changes code and has no seam list, have `oh-my-claudecode:test-engineer` write one (plan only, no files): a `## Test plan` section with one `seam: … | catches: … | misses: …` line per seam. Run `spec-check --key <key>` (exit 1: fix the Test plan, publish nothing), then `sync-spec --key <key>`. It moves any original description to a comment, writes the spec between `spec:start` and `spec:end` paragraphs, attaches a spec too long for the description as `<KEY>-spec.md`, and sets the draft label.
 
 - `refused` on `check`: someone edited the description since the last sync, or this machine has no record of a spec that is there. Report it with the `current` text against yours and skip the sync; rerun with `--replace` only when the user says to.
 - Exit 4: the markers are broken. Show the user; don't guess.
@@ -107,7 +107,7 @@ Requirement IDs (FR-, AC-, EC-…) stay out of code, test names and comments unl
 
 ### 7. Open the PR
 
-Draft the body with `/oh-my-claudecode:pr`, shaped by [assets/pr-body-template.md](assets/pr-body-template.md): the first line `Ticket: <site>/browse/KEY-N`, a `Spec: KEY-N` line, a map from each acceptance criterion to the test or check that covers it (`not verified` with the reason, never a false pass), and a `## Review` section with the PR-diff review note, if a review ran. Then:
+Draft the body with `/oh-my-claudecode:pr`, shaped by [assets/pr-body-template.md](assets/pr-body-template.md): the first line `Ticket: <site>/browse/KEY-N`, a `Spec: KEY-N` line, a map from each acceptance criterion to the test or check that covers it (`not verified` with the reason, never a false pass), and a `## Review` section with the PR-diff review note, if a review ran, and a `Spec check:` line under `## Review` (every spec item built; nothing outside the spec or under its Non-Goals), even when no review ran. Then:
 ```bash
 python3 -I <skill-dir>/scripts/ticket_lifecycle.py pr-body-check --body "$tmp/pr.md" --key PAY-142
 gh pr create --draft --base <default> --title "feat(export): add CSV export (PAY-142)" --body-file "$tmp/pr.md"

@@ -1,10 +1,11 @@
 """The text subcommands: settings and pr-body-check. Neither touches Jira."""
 
 import json
+import re
 
 import pytest
 
-from tests.skills.jira_ticket_lifecycle.conftest import SETTINGS
+from tests.skills.jira_ticket_lifecycle.conftest import SETTINGS, SKILL_DIR
 
 # ── settings ─────────────────────────────────────────────────────────────────
 
@@ -109,13 +110,29 @@ def pr(env, body):
 def good_body(spec="Spec: PAY-142"):
     return (
         f"{TICKET_LINE}\n{spec}\n\n## Tests\n- export writes a header: "
-        f"test_export.py\n\n## Review\nClean.\n"
+        f"test_export.py\n\n## Review\nSpec check: every item built, nothing more.\nClean.\n"
     )
 
 
 def test_valid_bodies_pass(env):
     assert pr(env, good_body()).returncode == 0
     assert pr(env, good_body("spec: pay-142")).returncode == 0
+
+
+def test_the_missing_spec_check_message_names_the_review_heading(env):
+    r = pr(env, good_body().replace("Spec check: every item built, nothing more.\n", ""))
+    problems = json.loads(r.stdout)["problems"]
+    assert any("## Review" in p["detail"] for p in problems if p["code"] == "missing-spec-check")
+
+
+def test_a_subheading_inside_review_keeps_the_section_open(env):
+    assert pr(env, good_body().replace("## Review\n", "## Review\n### Notes\n")).returncode == 0
+
+
+def test_the_filled_in_template_passes(env):
+    text = (SKILL_DIR / "assets" / "pr-body-template.md").read_text()
+    r = pr(env, re.sub(r"<[^<>]*>", "filled in", text))
+    assert r.returncode == 0, r.stdout + r.stderr
 
 
 @pytest.mark.parametrize(
@@ -130,7 +147,23 @@ def test_valid_bodies_pass(env):
         (good_body("Spec: config/skills/foo/SPEC.md"), "missing-spec-line"),
         (good_body() + "\n### AC-1: export\n", "spec-copied"),
         (good_body() + "\nGiven a roster\nWhen exported\nThen a header\n", "spec-copied"),
-        (good_body().replace("## Review\nClean.\n", ""), "missing-review"),
+        (good_body().replace("## Review\n", ""), "missing-review"),
+        (good_body().replace("Spec check: every item built, nothing more.\n", ""), "missing-spec-check"),
+        (good_body().replace("every item built, nothing more.", ""), "missing-spec-check"),
+        (
+            good_body().replace("## Tests", "Spec check: all built.\n\n## Tests").replace(
+                "Spec check: every item built, nothing more.\n", ""
+            ),
+            "missing-spec-check",
+        ),
+        (good_body().replace("## Review\n", "## Notes\n### Pre-review notes\n"), "missing-spec-check"),
+        (
+            good_body().replace(
+                "every item built, nothing more.",
+                "<Every spec item built; nothing outside the spec or under its Non-Goals.>",
+            ),
+            "missing-spec-check",
+        ),
     ],
 )
 def test_bad_bodies_fail_with_a_code(env, body, code):

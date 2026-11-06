@@ -5,7 +5,8 @@ Each skill ships an identical copy, so neither depends on the other being deploy
 Subcommands:
   extract        print the spec block from an issue body file
   replace        write a new issue body with the spec block swapped (or appended)
-  pr-body-check  validate a PR body (Closes line, Spec line, Review section)
+  spec-check     check a spec's Test plan holds a seam list or a reasoned skip
+  pr-body-check  validate a PR body (Closes line, Spec line, Review section, Spec check line)
   diff-check     scan `git diff <base>...HEAD` for spec IDs in code and committed spec files
 
 Exit codes: 0 ok, 1 check failed, 2 usage error, 3 no spec markers, 4 malformed markers.
@@ -118,6 +119,54 @@ def replace_spec(body, spec):
     return prefix + block + rest
 
 
+# ── spec check ───────────────────────────────────────────────────────────────
+
+SEAM_START = r"(?:(?:[-*+]|\d+\.) +)?seam:"
+SEAM_RE = re.compile(SEAM_START + r"(.*?)catches:(.*?)misses:(.*)")
+SKIP_RE = re.compile(r"(?:(?:[-*+]|\d+\.) +)?test plan: skipped:(.*)")
+
+
+def _filled(text):
+    """Real text: not empty and not a template placeholder such as <reason>."""
+    return bool(text) and not re.fullmatch(r"<.*>", text)
+
+
+def _good_seam(line):
+    match = SEAM_RE.fullmatch(line.strip())
+    return bool(match) and all(_filled(part.strip().rstrip("|").strip()) for part in match.groups())
+
+
+def _good_skip(line):
+    match = SKIP_RE.match(line.strip())  # a line of its own, not one quoted in prose
+    return bool(match) and _filled(match.group(1).strip())
+
+
+def check_spec(spec):
+    lines = spec.replace("\r\n", "\n").split("\n")
+    if "## Test plan" not in lines:
+        if any(_good_skip(line) for line in lines):
+            return []
+        return [("no-test-plan", "needs a '## Test plan' section")]
+    section = []
+    for line in lines[lines.index("## Test plan") + 1 :]:
+        if line.startswith("## "):
+            break
+        section.append(line)
+    seams = [line for line in section if re.match(SEAM_START, line.lstrip())]
+    if seams:
+        if all(_good_seam(line) for line in seams):
+            return []
+        return [
+            (
+                "bad-seam",
+                "every seam line needs 'seam:', 'catches:' and 'misses:', each followed by real text",
+            )
+        ]
+    if any(_good_skip(line) for line in section):
+        return []
+    return [("no-seams", "the Test plan needs a seam line or 'test plan: skipped: <a real reason>'")]
+
+
 # ── PR checks ────────────────────────────────────────────────────────────────
 
 
@@ -133,6 +182,15 @@ def check_pr_body(body, issue, repo=None):
         problems.append(("missing-spec-line", f"needs a 'Spec: {target}' line"))
     if not any(line.startswith("#") and "review" in line.lower() for line in lines):
         problems.append(("missing-review", "needs a Review section with the PR-diff review note"))
+    in_review = spec_check = False
+    for line in body.replace("\r\n", "\n").split("\n"):
+        line = line.rstrip()
+        if line.startswith("## "):
+            in_review = line == "## Review"
+        elif in_review and (match := re.match(r"Spec check:(.*)", line.strip())):
+            spec_check = spec_check or _filled(match.group(1).strip())
+    if not spec_check:
+        problems.append(("missing-spec-check", "needs a 'Spec check:' line under the '## Review' heading"))
     return problems
 
 
@@ -228,6 +286,7 @@ def cmd_diff_check(base, repo_dir):
 EPILOG = """Examples:
   issue_lifecycle.py extract --body body.md > spec.md
   issue_lifecycle.py replace --body body.md --spec spec.md --out new-body.md
+  issue_lifecycle.py spec-check --spec spec.md
   issue_lifecycle.py pr-body-check --body pr.md --issue 42
   issue_lifecycle.py diff-check --base origin/main
 
@@ -256,6 +315,8 @@ def build_parser():
     p.add_argument("--body", required=True, help="current issue body file")
     p.add_argument("--spec", required=True, help="new spec file")
     p.add_argument("--out", required=True, help="where to write the new body")
+    p = sub.add_parser("spec-check", parents=[common], help="check the spec's Test plan")
+    p.add_argument("--spec", required=True, help="spec file")
     p = sub.add_parser("pr-body-check", parents=[common], help="validate a PR body")
     p.add_argument("--body", required=True, help="PR body file")
     p.add_argument("--issue", required=True, type=int, help="issue the PR closes")
@@ -290,6 +351,8 @@ def run(argv):
         new_body = replace_spec(read_text(args.body), read_text(args.spec))
         write_text(args.out, new_body)
         return EXIT_OK
+    if args.cmd == "spec-check":
+        return report(check_spec(read_text(args.spec)), args.json)
     if args.cmd == "pr-body-check":
         body = read_text(args.body)
         return report(check_pr_body(body, args.issue, args.repo), args.json)

@@ -13,4 +13,6 @@ Spec: PAY-142
 
 ## Review
 
+Spec check: <Every spec item built; nothing outside the spec or under its Non-Goals.>
+
 <The review note, if a review ran: each finding, its severity, and how it was handled. Otherwise say no review ran.>

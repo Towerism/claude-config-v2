@@ -8,7 +8,9 @@
     "jira-ticket-lifecycle",
     "fresh-session-handoff",
     "linux-troubleshooting",
-    "architecture-backfill"
+    "architecture-backfill",
+    "spec-test-plan",
+    "spec-scope"
   ],
   "marketplaces": {
     "omc": {
