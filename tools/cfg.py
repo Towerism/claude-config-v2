@@ -143,14 +143,12 @@ def strip_jsonc(text: str) -> str:
 def read_gate_config(path: Path) -> dict | None:
     """The config as an object, read as OMC reads JSONC; None when missing or empty; CfgError
     (naming it) when it still isn't JSON or isn't an object."""
-    raw = _read(path).decode("utf-8")
-    if not raw:
-        return None
     try:
-        data = json.loads(strip_jsonc(raw))
-    except ValueError as err:
+        text = strip_jsonc(_read(path).decode("utf-8"))
+        data = json.loads(text) if text.strip() else None  # OMC reads a blank file as no config
+    except ValueError as err:  # UnicodeDecodeError included
         raise CfgError(f"{path} is not valid JSON: {err}") from err
-    if not isinstance(data, dict):
+    if data is not None and not isinstance(data, dict):
         raise CfgError(f"{path} must hold a JSON object")
     return data
 
@@ -323,6 +321,10 @@ class Plan:
         self.clone = self.state.get("syncClone")  # main() sets it before a deploy
         self.settings_changed = self.settings != _read(home / "settings.json")
         self.gates_old = read_gate_config(gates)
+        try:  # a JSONC file loses its comments when the merge writes it back as plain JSON
+            self.gates_plain = self.gates_old is None or json.loads(_read(gates)) == self.gates_old
+        except ValueError:
+            self.gates_plain = False
         fragment = json.loads((ROOT / "config" / "omc.fragment.json").read_text(encoding="utf-8"))
         self.gates_want = fragment["qualityGates"]
         self.gates_changed = (self.gates_old or {}).get("qualityGates") != self.gates_want
@@ -334,11 +336,7 @@ class Plan:
             out += [f"  {label:7}{rel}" + ("   CONFLICT (live file changed since last deploy)" if rel in self.conflicts else "") for rel in rels]
         out += [f"  merge  {name}" for name, changed in (("settings.json", self.settings_changed), ("CLAUDE.md", self.claude_md_changed)) if changed]
         if self.gates_changed:
-            try:
-                plain = self.gates_old is None or json.loads(_read(self.gates)) == self.gates_old
-            except ValueError:
-                plain = False
-            note = "" if plain else "   (rewritten as plain JSON: its comments are dropped)"
+            note = "" if self.gates_plain else "   (rewritten as plain JSON: its comments are dropped)"
             out.append(f"  merge  qualityGates into {self.gates}{note}")
         if self.state and (self.host["name"], self.host.get("defaultTracker")) != (
             self.state.get("host"), self.state.get("defaultTracker")
@@ -456,6 +454,8 @@ def rollback_gates(state: dict) -> list[str]:
     if live is None or live.get("qualityGates") != record.get("deployed"):
         return [f"{path}: qualityGates changed after the deploy: left as it is"]
     if record.get("hadKey"):
+        if record.get("previous") == record.get("deployed"):
+            return []  # the deploy changed nothing here; keep the file as it is
         live["qualityGates"] = record.get("previous")
     else:
         del live["qualityGates"]
@@ -505,6 +505,8 @@ def rollback(home: Path) -> list[str]:
             created.discard(rel)
             (latest / "files" / rel).unlink(missing_ok=True)
             notes.append(f"{rel} changed after the deploy: removed only claude-config's part")
+    if finished:  # after the steps above that can fail, before state.json is restored, so a
+        notes += rollback_gates(state)  # failed rollback can be retried; an unfinished deploy never wrote them
     for rel in sorted(created):
         (home / rel).unlink(missing_ok=True)
         _prune_dirs((home / rel).parent, home)
@@ -513,8 +515,6 @@ def rollback(home: Path) -> list[str]:
         dest = home / path.relative_to(files)
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, dest)
-    if finished:  # last, so a rollback that fails above leaves the gates deployed
-        notes += rollback_gates(state)  # an unfinished deploy never wrote them
     shutil.rmtree(latest)
     return [latest.name, *notes]
 

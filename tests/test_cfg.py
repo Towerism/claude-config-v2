@@ -734,3 +734,42 @@ def test_a_failed_rollback_leaves_the_gates_deployed(home):
     (home / "settings.json").write_text(json.dumps({"hooks": []}))
     assert run(home, "rollback") == 2
     assert json.loads(gate_config(home).read_text()) == {"qualityGates": GATES}
+
+
+@pytest.mark.parametrize("raw", [b"\n", b"\xef\xbb\xbf", b"// { \"qualityGates\": {} }\n"], ids=["blank", "bom", "comments-only"])
+def test_a_gate_config_with_nothing_in_it_counts_as_missing(home, raw):
+    gate_config(home).parent.mkdir(parents=True)
+    gate_config(home).write_bytes(raw)
+    assert run(home, "deploy", "--host", "personal", "--yes") == 0
+    assert json.loads(gate_config(home).read_text()) == {"qualityGates": GATES}
+
+
+def test_a_gate_config_that_is_not_utf8_is_a_clean_error(home, capsys):
+    gate_config(home).parent.mkdir(parents=True)
+    gate_config(home).write_bytes(b'{"theme": "\xe9"}')
+    assert run(home, "plan", "--host", "personal") == 2
+    assert str(gate_config(home)) in capsys.readouterr().err
+
+
+def test_a_rollback_whose_gate_step_fails_can_be_retried(home, monkeypatch):
+    run(home, "deploy", "--host", "personal", "--yes")
+    real = cfg.rollback_gates
+    monkeypatch.setattr(cfg, "rollback_gates", lambda state: (_ for _ in ()).throw(cfg.CfgError("disk full")))
+    assert run(home, "rollback") == 2
+    monkeypatch.setattr(cfg, "rollback_gates", real)
+    assert run(home, "rollback") == 0
+    assert json.loads(gate_config(home).read_text()) == {}
+
+
+def test_rollback_leaves_an_unchanged_gate_config_byte_for_byte(home):
+    gate_config(home).parent.mkdir(parents=True)
+    text = '// mine\n{"qualityGates": {"ralplan": ["mine"]}}\n'
+    gate_config(home).write_text(text)
+    run(home, "deploy", "--host", "personal", "--yes")
+    gate_config(home).write_text('// mine\n{"qualityGates": ' + json.dumps(GATES) + "}\n")
+    state = json.loads((home / "claude-config" / "state.json").read_text())
+    state["omcGates"]["previous"] = GATES  # the deploy changed nothing
+    (home / "claude-config" / "state.json").write_text(json.dumps(state))
+    before = gate_config(home).read_text()
+    run(home, "rollback")
+    assert gate_config(home).read_text() == before
