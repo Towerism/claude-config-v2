@@ -129,10 +129,30 @@ def gate_config(target: str | None) -> Path:
     return base / "claude-omc" / "config.jsonc"
 
 
+JSON_STRING = r'"(?:\\.|[^"\\])*"'
+
+
+def strip_jsonc(text: str) -> str:
+    """JSONC as OMC reads it (its utils/jsonc.js): no leading BOM, then no // or /* */ comments,
+    then no trailing comma before } or ]. String contents are kept as they are."""
+    keep = lambda m: m.group(1) or " "
+    text = re.sub(rf"({JSON_STRING})|//[^\n]*|/\*[\s\S]*?\*/", keep, text.removeprefix("\ufeff"))
+    return re.sub(rf"({JSON_STRING})|,(?=\s*[}}\]])", keep, text)
+
+
 def read_gate_config(path: Path) -> dict | None:
-    """The config as an object, None when missing or empty; CfgError (naming it) when it isn't
-    plain JSON, comments included, or not an object."""
-    return read_json(path) if _read(path) else None
+    """The config as an object, read as OMC reads JSONC; None when missing or empty; CfgError
+    (naming it) when it still isn't JSON or isn't an object."""
+    raw = _read(path).decode("utf-8")
+    if not raw:
+        return None
+    try:
+        data = json.loads(strip_jsonc(raw))
+    except ValueError as err:
+        raise CfgError(f"{path} is not valid JSON: {err}") from err
+    if not isinstance(data, dict):
+        raise CfgError(f"{path} must hold a JSON object")
+    return data
 
 
 # --- the host profile and what it selects -------------------------------------
@@ -314,7 +334,12 @@ class Plan:
             out += [f"  {label:7}{rel}" + ("   CONFLICT (live file changed since last deploy)" if rel in self.conflicts else "") for rel in rels]
         out += [f"  merge  {name}" for name, changed in (("settings.json", self.settings_changed), ("CLAUDE.md", self.claude_md_changed)) if changed]
         if self.gates_changed:
-            out.append(f"  merge  qualityGates into {self.gates}")
+            try:
+                plain = self.gates_old is None or json.loads(_read(self.gates)) == self.gates_old
+            except ValueError:
+                plain = False
+            note = "" if plain else "   (rewritten as plain JSON: its comments are dropped)"
+            out.append(f"  merge  qualityGates into {self.gates}{note}")
         if self.state and (self.host["name"], self.host.get("defaultTracker")) != (
             self.state.get("host"), self.state.get("defaultTracker")
         ):
@@ -473,8 +498,6 @@ def rollback(home: Path) -> list[str]:
         "CLAUDE.md": (state.get("claudeMdSha"), remove_block),
     }
     finished = latest.name == state.get("deployedAt")
-    if finished:  # an unfinished deploy never wrote the gates; state.json describes an older one
-        notes += rollback_gates(state)
     for rel, (digest, strip) in shared.items() if finished else ():
         live = home / rel
         if live.exists() and digest and sha(live.read_bytes()) != digest:
@@ -490,6 +513,8 @@ def rollback(home: Path) -> list[str]:
         dest = home / path.relative_to(files)
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, dest)
+    if finished:  # last, so a rollback that fails above leaves the gates deployed
+        notes += rollback_gates(state)  # an unfinished deploy never wrote them
     shutil.rmtree(latest)
     return [latest.name, *notes]
 

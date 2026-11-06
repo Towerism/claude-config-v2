@@ -673,7 +673,7 @@ def test_status_reports_gate_drift(home, capsys):
     assert f"missing   {gate_config(home)}" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("text", ['// mine\n{"theme": "x"}\n', "[1, 2]\n"], ids=["comments", "not-an-object"])
+@pytest.mark.parametrize("text", ['{"theme": }\n', "[1, 2]\n"], ids=["not-json", "not-an-object"])
 def test_an_unreadable_gate_config_stops_the_deploy_and_nothing_is_written(home, text, capsys):
     gate_config(home).parent.mkdir(parents=True)
     gate_config(home).write_text(text)
@@ -709,7 +709,7 @@ def test_a_relative_target_deploy_can_be_checked_and_rolled_back(tmp_path, monke
 
 def test_status_and_rollback_name_a_gate_config_that_is_not_plain_json(home, capsys):
     run(home, "deploy", "--host", "personal", "--yes")
-    text = '// mine\n{"qualityGates": {}}\n'
+    text = '{"qualityGates": \n'
     gate_config(home).write_text(text)
     capsys.readouterr()
     assert run(home, "status") == 0
@@ -717,3 +717,20 @@ def test_status_and_rollback_name_a_gate_config_that_is_not_plain_json(home, cap
     assert run(home, "rollback") == 0
     assert f"{gate_config(home)}: not plain JSON: left as it is" in capsys.readouterr().out
     assert gate_config(home).read_text() == text
+
+
+def test_a_jsonc_gate_config_is_read_as_omc_reads_it(home, capsys):
+    gate_config(home).parent.mkdir(parents=True)
+    gate_config(home).write_text('\ufeff// mine\n{"theme": "x // not a comment", /* old */ "nested": [1, 2,],}\n')
+    run(home, "plan", "--host", "personal")
+    assert "comments" in capsys.readouterr().out
+    assert run(home, "deploy", "--host", "personal", "--yes") == 0
+    assert json.loads(gate_config(home).read_text()) == {
+        "theme": "x // not a comment", "nested": [1, 2], "qualityGates": GATES}
+
+
+def test_a_failed_rollback_leaves_the_gates_deployed(home):
+    run(home, "deploy", "--host", "personal", "--yes")
+    (home / "settings.json").write_text(json.dumps({"hooks": []}))
+    assert run(home, "rollback") == 2
+    assert json.loads(gate_config(home).read_text()) == {"qualityGates": GATES}
