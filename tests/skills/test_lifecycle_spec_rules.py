@@ -20,6 +20,7 @@ def test_step_4_plans_missing_seams_and_runs_spec_check(skill):
     text = step(skill, 4)
     assert "oh-my-claudecode:test-engineer" in text
     assert "spec-check" in text
+    assert "`## Test plan`" in text and "`seam: … | catches: … | misses: …`" in text  # the form spec-check reads
 
 
 @pytest.mark.parametrize("skill", SKILLS)

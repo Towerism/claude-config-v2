@@ -78,7 +78,7 @@ The spec is the deep-interview spec or the ralplan plan. It lives in the issue b
 ...spec...
 <!-- spec:end -->
 ```
-No spec file goes in the repo, unless the repo's CLAUDE.md says its specs live there. If the spec changes code and has no seam list, have `oh-my-claudecode:test-engineer` write one (plan only, no files). Always re-pull the body right before replacing, since people edit issues:
+No spec file goes in the repo, unless the repo's CLAUDE.md says its specs live there. If the spec changes code and has no seam list, have `oh-my-claudecode:test-engineer` write one (plan only, no files): a `## Test plan` section with one `seam: … | catches: … | misses: …` line per seam. Always re-pull the body right before replacing, since people edit issues:
 ```bash
 gh issue view 42 --json body > "$tmp/issue.json"
 python3 -I -c 'import json,sys; sys.stdout.write(json.load(open(sys.argv[1]))["body"])' "$tmp/issue.json" > "$tmp/body.md"

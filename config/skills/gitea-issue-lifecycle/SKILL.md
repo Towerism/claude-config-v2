@@ -71,7 +71,7 @@ Hand over to `/oh-my-claudecode:deep-interview` or `/oh-my-claudecode:ralplan`; 
 
 ### 4. Store the spec on the issue
 
-The spec is the deep-interview spec or the ralplan plan. No spec file goes in the repo, unless the repo's CLAUDE.md says its specs live there. It lives in the issue body, below the original description, between two whole-line markers, `<!-- spec:start -->` and `<!-- spec:end -->`. If the spec changes code and has no seam list, have `oh-my-claudecode:test-engineer` write one (plan only, no files). Always re-read the body right before replacing it:
+The spec is the deep-interview spec or the ralplan plan. No spec file goes in the repo, unless the repo's CLAUDE.md says its specs live there. It lives in the issue body, below the original description, between two whole-line markers, `<!-- spec:start -->` and `<!-- spec:end -->`. If the spec changes code and has no seam list, have `oh-my-claudecode:test-engineer` write one (plan only, no files): a `## Test plan` section with one `seam: … | catches: … | misses: …` line per seam. Always re-read the body right before replacing it:
 
 ```bash
 tea api --login <login> -X GET repos/<o>/<r>/issues/N > "$tmp/issue.json"
