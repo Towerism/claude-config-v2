@@ -66,8 +66,9 @@ def test_deploy_installs_everything_the_host_selects(home):
         assert (home / "hooks" / hook).is_file()
     settings = json.loads((home / "settings.json").read_text())
     assert settings["enabledPlugins"] == {"oh-my-claudecode@omc": True}
-    commands = [h["command"] for g in settings["hooks"]["PreToolUse"] for h in g["hooks"]]
-    assert commands == [f"python3 -I {home}/hooks/merge_confirm.py"]
+    commands = [h["command"] for g in settings["hooks"]["SubagentStart"] for h in g["hooks"]]
+    assert commands == [f"python3 -I {home}/hooks/host_default.py"]
+    assert "PreToolUse" not in settings["hooks"]
     state = json.loads((home / "claude-config" / "state.json").read_text())
     assert state["host"] == "work" and state["defaultTracker"] == "jira"
     assert "{claude_home}" not in (home / "settings.json").read_text()
@@ -124,9 +125,9 @@ def test_switching_host_removes_what_the_new_host_lacks(home, tmp_path, monkeypa
     monkeypatch.setattr(cfg, "load_host", lambda name: small if name == "small" else real(name))
     assert run(home, "deploy", "--host", "small", "--yes") == 0
     assert not (home / "skills" / "github-issue-lifecycle").exists()
-    assert not (home / "hooks" / "merge_confirm.py").exists()
+    assert not (home / "hooks" / "auto_sync.py").exists()
     settings = json.loads((home / "settings.json").read_text())
-    assert "PreToolUse" not in settings["hooks"]
+    assert "auto_sync.py" not in json.dumps(settings)
 
 
 def test_deploy_removes_a_hook_the_profile_no_longer_lists(home, tmp_path, monkeypatch):
@@ -136,11 +137,11 @@ def test_deploy_removes_a_hook_the_profile_no_longer_lists(home, tmp_path, monke
     (old / "config" / "hooks" / "bash_guard.py").write_text("import sys\nsys.exit(0)\n")
     fragment = json.loads((old / "config" / "settings.fragment.json").read_text())
     guard = {"type": "command", "command": "python3 -I {claude_home}/hooks/bash_guard.py", "timeout": 10}
-    fragment["hooks"]["PreToolUse"].append({"matcher": "Bash", "hooks": [guard]})
+    fragment["hooks"]["PreToolUse"] = [{"matcher": "Bash", "hooks": [guard]}]
     (old / "config" / "settings.fragment.json").write_text(json.dumps(fragment))
     (old / "hosts").mkdir()
     profile = json.loads((ROOT / "hosts" / "personal.json").read_text())
-    profile["hooks"] = ["merge_confirm.py", "host_default.py", "bash_guard.py"]
+    profile["hooks"] = ["host_default.py", "auto_sync.py", "bash_guard.py"]
     (old / "hosts" / "personal.json").write_text(json.dumps(profile))
     monkeypatch.setattr(cfg, "ROOT", old)
     assert run(home, "deploy", "--host", "personal", "--yes") == 0
@@ -152,9 +153,7 @@ def test_deploy_removes_a_hook_the_profile_no_longer_lists(home, tmp_path, monke
     settings = json.loads((home / "settings.json").read_text())
     assert "bash_guard.py" not in json.dumps(settings)
     commands = [h["command"] for groups in settings["hooks"].values() for g in groups for h in g["hooks"]]
-    assert sorted(c.split("/")[-1] for c in commands) == [
-        "auto_sync.py", "host_default.py", "host_default.py", "merge_confirm.py"
-    ]
+    assert sorted(c.split("/")[-1] for c in commands) == ["auto_sync.py", "host_default.py", "host_default.py"]
 
 
 def test_locally_edited_file_is_a_conflict(home, capsys):
@@ -174,11 +173,11 @@ def test_status_reports_modified_missing_and_sync(home, capsys):
     capsys.readouterr()
     run(home, "status")
     assert "in sync" in capsys.readouterr().out
-    (home / "hooks" / "merge_confirm.py").write_text("x")
+    (home / "hooks" / "host_default.py").write_text("x")
     (home / "skills" / "fresh-session-handoff" / "SKILL.md").unlink()
     run(home, "status")
     out = capsys.readouterr().out
-    assert "modified  hooks/merge_confirm.py" in out and "missing   skills/fresh-session-handoff/SKILL.md" in out
+    assert "modified  hooks/host_default.py" in out and "missing   skills/fresh-session-handoff/SKILL.md" in out
 
 
 def test_deploy_wires_auto_sync_for_new_sessions_only(home):
@@ -280,7 +279,7 @@ def test_rollback_with_no_backup(home, capsys):
 def test_old_backups_are_pruned(home):
     run(home, "deploy", "--host", "personal", "--yes")
     for i in range(cfg.KEEP_BACKUPS + 2):
-        (home / "hooks" / "merge_confirm.py").write_text(str(i))
+        (home / "hooks" / "host_default.py").write_text(str(i))
         run(home, "deploy", "--yes", "--force")
     assert len(list((home / "claude-config" / "backups").iterdir())) == cfg.KEEP_BACKUPS
 
@@ -426,7 +425,7 @@ def test_retrying_after_a_failed_deploy_does_not_duplicate_hooks(home, monkeypat
     monkeypatch.setattr(cfg, "write_atomic", real)
     assert run(home, "deploy", "--host", "personal", "--yes") == 0
     settings = json.loads((home / "settings.json").read_text())
-    assert [len(g["hooks"]) for g in settings["hooks"]["PreToolUse"]] == [1]
+    assert [len(g["hooks"]) for g in settings["hooks"]["SubagentStart"]] == [1]
     assert "UserPromptExpansion" not in settings["hooks"]
     assert len(settings["hooks"]["SessionStart"]) == 2  # host_default, and auto_sync on startup
 
@@ -452,7 +451,7 @@ def test_an_incomplete_backup_is_reported_not_a_traceback(home, capsys):
 def test_backups_sort_in_creation_order_past_ten(home):
     run(home, "deploy", "--host", "personal", "--yes")
     for i in range(12):
-        (home / "hooks" / "merge_confirm.py").write_text(str(i))
+        (home / "hooks" / "host_default.py").write_text(str(i))
         run(home, "deploy", "--yes", "--force")
     names = backups(home)
     assert names == sorted(names) and len(names) == cfg.KEEP_BACKUPS
@@ -473,10 +472,10 @@ def test_a_home_with_a_space_gets_a_quoted_hook_command(tmp_path):
     spaced = tmp_path / "my claude"
     run(spaced, "deploy", "--host", "personal", "--yes")
     settings = json.loads((spaced / "settings.json").read_text())
-    command = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+    command = settings["hooks"]["SubagentStart"][0]["hooks"][0]["command"]
     import shlex
 
-    assert shlex.split(command) == ["python3", "-I", f"{spaced}/hooks/merge_confirm.py"]
+    assert shlex.split(command) == ["python3", "-I", f"{spaced}/hooks/host_default.py"]
 
 
 def test_non_ascii_settings_survive(home):
