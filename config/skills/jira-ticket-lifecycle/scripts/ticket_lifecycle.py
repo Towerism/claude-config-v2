@@ -277,10 +277,11 @@ def check_pr_body(body, key, site):
     if not any(line.startswith("#") and "review" in line.lower() for line in lines):
         problems.append(("missing-review", "needs a Review section with the PR-diff review note"))
     in_review = spec_check = False
-    for line in lines:
-        if line.startswith("#"):
-            in_review = "review" in line.lower()
-        elif in_review and re.match(r"Spec check: *\S", line):
+    for line in text.split("\n"):
+        line = line.rstrip()
+        if line.startswith("## "):
+            in_review = line == "## Review"
+        elif in_review and re.match(r"Spec check: *\S", line.strip()):
             spec_check = True
     if not spec_check:
         problems.append(("missing-spec-check", "the Review section needs a 'Spec check:' line"))
@@ -296,8 +297,18 @@ def check_pr_body(body, key, site):
 
 # ── spec check (the same rules as the GitHub lifecycle skill's script) ──────
 
-SEAM_RE = re.compile(r"seam: *[^\s|].*catches: *[^\s|].*misses: *\S")
+SEAM_RE = re.compile(r"(?:- )?seam:(.*?)catches:(.*?)misses:(.*)")
 SKIP_RE = re.compile(r"test plan: skipped:(.*)")
+
+
+def _filled(text):
+    """Real text: not empty and not a template placeholder such as <reason>."""
+    return bool(text) and not re.fullmatch(r"<.*>", text)
+
+
+def _good_seam(line):
+    match = SEAM_RE.fullmatch(line.strip())
+    return bool(match) and all(_filled(part.strip().rstrip("|").strip()) for part in match.groups())
 
 
 def check_spec(spec):
@@ -309,14 +320,19 @@ def check_spec(spec):
         if line.startswith("## "):
             break
         section.append(line)
-    seams = [line for line in section if "seam:" in line]
+    seams = [line for line in section if line.lstrip().startswith(("seam:", "- seam:"))]
     if seams:
-        if any(SEAM_RE.search(line) for line in seams):
+        if all(_good_seam(line) for line in seams):
             return []
-        return [("bad-seam", "a seam line needs 'catches:' and 'misses:', each followed by text")]
+        return [
+            (
+                "bad-seam",
+                "every seam line needs 'seam:', 'catches:' and 'misses:', each followed by real text",
+            )
+        ]
     for line in section:
         match = SKIP_RE.search(line)
-        if match and match.group(1).strip() not in ("", "<reason>"):
+        if match and _filled(match.group(1).strip()):
             return []
     return [("no-seams", "the Test plan needs a seam line or 'test plan: skipped: <a real reason>'")]
 
@@ -1524,13 +1540,16 @@ def run(argv):
         raise UsageError("a subcommand is required")
     if args.cmd == "diff-check":
         return report(diff_check(args.base, args.repo_dir), args.json)
-    cfg = load_settings()
     if args.cmd == "spec-check":
-        key = normalize_key(args.key, cfg)
-        spec_path = args.spec or os.path.join(spec_folder(cfg, args.repo_dir), f"{key}.md")
+        spec_path = args.spec
+        if not spec_path:  # only the default working copy needs the settings
+            cfg = load_settings()
+            key = normalize_key(args.key, cfg)
+            spec_path = os.path.join(spec_folder(cfg, args.repo_dir), f"{key}.md")
         if not os.path.exists(spec_path):
             raise UsageError(f"no spec at {spec_path}; write the working copy there, or run pull-spec")
         return report(check_spec(read_text(spec_path)), args.json)
+    cfg = load_settings()
     if args.cmd not in ("settings", "pr-body-check"):
         return run_step(args, cfg)
     if args.cmd == "settings":

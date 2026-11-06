@@ -1,5 +1,12 @@
 """pr-body-check: the PR body rules."""
 
+import re
+import subprocess
+import sys
+
+import pytest
+
+from tests.conftest import ROOT
 from tests.skills.github_issue_lifecycle.conftest import run, write
 
 
@@ -56,3 +63,26 @@ class TestPrBodyCheck:
         line = "Spec check: every item built, nothing outside the spec\n"
         body = self.GOOD.replace(line, "").replace("## Review", line + "\n## Review")
         assert self.check(tmp_path, body).returncode == 1
+
+    def test_a_review_subheading_does_not_open_the_review_section(self, tmp_path):
+        body = self.GOOD.replace("## Review\n", "## Notes\n### Pre-review notes\n")
+        r = self.check(tmp_path, body)
+        assert r.returncode == 1
+        assert "Spec check:" in r.stdout
+
+    def test_a_subheading_inside_review_keeps_the_section_open(self, tmp_path):
+        body = self.GOOD.replace("## Review\n", "## Review\n### Notes\n")
+        assert self.check(tmp_path, body).returncode == 0
+
+    @pytest.mark.parametrize("skill", ["github-issue-lifecycle", "gitea-issue-lifecycle"])
+    def test_the_filled_in_template_passes(self, tmp_path, skill):
+        skill_dir = ROOT / "config" / "skills" / skill
+        text = (skill_dir / "assets" / "pr-body-template.md").read_text()
+        text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL).replace("#N", "#42")
+        body = write(tmp_path, "pr.md", re.sub(r"<[^<>]*>", "filled in", text))
+        script = skill_dir / "scripts" / "issue_lifecycle.py"
+        r = subprocess.run(
+            [sys.executable, "-I", str(script), "pr-body-check", "--body", body, "--issue", "42"],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+        assert r.returncode == 0, r.stdout + r.stderr

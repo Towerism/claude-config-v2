@@ -1,10 +1,11 @@
 """The text subcommands: settings and pr-body-check. Neither touches Jira."""
 
 import json
+import re
 
 import pytest
 
-from tests.skills.jira_ticket_lifecycle.conftest import SETTINGS
+from tests.skills.jira_ticket_lifecycle.conftest import SETTINGS, SKILL_DIR
 
 # ── settings ─────────────────────────────────────────────────────────────────
 
@@ -118,6 +119,16 @@ def test_valid_bodies_pass(env):
     assert pr(env, good_body("spec: pay-142")).returncode == 0
 
 
+def test_a_subheading_inside_review_keeps_the_section_open(env):
+    assert pr(env, good_body().replace("## Review\n", "## Review\n### Notes\n")).returncode == 0
+
+
+def test_the_filled_in_template_passes(env):
+    text = (SKILL_DIR / "assets" / "pr-body-template.md").read_text()
+    r = pr(env, re.sub(r"<[^<>]*>", "filled in", text))
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
 @pytest.mark.parametrize(
     ("body", "code"),
     [
@@ -139,6 +150,7 @@ def test_valid_bodies_pass(env):
             ),
             "missing-spec-check",
         ),
+        (good_body().replace("## Review\n", "## Notes\n### Pre-review notes\n"), "missing-spec-check"),
     ],
 )
 def test_bad_bodies_fail_with_a_code(env, body, code):

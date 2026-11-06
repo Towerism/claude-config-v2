@@ -21,7 +21,9 @@ def check(env, *extra):
 
 
 @pytest.mark.parametrize(
-    "plan", [(SEAM,), ("test plan: skipped: docs-only change",)], ids=["seam", "skip"]
+    "plan",
+    [(SEAM,), ("test plan: skipped: docs-only change",), ("test plan: skipped: no seam: needed",)],
+    ids=["seam", "skip", "seam-in-prose"],
 )
 def test_the_working_copy_passes(env, plan):
     working_copy(env, spec(*plan))
@@ -38,8 +40,23 @@ def test_the_working_copy_passes(env, plan):
         spec("test plan: skipped:   "),
         spec("test plan: skipped: <reason>"),
         spec("- seam: the export CLI | catches: a bug", "test plan: skipped: none"),
+        spec(SEAM, "- seam: the import CLI | catches: a wrong exit code"),
+        spec("test plan: skipped: <a real reason>"),
+        spec("seam: <seam> | catches: <what it catches> | misses: <what it lets through>"),
+        spec("- seam: the export CLI | catches: <what it catches> | misses: a slow disk"),
     ],
-    ids=["no-section", "no-catches", "no-misses", "empty-reason", "placeholder", "seams-decide"],
+    ids=[
+        "no-section",
+        "no-catches",
+        "no-misses",
+        "empty-reason",
+        "placeholder",
+        "seams-decide",
+        "every-seam",
+        "placeholder-reason",
+        "placeholder-seam",
+        "one-placeholder-part",
+    ],
 )
 def test_the_working_copy_fails(env, text):
     working_copy(env, text)
@@ -62,3 +79,9 @@ def test_no_working_copy_is_a_usage_error(env):
     r = check(env)
     assert r.returncode == 2
     assert "PAY-142.md" in r.stderr
+
+
+def test_spec_needs_no_jira_settings(env):
+    (env.config / "claude-config" / "local.json").unlink()
+    r = check(env, "--spec", env.file("spec.md", spec(SEAM)))
+    assert r.returncode == 0, r.stdout + r.stderr

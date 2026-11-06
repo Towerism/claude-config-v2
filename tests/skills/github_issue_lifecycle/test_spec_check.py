@@ -55,3 +55,26 @@ def test_a_seam_line_outside_the_section_does_not_count(tmp_path):
 
 def test_a_missing_spec_file_is_a_usage_error(tmp_path):
     assert run("spec-check", "--spec", tmp_path / "nope.md").returncode == 2
+
+
+def test_prose_mentioning_seam_is_not_a_seam_line(tmp_path):
+    assert check(tmp_path, spec("test plan: skipped: no seam: needed")).returncode == 0
+
+
+def test_every_seam_line_must_be_complete(tmp_path):
+    plan = (SEAM, "- seam: the import CLI | catches: a wrong exit code")
+    assert check(tmp_path, spec(*plan)).returncode == 1
+
+
+def test_a_placeholder_skip_reason_fails(tmp_path):
+    assert check(tmp_path, spec("test plan: skipped: <a real reason>")).returncode == 1
+
+
+def test_placeholder_seam_parts_fail(tmp_path):
+    plan = "seam: <seam> | catches: <what it catches> | misses: <what it lets through>"
+    assert check(tmp_path, spec(plan)).returncode == 1
+
+
+def test_one_placeholder_seam_part_fails(tmp_path):
+    plan = "- seam: the export CLI | catches: <what it catches> | misses: a slow disk"
+    assert check(tmp_path, spec(plan)).returncode == 1
