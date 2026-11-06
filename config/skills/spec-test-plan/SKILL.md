@@ -12,7 +12,7 @@ A **blocking** gate at OMC's `deep-interview` and `ralplan` stages. It is read-o
 1. Decide whether the spec changes code: any source, test, script, hook or config that runs.
 2. Find its `## Test plan` section, which runs to the next `## ` heading.
 3. If the spec changes code, the section needs at least one seam line of the form `seam: <seam> | catches: <what it catches> | misses: <what it lets through>`, each part non-empty. Every seam line must have both `catches:` and `misses:`.
-4. If the spec changes no code, the section needs `test plan: skipped: <reason>` with a real reason (not empty, not the literal `<reason>`).
+4. If the spec changes no code, it needs `test plan: skipped: <reason>` with a real reason (not empty, not the literal `<reason>`): inside the section, or, for a spec with no `## Test plan` section, anywhere in the spec (the pipeline list, for example).
 
 ## Verdict
 

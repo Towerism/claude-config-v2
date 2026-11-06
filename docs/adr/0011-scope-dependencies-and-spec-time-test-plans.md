@@ -1,6 +1,6 @@
 # ADR-0011: Build exactly the spec, keep the complexity to own small, and plan the tests with the spec
 
-**Status:** Accepted by the owner on 2026-11-06, issue #54 (revision 6 of its spec). Amends ADR-0006 (the dropped test-plan rule, and when OMC text counts as coverage) and ADR-0009 (an operating-principles section, a fourth guardrails section, scenarios 14-17 and a context-limit note).
+**Status:** Accepted by the owner on 2026-11-06, issue #54 (revision 7 of its spec). Amends ADR-0006 (the dropped test-plan rule, and when OMC text counts as coverage) and ADR-0009 (an operating-principles section, a fourth guardrails section, scenarios 14-17 and a context-limit note).
 
 ## Context
 
