@@ -4,7 +4,10 @@ from tests.skills.github_issue_lifecycle.conftest import run, write
 
 
 class TestPrBodyCheck:
-    GOOD = "Implements the export.\n\nCloses #42\nSpec: #42\n\n## Review\n- W1 fixed\n"
+    GOOD = (
+        "Implements the export.\n\nCloses #42\nSpec: #42\n\n"
+        "## Review\nSpec check: every item built, nothing outside the spec\n- W1 fixed\n"
+    )
 
     def check(self, tmp_path, body, *extra):
         return run("pr-body-check", "--body", write(tmp_path, "pr.md", body), "--issue", 42, *extra)
@@ -37,4 +40,19 @@ class TestPrBodyCheck:
 
     def test_a_spec_file_path_does_not_stand_for_the_issue(self, tmp_path):
         body = self.GOOD.replace("Spec: #42", "Spec: config/skills/foo/SPEC.md")
+        assert self.check(tmp_path, body).returncode == 1
+
+    def test_missing_spec_check_line_fails(self, tmp_path):
+        body = self.GOOD.replace("Spec check: every item built, nothing outside the spec\n", "")
+        r = self.check(tmp_path, body)
+        assert r.returncode == 1
+        assert "Spec check:" in r.stdout
+
+    def test_an_empty_spec_check_line_fails(self, tmp_path):
+        body = self.GOOD.replace("every item built, nothing outside the spec", "")
+        assert self.check(tmp_path, body).returncode == 1
+
+    def test_a_spec_check_line_outside_the_review_section_fails(self, tmp_path):
+        line = "Spec check: every item built, nothing outside the spec\n"
+        body = self.GOOD.replace(line, "").replace("## Review", line + "\n## Review")
         assert self.check(tmp_path, body).returncode == 1

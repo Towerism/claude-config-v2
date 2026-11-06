@@ -109,7 +109,7 @@ def pr(env, body):
 def good_body(spec="Spec: PAY-142"):
     return (
         f"{TICKET_LINE}\n{spec}\n\n## Tests\n- export writes a header: "
-        f"test_export.py\n\n## Review\nClean.\n"
+        f"test_export.py\n\n## Review\nSpec check: every item built, nothing more.\nClean.\n"
     )
 
 
@@ -130,7 +130,15 @@ def test_valid_bodies_pass(env):
         (good_body("Spec: config/skills/foo/SPEC.md"), "missing-spec-line"),
         (good_body() + "\n### AC-1: export\n", "spec-copied"),
         (good_body() + "\nGiven a roster\nWhen exported\nThen a header\n", "spec-copied"),
-        (good_body().replace("## Review\nClean.\n", ""), "missing-review"),
+        (good_body().replace("## Review\n", ""), "missing-review"),
+        (good_body().replace("Spec check: every item built, nothing more.\n", ""), "missing-spec-check"),
+        (good_body().replace("every item built, nothing more.", ""), "missing-spec-check"),
+        (
+            good_body().replace("## Tests", "Spec check: all built.\n\n## Tests").replace(
+                "Spec check: every item built, nothing more.\n", ""
+            ),
+            "missing-spec-check",
+        ),
     ],
 )
 def test_bad_bodies_fail_with_a_code(env, body, code):

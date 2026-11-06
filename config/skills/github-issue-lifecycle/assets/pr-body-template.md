@@ -10,4 +10,5 @@ Spec: #N
 | <criterion, in words> | `<path/to/test file>`: <test name> |
 
 ## Review
+Spec check: <every spec item built; nothing outside the spec or under its Non-Goals>
 <the review note, if a review ran: each finding, its severity, and how it was handled; otherwise say no review ran>

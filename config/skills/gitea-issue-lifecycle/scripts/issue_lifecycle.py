@@ -5,7 +5,8 @@ Each skill ships an identical copy, so neither depends on the other being deploy
 Subcommands:
   extract        print the spec block from an issue body file
   replace        write a new issue body with the spec block swapped (or appended)
-  pr-body-check  validate a PR body (Closes line, Spec line, Review section)
+  spec-check     check a spec's Test plan holds a seam list or a reasoned skip
+  pr-body-check  validate a PR body (Closes line, Spec line, Review section, Spec check line)
   diff-check     scan `git diff <base>...HEAD` for spec IDs in code and committed spec files
 
 Exit codes: 0 ok, 1 check failed, 2 usage error, 3 no spec markers, 4 malformed markers.
@@ -118,6 +119,33 @@ def replace_spec(body, spec):
     return prefix + block + rest
 
 
+# ── spec check ───────────────────────────────────────────────────────────────
+
+SEAM_RE = re.compile(r"seam: *[^\s|].*catches: *[^\s|].*misses: *\S")
+SKIP_RE = re.compile(r"test plan: skipped:(.*)")
+
+
+def check_spec(spec):
+    lines = spec.replace("\r\n", "\n").split("\n")
+    if "## Test plan" not in lines:
+        return [("no-test-plan", "needs a '## Test plan' section")]
+    section = []
+    for line in lines[lines.index("## Test plan") + 1 :]:
+        if line.startswith("## "):
+            break
+        section.append(line)
+    seams = [line for line in section if "seam:" in line]
+    if seams:
+        if any(SEAM_RE.search(line) for line in seams):
+            return []
+        return [("bad-seam", "a seam line needs 'catches:' and 'misses:', each followed by text")]
+    for line in section:
+        match = SKIP_RE.search(line)
+        if match and match.group(1).strip() not in ("", "<reason>"):
+            return []
+    return [("no-seams", "the Test plan needs a seam line or 'test plan: skipped: <a real reason>'")]
+
+
 # ── PR checks ────────────────────────────────────────────────────────────────
 
 
@@ -133,6 +161,14 @@ def check_pr_body(body, issue, repo=None):
         problems.append(("missing-spec-line", f"needs a 'Spec: {target}' line"))
     if not any(line.startswith("#") and "review" in line.lower() for line in lines):
         problems.append(("missing-review", "needs a Review section with the PR-diff review note"))
+    in_review = spec_check = False
+    for line in lines:
+        if line.startswith("#"):
+            in_review = "review" in line.lower()
+        elif in_review and re.match(r"Spec check: *\S", line):
+            spec_check = True
+    if not spec_check:
+        problems.append(("missing-spec-check", "the Review section needs a 'Spec check:' line"))
     return problems
 
 
@@ -228,6 +264,7 @@ def cmd_diff_check(base, repo_dir):
 EPILOG = """Examples:
   issue_lifecycle.py extract --body body.md > spec.md
   issue_lifecycle.py replace --body body.md --spec spec.md --out new-body.md
+  issue_lifecycle.py spec-check --spec spec.md
   issue_lifecycle.py pr-body-check --body pr.md --issue 42
   issue_lifecycle.py diff-check --base origin/main
 
@@ -256,6 +293,8 @@ def build_parser():
     p.add_argument("--body", required=True, help="current issue body file")
     p.add_argument("--spec", required=True, help="new spec file")
     p.add_argument("--out", required=True, help="where to write the new body")
+    p = sub.add_parser("spec-check", parents=[common], help="check the spec's Test plan")
+    p.add_argument("--spec", required=True, help="spec file")
     p = sub.add_parser("pr-body-check", parents=[common], help="validate a PR body")
     p.add_argument("--body", required=True, help="PR body file")
     p.add_argument("--issue", required=True, type=int, help="issue the PR closes")
@@ -290,6 +329,8 @@ def run(argv):
         new_body = replace_spec(read_text(args.body), read_text(args.spec))
         write_text(args.out, new_body)
         return EXIT_OK
+    if args.cmd == "spec-check":
+        return report(check_spec(read_text(args.spec)), args.json)
     if args.cmd == "pr-body-check":
         body = read_text(args.body)
         return report(check_pr_body(body, args.issue, args.repo), args.json)
