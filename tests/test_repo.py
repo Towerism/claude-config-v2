@@ -161,7 +161,7 @@ def test_nothing_personal_is_committed():
             assert not re.search(r"/home/\w|mfracker", path.read_text()), path
 
 
-# A pinned snapshot of OMC 5.7.13's agents and of the skills CLAUDE.global.md may name.
+# A pinned snapshot of OMC 5.7.13's agents, and of the skills (as of 5.7.30) CLAUDE.global.md may name.
 # A human bumps them when OMC changes; nothing derives them from the installed plugin.
 OMC_AGENTS = [
     "analyst", "architect", "code-reviewer", "code-simplifier", "critic", "debugger", "designer",
@@ -171,6 +171,7 @@ OMC_AGENTS = [
 OMC_SKILLS = [
     "deep-interview", "ralplan", "drydock", "execute", "tdd", "team", "ralph", "autopilot", "review",
     "verify", "pr", "plan", "research", "cancel", "minimal-prose-discipline", "agent-doc-discipline",
+    "minimal-code-discipline",
 ]
 
 
@@ -193,9 +194,12 @@ def global_bullets():
 
 
 BEFORE_CODE = "### Before you write code"
+REVIEW_AND_VERIFY = "### Review and verify"
+PRINCIPLES = "## Operating principles"
+GUARDRAILS = "## Guardrails (claude-config v2)"
 GIT_AND_PRS = "### Git and pull requests"
 UNTRUSTED = "### Untrusted text and secrets"
-GLOBAL_SECTIONS = [BEFORE_CODE, GIT_AND_PRS, UNTRUSTED]
+GLOBAL_SECTIONS = [BEFORE_CODE, REVIEW_AND_VERIFY, GIT_AND_PRS, UNTRUSTED]
 
 
 def global_section(heading):
@@ -210,18 +214,22 @@ def section_bullet(heading, *needles):
     return found[0]
 
 
-def test_global_rules_are_a_title_a_lead_and_three_sections_of_bullets():
-    """ADR-0009: short bullets in three sections, so a weaker model can follow them."""
+def test_global_rules_are_principles_then_a_title_a_lead_and_four_sections_of_bullets():
+    """ADR-0009, amended by ADR-0011: two bullets of operating principles, then the guardrails
+    as a title, a lead and short bullets in four sections, so a weaker model can follow them."""
     lines = [l for l in global_text().splitlines() if l.strip()]
-    assert lines[0].startswith("## ")
-    assert not lines[1].startswith(("#", "- "))
+    title = lines.index(GUARDRAILS)
+    assert lines[0] == PRINCIPLES and len(global_section(PRINCIPLES)) == 2 == title - 1
+    assert not lines[title + 1].startswith(("#", "- "))
+    assert [l for l in lines if l.startswith("## ")] == [PRINCIPLES, GUARDRAILS]
     assert [l for l in lines if l.startswith("### ")] == GLOBAL_SECTIONS
-    assert [l for l in lines[2:] if not l.startswith("### ")] == global_bullets()
+    assert [l for l in lines[title + 2:] if not l.startswith("### ")] == global_bullets()[2:]
     assert all(global_section(h) for h in GLOBAL_SECTIONS)
 
 
 def test_global_rules_lead_names_the_three_user_decisions():
-    lead = [l for l in global_text().splitlines() if l.strip()][1]
+    lines = [l for l in global_text().splitlines() if l.strip()]
+    lead = lines[lines.index(GUARDRAILS) + 1]
     for needle in ("three decisions", "approving the spec", "marking a PR ready", "merging"):
         assert needle in lead, needle
 
@@ -264,6 +272,66 @@ def test_pipeline_declaration_shows_both_marks_and_is_only_acknowledged():
     assert "<reason>" not in line
     section_bullet(BEFORE_CODE, "needs no approval of its own", "Approving the spec acknowledges it")
     section_bullet(BEFORE_CODE, "Before you run an approved spec with `autopilot`", "ralplan-<slug>.md")
+
+
+def test_spikes_close_questions_of_fact():
+    section_bullet(PRINCIPLES, "open question of fact", "cheap spike", "close the question yourself",
+                   "scratch directory", "never committed", "not the code change the approval gate covers")
+
+
+def test_dependencies_are_researched_not_remembered():
+    section_bullet(PRINCIPLES, "do not rely on memory", "`/oh-my-claudecode:research`", "what each replaces",
+                   "upkeep", "bundle size")
+
+
+def test_test_engineer_plans_the_seams_and_approval_covers_them():
+    section_bullet(BEFORE_CODE, "`oh-my-claudecode:test-engineer`", "without writing any file", "one line per seam",
+                   "what it catches and what it misses", "sized to the risk", "Approving the spec approves those seams")
+    section_bullet(BEFORE_CODE, "changes no code", "`skipped:`", "pipeline list")
+
+
+def test_tdd_and_minimal_code_discipline_load_before_any_code():
+    section_bullet(BEFORE_CODE, "Before you write code", "yourself or through an agent", "in every mode",
+                   "`/oh-my-claudecode:tdd`", "`/oh-my-claudecode:minimal-code-discipline`",
+                   "follow both for all of it", "counts as approved")
+
+
+def test_the_new_bullets_sit_between_deep_interview_and_the_pipeline_list():
+    bullets = global_section(BEFORE_CODE)
+    order = [bullets.index(section_bullet(BEFORE_CODE, *n)) for n in (
+        ("`/oh-my-claudecode:deep-interview`",), ("one line per seam",), ("changes no code",),
+        ("every item in it",), ("least complexity to own",), ("Name each new dependency",),
+        ("`/oh-my-claudecode:tdd`",), ("full OMC pipeline",))]
+    assert 0 < order[0] and order == sorted(order) and order[-1] - order[0] == 7
+
+
+def test_the_agent_builds_the_approved_spec_and_nothing_else():
+    section_bullet(BEFORE_CODE, "every item in it", "nothing outside it", "Non-Goals", "follow-up issue", "do not build it")
+
+
+def test_least_complexity_to_own_wins_and_browser_code_counts_bundle_size():
+    section_bullet(BEFORE_CODE, "least complexity to own", "each dependency's upkeep", "ships to a browser", "bundle size")
+
+
+def test_new_dependencies_are_named_in_the_spec():
+    section_bullet(BEFORE_CODE, "Name each new dependency in the spec", "what it replaces", "its size",
+                   "goes into the spec first", "back for approval")
+
+
+def test_review_and_verify_has_exactly_three_bullets():
+    bullets = global_section(REVIEW_AND_VERIFY)
+    trigger = section_bullet(REVIEW_AND_VERIFY, "Before you report the work done", "in every mode",
+                             "`/oh-my-claudecode:review`", "then `/oh-my-claudecode:verify`")
+    assert trigger.index("review`") < trigger.index("verify`")
+    section_bullet(REVIEW_AND_VERIFY, "In review and verify", "Non-Goals", "`scope:` findings", "not as defects")
+    section_bullet(REVIEW_AND_VERIFY, "abstraction", "only when it makes the code easier to read or to maintain")
+    assert len(bullets) == 3
+
+
+def test_revision_one_wording_is_gone():
+    text = global_text()
+    for phrase in ("rule on dependencies does not apply", "every diff, small ones included", "seams `tdd` tests"):
+        assert phrase not in text, phrase
 
 
 def test_global_rules_grant_the_feature_branch_push_and_draft_pr():
@@ -500,3 +568,30 @@ def test_ci_workflow_runs_lint_and_tests_on_pull_requests():
         r"uses: actions/setup-python@\S+.*\n\s+with:\s*\n\s+python-version: \"([\d.]+)\"", text
     )
     assert setup and setup[1] == floor[1]
+
+
+def test_adr_0011_cites_tdd_and_the_amended_adrs_cite_it():
+    assert "a seam nobody approved gets no tests" in adr(11)
+    assert "ADR-0011" in adr(6) and "ADR-0011" in adr(9) and "ADR-0011" not in adr(3)
+
+
+def test_omc_text_counts_only_if_the_skill_runs():
+    """ADR-0011: OMC skills rarely load on their own, so the block names when to load them."""
+    rule = "counts as coverage only if the skill runs"
+    assert rule in adr(11) and rule in adr(6)
+    assert rule in section((ROOT / "GLOSSARY.md").read_text(), "## Guardrails")
+    for count in ("`tdd` 0", "`minimal-code-discipline` 0"):
+        assert count in adr(11), count
+
+
+def test_gap_analysis_test_plan_row_is_not_covered():
+    row = next(l for l in (ROOT / "docs" / "gap-analysis.md").read_text().splitlines() if l.startswith("| Test plan"))
+    assert "Covered" not in row and "ADR-0011" in row and "spec-check" in row and "spec-test-plan" in row
+
+
+def test_glossary_names_the_seam_list_and_the_scope_finding():
+    text = (ROOT / "GLOSSARY.md").read_text()
+    assert "## Guardrails" in text
+    seams, scope = section(text, "## Seam list"), section(text, "## Scope finding")
+    assert "`test-engineer`" in seams and "`skipped:`" in seams and "`spec-check`" in seams
+    assert "`scope:`" in scope and "not a defect" in scope and "`spec-scope`" in scope and "verify" in scope
