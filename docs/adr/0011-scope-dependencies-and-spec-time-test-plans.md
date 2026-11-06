@@ -1,6 +1,6 @@
 # ADR-0011: Build exactly the spec, keep the complexity to own small, and plan the tests with the spec
 
-**Status:** Accepted by the owner on 2026-11-06, issue #54 (revision 4 of its spec). Amends ADR-0006 (the dropped test-plan rule, and when OMC text counts as coverage) and ADR-0009 (an operating-principles section, a fourth guardrails section, scenarios 14-17 and a context-limit note).
+**Status:** Accepted by the owner on 2026-11-06, issue #54 (revision 5 of its spec). Amends ADR-0006 (the dropped test-plan rule, and when OMC text counts as coverage) and ADR-0009 (an operating-principles section, a fourth guardrails section, scenarios 14-17 and a context-limit note).
 
 ## Context
 
@@ -41,11 +41,11 @@ So `tdd` 0 and `minimal-code-discipline` 0: their guidance never reached the mod
    - Name each new dependency in the spec. A dependency found mid-build sends the spec back for approval.
    - Before any code is written, `tdd` and `minimal-code-discipline` load and apply to all of it. A dependency named in the approved spec counts as approved under `minimal-code-discipline`'s "requested or approved".
 5. **Review and verify.**
-   - Before the work is reported done, `review` runs on the diff, then `verify`.
+   - Before the work is reported done, `/code-review` reviews the diff and `verify` runs, in parallel. OMC's `review` is for plans, not diffs.
    - Work outside the spec or under its Non-Goals is a `scope:` finding, not a defect.
    - An abstraction is asked for only when it makes the code easier to read or maintain.
    - The lifecycle `pr-body-check` requires a `Spec check:` line in the PR's review section.
-   - The advisory `spec-scope` gate checks the diff against the spec both ways inside `review`.
+   - The advisory `spec-scope` gate checks a plan against the spec both ways when OMC's `review` reviews it.
 6. **Quality gates** come from `config/omc.fragment.json`. `cfg.py` merges only its `qualityGates` key into OMC's user config (`$XDG_CONFIG_HOME/claude-omc/config.jsonc`), records the previous value in `state.json`, and undoes it on rollback. A file with comments stops the deploy, and nothing is written.
 
 The block's bullets cover repos with no tracker. The lifecycle checks cover every tracked spec and PR. The gates catch the gap inside OMC's own stages.

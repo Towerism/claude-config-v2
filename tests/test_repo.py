@@ -320,9 +320,9 @@ def test_new_dependencies_are_named_in_the_spec():
 
 def test_review_and_verify_has_exactly_three_bullets():
     bullets = global_section(REVIEW_AND_VERIFY)
-    trigger = section_bullet(REVIEW_AND_VERIFY, "Before you report the work done", "in every mode",
-                             "`/oh-my-claudecode:review`", "then `/oh-my-claudecode:verify`")
-    assert trigger.index("review`") < trigger.index("verify`")
+    section_bullet(REVIEW_AND_VERIFY, "Before you report the work done", "in every mode",
+                   "`/code-review` on the diff", "`/oh-my-claudecode:verify` in parallel")
+    assert "oh-my-claudecode:review" not in global_text()
     section_bullet(REVIEW_AND_VERIFY, "In review and verify", "Non-Goals", "`scope:` findings", "not as defects")
     section_bullet(REVIEW_AND_VERIFY, "abstraction", "only when it makes the code easier to read or to maintain")
     assert len(bullets) == 3
@@ -595,3 +595,9 @@ def test_glossary_names_the_seam_list_and_the_scope_finding():
     seams, scope = section(text, "## Seam list"), section(text, "## Scope finding")
     assert "`test-engineer`" in seams and "`skipped:`" in seams and "`spec-check`" in seams
     assert "`scope:`" in scope and "not a defect" in scope and "`spec-scope`" in scope and "verify" in scope
+
+
+def test_readme_lists_the_gate_skills_and_their_config():
+    rows = (ROOT / "README.md").read_text()
+    for needle in ("`spec-test-plan`", "`spec-scope`", "`config/omc.fragment.json`"):
+        assert needle in rows, needle

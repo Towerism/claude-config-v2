@@ -24,7 +24,7 @@ In every repo the user holds three decisions: approving the spec before any code
 - Before you run an approved spec with `autopilot`, save it as `.omc/plans/ralplan-<slug>.md`.
 
 ### Review and verify
-- Before you report the work done, in every mode, run `/oh-my-claudecode:review` on the diff, then `/oh-my-claudecode:verify`.
+- Before you report the work done, in every mode, run `/code-review` on the diff and `/oh-my-claudecode:verify` in parallel.
 - In review and verify, report work outside the approved spec or under its Non-Goals as `scope:` findings, not as defects.
 - Ask for an abstraction only when it makes the code easier to read or to maintain than the code without it.
 

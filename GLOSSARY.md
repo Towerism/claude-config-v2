@@ -32,7 +32,7 @@ One entry per term: definition, boundaries, one resolved ambiguity. Write here t
 - Boundary: an instruction only; nothing checks it, and it asks no separate question.
 
 ## Scope finding
-- Definition: a review or verify finding, marked `scope:`, for work in the diff that is outside the approved spec or under its Non-Goals; the `spec-scope` gate reports them too (ADR-0011).
+- Definition: a review or verify finding, marked `scope:`, for work in the diff that is outside the approved spec or under its Non-Goals; the `spec-scope` gate reports them in a plan (ADR-0011).
 - Boundary: not a defect. It asks to remove the work or move it to a follow-up issue, and never to grow the spec.
 
 ## Seam list

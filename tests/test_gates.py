@@ -41,3 +41,10 @@ def test_spec_scope_gate_matches_the_block_wording():
     text = " ".join((SKILLS / "spec-scope" / "SKILL.md").read_text().split())
     assert "Report work outside the approved spec or under its Non-Goals as `scope:` findings, not as defects." in text
     assert "Ask for an abstraction only when it makes the code easier to read or to maintain than the code without it." in text
+
+
+def test_spec_scope_checks_a_plan_not_a_diff():
+    """OMC's review stage reviews plans; a diff goes to /code-review (ADR-0011)."""
+    text = (SKILLS / "spec-scope" / "SKILL.md").read_text()
+    assert "reviewed plan" in text and "every spec item planned" in text
+    assert "diff" not in text
