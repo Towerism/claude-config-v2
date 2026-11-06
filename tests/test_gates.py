@@ -43,8 +43,9 @@ def test_spec_scope_gate_matches_the_block_wording():
     assert "Ask for an abstraction only when it makes the code easier to read or to maintain than the code without it." in text
 
 
-def test_spec_scope_checks_a_plan_not_a_diff():
-    """OMC's review stage reviews plans; a diff goes to /code-review (ADR-0011)."""
-    text = (SKILLS / "spec-scope" / "SKILL.md").read_text()
-    assert "reviewed plan" in text and "every spec item planned" in text
-    assert "diff" not in text
+def test_spec_scope_checks_the_reviewed_diff_and_its_verdict_rules_agree():
+    """omc-review is the stage for diff gates; deep-interview and ralplan are for planning gates."""
+    text = " ".join((SKILLS / "spec-scope" / "SKILL.md").read_text().split())
+    assert "reviewed changes" in text and "every spec item built" in text and "reviewed plan" not in text
+    assert "`VERDICT: PASS` when there is no `missing:` or `scope:` finding" in text
+    assert "return `VERDICT: PASS` with that one note" in text
