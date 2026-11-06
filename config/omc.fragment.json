@@ -1,0 +1,7 @@
+{
+  "qualityGates": {
+    "deep-interview": [{ "skill": "spec-test-plan", "mode": "blocking" }],
+    "ralplan": [{ "skill": "spec-test-plan", "mode": "blocking" }],
+    "omc-review": [{ "skill": "spec-scope", "mode": "advisory" }]
+  }
+}

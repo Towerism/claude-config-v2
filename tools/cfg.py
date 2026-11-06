@@ -20,6 +20,11 @@ deploy still runs with a warning, auto sync stays off, and the next deploy tries
 names a clone still to be made; status shows the last line of <home>/claude-config/sync.log,
 where the hook logs a failed sync.
 
+A deploy also sets the qualityGates key of OMC's user config, $XDG_CONFIG_HOME/claude-omc/config.jsonc
+(<target>/.config/claude-omc/config.jsonc with --target), from config/omc.fragment.json, keeping
+its other keys. state.json records the key's old value as omcGates, which rollback restores while
+the key is still the deployed one; status reports a key changed since.
+
 The Claude home is --target, else $CLAUDE_CONFIG_DIR, else ~/.claude.
 Standard library only: it runs on a machine with nothing installed but Python.
 """
@@ -112,6 +117,22 @@ def dump(obj: dict) -> bytes:
 
 def claude_home(arg: str | None) -> Path:
     return Path(arg or os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+
+
+def gate_config(target: str | None) -> Path:
+    """OMC's user config, which holds the quality gates. A --target deploy keeps it under the
+    target, so a trial deploy never writes the real one."""
+    if target:
+        return Path(target) / ".config" / "claude-omc" / "config.jsonc"
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    base = Path(xdg) if xdg and os.path.isabs(xdg) else Path.home() / ".config"
+    return base / "claude-omc" / "config.jsonc"
+
+
+def read_gate_config(path: Path) -> dict | None:
+    """The config as an object, None when missing or empty; CfgError (naming it) when it isn't
+    plain JSON, comments included, or not an object."""
+    return read_json(path) if _read(path) else None
 
 
 # --- the host profile and what it selects -------------------------------------
@@ -248,8 +269,8 @@ def remove_block(text: str) -> str:
 
 
 class Plan:
-    def __init__(self, home: Path, host: dict):
-        self.home, self.host = home, host
+    def __init__(self, home: Path, host: dict, gates: Path):
+        self.home, self.host, self.gates = home, host, gates
         self.state_dir = home / "claude-config"
         self.state = read_json(self.state_dir / "state.json")
         self.recorded: dict[str, str] = {
@@ -281,6 +302,10 @@ class Plan:
         self.claude_md = merge_claude_md(old_md).encode()
         self.clone = self.state.get("syncClone")  # main() sets it before a deploy
         self.settings_changed = self.settings != _read(home / "settings.json")
+        self.gates_old = read_gate_config(gates)
+        fragment = json.loads((ROOT / "config" / "omc.fragment.json").read_text(encoding="utf-8"))
+        self.gates_want = fragment["qualityGates"]
+        self.gates_changed = (self.gates_old or {}).get("qualityGates") != self.gates_want
         self.claude_md_changed = self.claude_md != _read(home / "CLAUDE.md")
 
     def lines(self) -> list[str]:
@@ -288,6 +313,8 @@ class Plan:
         for label, rels in (("add", self.add), ("update", self.update), ("remove", self.remove)):
             out += [f"  {label:7}{rel}" + ("   CONFLICT (live file changed since last deploy)" if rel in self.conflicts else "") for rel in rels]
         out += [f"  merge  {name}" for name, changed in (("settings.json", self.settings_changed), ("CLAUDE.md", self.claude_md_changed)) if changed]
+        if self.gates_changed:
+            out.append(f"  merge  qualityGates into {self.gates}")
         if self.state and (self.host["name"], self.host.get("defaultTracker")) != (
             self.state.get("host"), self.state.get("defaultTracker")
         ):
@@ -304,7 +331,8 @@ class Plan:
             return True  # same files, different machine role: state.json must still be rewritten
         if self.clone != self.state.get("syncClone"):
             return True  # a new sync clone must still be recorded
-        return bool(self.add or self.update or self.remove or self.settings_changed or self.claude_md_changed)
+        return bool(self.add or self.update or self.remove or self.settings_changed
+                    or self.claude_md_changed or self.gates_changed)
 
 
 def read_text(path: Path) -> str:
@@ -362,11 +390,52 @@ def deploy(plan: Plan) -> None:
         "claudeMdSha": sha(plan.claude_md),
         "deployedAt": final.name,
         **({"syncClone": plan.clone} if plan.clone else {}),
+        "omcGates": {"path": str(plan.gates), **gate_record(plan.gates_old), "deployed": plan.gates_want},
     }
     write_atomic(plan.state_dir / "state.json", dump(state))
+    if plan.gates_changed:  # after state.json: a deploy that stops before it never touched the gates
+        merged = {**(plan.gates_old or {}), "qualityGates": plan.gates_want}
+        write_atomic(plan.gates, dump(merged), follow=True)
     old = sorted(p for p in (plan.state_dir / "backups").iterdir() if p.is_dir())
     for stale in old[:-KEEP_BACKUPS]:
         shutil.rmtree(stale)
+
+
+def gate_record(old: dict | None) -> dict:
+    if old is not None and "qualityGates" in old:
+        return {"hadKey": True, "previous": old["qualityGates"]}
+    return {"hadKey": False}
+
+
+def recorded_gates(state: dict) -> tuple[Path, dict] | None:
+    """The gate config the last deploy wrote and its record; CfgError for a path that isn't one."""
+    record = state.get("omcGates")
+    if not isinstance(record, dict):
+        return None
+    path = Path(str(record.get("path", "")))
+    if not path.is_absolute() or path.name != "config.jsonc" or path.parent.name != "claude-omc":
+        raise CfgError(f"refusing gate config path in state.json: {record.get('path')!r}")
+    return path, record
+
+
+def rollback_gates(state: dict) -> list[str]:
+    """Put back the qualityGates key the last deploy replaced, unless it was edited since."""
+    found = recorded_gates(state)
+    if found is None:
+        return []
+    path, record = found
+    try:
+        live = read_gate_config(path)
+    except CfgError:
+        live = None
+    if live is None or live.get("qualityGates") != record.get("deployed"):
+        return [f"{path}: qualityGates changed after the deploy: left as it is"]
+    if record.get("hadKey"):
+        live["qualityGates"] = record.get("previous")
+    else:
+        del live["qualityGates"]
+    write_atomic(path, dump(live), follow=True)
+    return []
 
 
 def _prune_dirs(path: Path, stop: Path) -> None:
@@ -404,6 +473,8 @@ def rollback(home: Path) -> list[str]:
         "CLAUDE.md": (state.get("claudeMdSha"), remove_block),
     }
     finished = latest.name == state.get("deployedAt")
+    if finished:  # an unfinished deploy never wrote the gates; state.json describes an older one
+        notes += rollback_gates(state)
     for rel, (digest, strip) in shared.items() if finished else ():
         live = home / rel
         if live.exists() and digest and sha(live.read_bytes()) != digest:
@@ -453,7 +524,7 @@ def unmerge_settings(text: str, state: dict) -> str:
     return dump(data).decode()
 
 
-def status(home: Path) -> list[str]:
+def status(home: Path, gates: Path) -> list[str]:
     state = read_json(home / "claude-config" / "state.json")
     if not state:
         return [f"{home}: no deploy recorded"]
@@ -464,8 +535,16 @@ def status(home: Path) -> list[str]:
             out.append(f"  missing   {rel}")
         elif sha(live.read_bytes()) != digest:
             out.append(f"  modified  {rel}")
+    found = recorded_gates(state)
+    if found:
+        path, record = found
+        live = read_gate_config(path)
+        if live is None:
+            out.append(f"  missing   {path}")
+        elif live.get("qualityGates") != record.get("deployed"):
+            out.append(f"  modified  {path}")
     host = load_host(state.get("host", ""))
-    pending = Plan(home, host)
+    pending = Plan(home, host, gates)
     out += [f"  pending   {line.strip()}" for line in pending.lines()[1:] if "nothing to change" not in line]
     if len(out) == 1:
         out.append("  in sync")
@@ -568,7 +647,7 @@ def main(argv: list[str] | None = None) -> int:
     home = claude_home(args.target)
     try:
         if args.command == "status":
-            print("\n".join(status(home)))
+            print("\n".join(status(home, gate_config(args.target))))
             return 0
         if args.command == "rollback":
             name, *notes = rollback(home)
@@ -577,7 +656,7 @@ def main(argv: list[str] | None = None) -> int:
         name = args.host or read_json(home / "claude-config" / "state.json").get("host")
         if not name:
             raise CfgError("first deploy on this machine needs --host NAME")
-        plan = Plan(home, load_host(name))
+        plan = Plan(home, load_host(name), gate_config(args.target))
         print("\n".join(plan.lines()))
         if args.command == "plan" or not args.yes:
             if args.command == "deploy":

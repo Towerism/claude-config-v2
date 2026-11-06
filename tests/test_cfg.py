@@ -594,3 +594,105 @@ def test_rollback_with_settings_broken_after_deploy_changes_nothing(home, capsys
 def test_host_names_are_plain(home, name, capsys):
     assert run(home, "plan", "--host", name) == 2
     assert "invalid host name" in capsys.readouterr().err
+
+
+# --- the OMC quality gates cfg merges into OMC's user config -------------------------------
+
+# The value the spec's "OMC quality gates" section names, written out here independently.
+GATES = {
+    "deep-interview": [{"skill": "spec-test-plan", "mode": "blocking"}],
+    "ralplan": [{"skill": "spec-test-plan", "mode": "blocking"}],
+    "omc-review": [{"skill": "spec-scope", "mode": "advisory"}],
+}
+
+
+def gate_config(home):
+    """With --target, the gate config sits under the target, never under $XDG_CONFIG_HOME."""
+    return home / ".config" / "claude-omc" / "config.jsonc"
+
+
+def test_plan_and_deploy_create_a_missing_gate_config(home, capsys):
+    run(home, "plan", "--host", "personal")
+    assert str(gate_config(home)) in capsys.readouterr().out
+    assert run(home, "deploy", "--host", "personal", "--yes") == 0
+    assert json.loads(gate_config(home).read_text()) == {"qualityGates": GATES}
+    state = json.loads((home / "claude-config" / "state.json").read_text())
+    assert state["omcGates"] == {"path": str(gate_config(home)), "hadKey": False, "deployed": GATES}
+
+
+def test_an_empty_gate_config_counts_as_missing(home):
+    gate_config(home).parent.mkdir(parents=True)
+    gate_config(home).write_text("")
+    assert run(home, "deploy", "--host", "personal", "--yes") == 0
+    assert json.loads(gate_config(home).read_text()) == {"qualityGates": GATES}
+
+
+def test_deploy_merges_the_gates_and_keeps_the_other_keys(home):
+    old = {"theme": "x", "qualityGates": {"ralplan": ["mine"]}, "nested": {"a": [1, 2]}}
+    gate_config(home).parent.mkdir(parents=True)
+    gate_config(home).write_text(json.dumps(old))
+    assert run(home, "deploy", "--host", "personal", "--yes") == 0
+    new = json.loads(gate_config(home).read_text())
+    assert new.pop("qualityGates") == GATES
+    assert new == {"theme": "x", "nested": {"a": [1, 2]}}
+    state = json.loads((home / "claude-config" / "state.json").read_text())
+    assert state["omcGates"]["hadKey"] is True and state["omcGates"]["previous"] == {"ralplan": ["mine"]}
+
+
+@pytest.mark.parametrize("old,after", [
+    ({"theme": "x", "qualityGates": {"ralplan": ["mine"]}}, {"theme": "x", "qualityGates": {"ralplan": ["mine"]}}),
+    ({"theme": "x"}, {"theme": "x"}),
+], ids=["restores-previous", "removes-added-key"])
+def test_rollback_restores_the_gates_from_before_the_deploy(home, old, after):
+    gate_config(home).parent.mkdir(parents=True)
+    gate_config(home).write_text(json.dumps(old))
+    run(home, "deploy", "--host", "personal", "--yes")
+    assert run(home, "rollback") == 0
+    assert json.loads(gate_config(home).read_text()) == after
+
+
+def test_rollback_leaves_gates_edited_after_the_deploy(home, capsys):
+    run(home, "deploy", "--host", "personal", "--yes")
+    gate_config(home).write_text(json.dumps({"qualityGates": {"ralplan": ["edited"]}}))
+    capsys.readouterr()
+    assert run(home, "rollback") == 0
+    assert str(gate_config(home)) in capsys.readouterr().out
+    assert json.loads(gate_config(home).read_text()) == {"qualityGates": {"ralplan": ["edited"]}}
+
+
+def test_status_reports_gate_drift(home, capsys):
+    run(home, "deploy", "--host", "personal", "--yes")
+    capsys.readouterr()
+    run(home, "status")
+    assert "in sync" in capsys.readouterr().out
+    gate_config(home).write_text(json.dumps({"qualityGates": {}}))
+    run(home, "status")
+    assert f"modified  {gate_config(home)}" in capsys.readouterr().out
+    gate_config(home).unlink()
+    run(home, "status")
+    assert f"missing   {gate_config(home)}" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("text", ['// mine\n{"theme": "x"}\n', "[1, 2]\n"], ids=["comments", "not-an-object"])
+def test_an_unreadable_gate_config_stops_the_deploy_and_nothing_is_written(home, text, capsys):
+    gate_config(home).parent.mkdir(parents=True)
+    gate_config(home).write_text(text)
+    assert run(home, "deploy", "--host", "personal", "--yes") == 2
+    assert str(gate_config(home)) in capsys.readouterr().err
+    assert gate_config(home).read_text() == text
+    assert sorted(p.name for p in home.iterdir()) == [".config"]
+
+
+def test_a_target_deploy_never_touches_the_real_gate_config(home, fresh_home):
+    assert run(home, "deploy", "--host", "personal", "--yes") == 0
+    assert gate_config(home).is_file()
+    assert not (fresh_home / ".config" / "claude-omc").exists()
+
+
+def test_without_a_target_the_gate_config_follows_xdg_config_home(tmp_path, monkeypatch, fresh_home):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    assert cfg.main(["deploy", "--host", "personal", "--yes"]) == 0
+    path = tmp_path / "xdg" / "claude-omc" / "config.jsonc"
+    assert json.loads(path.read_text()) == {"qualityGates": GATES}
+    assert not (fresh_home / ".config" / "claude-omc").exists()
