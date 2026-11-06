@@ -1,6 +1,6 @@
 # ADR-0006: OMC leads the pipeline; the user approves and merges
 
-**Status:** Accepted by the owner on 2026-10-29, issue #42. Decision 2 amended by ADR-0008 (the feature-branch push grant) and ADR-0009 (the block's shape). Decision 6 amended by ADR-0010 (`merge_confirm.py` removed).
+**Status:** Accepted by the owner on 2026-10-29, issue #42. Decision 2 amended by ADR-0008 (the feature-branch push grant) and ADR-0009 (the block's shape). Decision 6 amended by ADR-0010 (`merge_confirm.py` removed). The dropped test-plan rule is restored by ADR-0011, which also limits decision 2: OMC text counts as coverage only if the skill runs, and otherwise the block names when to load it.
 
 ## Context
 
@@ -62,7 +62,8 @@ The guardrails block in `config/CLAUDE.global.md` had grown to 76 lines: a numbe
 | Rule | Afterwards |
 |---|---|
 | First-prompt bypass | Gone everywhere |
-| Test plan before the spec; prose by owner; the cold-reader rule | OMC's choice (OMC's `minimal-prose-discipline`) |
+| Test plan before the spec | Restored by ADR-0011: `test-engineer` plans the seams, and the lifecycle `spec-check` and the `spec-test-plan` gate enforce it |
+| Prose by owner; the cold-reader rule | OMC's choice (OMC's `minimal-prose-discipline`) |
 | Never commit to, push, force-push or delete the default branch (`bash_guard.py` rules 1-2) | Unenforced |
 | Conventional Commits and branch naming (`bash_guard.py` rules 3-4, `commit-check`, `branch-name`) | Unenforced; a convention in each skill's `references/git-workflow.md` |
 | Tokens and secret files in commits; reading `.env` or `deny-terms` (`bash_guard.py` rule 5, `secrets_guard.py`) | Text only (the Safety line) |
@@ -104,6 +105,6 @@ ADR-0001 said this repo adds only gaps, and listed approval and git guardrails, 
 
 ## Consequences
 
-- The `autopilot` hand-off depends on OMC 5.7.14 skipping its planning for `.omc/plans/ralplan-*.md`. Recheck it, and the "Sentences left to others" table, on each OMC upgrade.
+- The `autopilot` hand-off depends on OMC 5.7.14 skipping its planning for `.omc/plans/ralplan-*.md`. Recheck it, and the "Sentences left to others" table, on each OMC upgrade. The table, first checked against 5.7.14, was rechecked against 5.7.30 on 2026-11-06 (#54), and every row still holds.
 - Jira's `approve` moves a ticket only forward, so a reopened ticket in a done state is not moved back to in progress.
 - ADR-0005 is superseded, and ADR-0004 is superseded in part.

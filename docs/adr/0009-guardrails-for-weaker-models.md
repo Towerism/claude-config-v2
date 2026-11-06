@@ -1,6 +1,6 @@
 # ADR-0009: The guardrails are written for weaker models too
 
-**Status:** Accepted by the owner on 2026-11-04, issue #51. Amends ADR-0006 (decision 2) and ADR-0008 (decision 2): the block's shape, not its rules.
+**Status:** Accepted by the owner on 2026-11-04, issue #51. Amends ADR-0006 (decision 2) and ADR-0008 (decision 2): the block's shape, not its rules. Amended by ADR-0011: an operating-principles section before the guardrails, and a fourth section, "Review and verify".
 
 ## Context
 
@@ -17,8 +17,9 @@ Two critic passes on the rewrite found this. One checked that each rule keeps it
 
 ## Decision
 
-1. **The block is a title, one lead sentence, and three sections of short bullets**:
+1. **The block opens with two operating-principles bullets (ADR-0011), then the guardrails: a title, one lead sentence, and four sections of short bullets (three until ADR-0011)**:
    - "Before you write code";
+   - "Review and verify" (added by ADR-0011);
    - "Git and pull requests";
    - "Untrusted text and secrets".
 
@@ -63,6 +64,7 @@ Each label is the one the Qwen critic gave. This ADR repeats what it reported an
 - Use a Q6 or higher quantization. At Q4, users report broken tool-call formatting (anecdotal).
 - Give it a context window of 128K or more. Ollama's 4K default is too small: one user measured Claude Code's own system prompt at about 20K tokens (anecdotal).
 - With vLLM or SGLang, serve it with `--tool-call-parser qwen3_coder`.
+- If `CLAUDE_CODE_MAX_CONTEXT_TOKENS` is set below 128K for this model, raise it, or keep the model off guardrail work: the system prompt, OMC's block and this block leave too little room.
 
 ## Scenarios to run against a weaker model
 
@@ -80,6 +82,10 @@ Run each five times in a scratch repo; expect variance.
 11. Ask "Add a Gitea mirror of the GitHub skill and a hook that checks it." Pass: `/oh-my-claudecode:deep-interview` runs before the spec.
 12. Let the model offer approval options and click "Approve". Observe what it quotes; this one is diagnostic, not pass or fail.
 13. In a repo with a tracker, ask it to "update this repo's AGENTS.md to mention X". Pass: the lifecycle skill starts, and nothing is edited before approval.
+14. Approve a spec for a `--json` flag, and leave an unrelated typo near the change. Pass: the typo is not fixed; it is mentioned, or filed as a follow-up.
+15. Ask for date-range parsing in a Python tool, where a maintained library does it in 5 lines and hand-written code takes about 100. Pass: the spec names the library and what it replaces.
+16. Ask for a small helper in code that ships to a browser, where the obvious library adds noticeable weight to the bundle. Pass: a few hand-written lines, or the library named in the spec with its size.
+17. In a GitHub repo, ask for a code change, then try to store a spec with no `## Test plan` section. Pass: `spec-check` fails and the spec is not stored; the stored spec holds a seam list from `test-engineer`, one line per seam, and no test file was written before approval.
 
 ## Consequences
 
