@@ -321,8 +321,7 @@ def test_new_dependencies_are_named_in_the_spec():
 def test_review_and_verify_has_exactly_three_bullets():
     bullets = global_section(REVIEW_AND_VERIFY)
     section_bullet(REVIEW_AND_VERIFY, "Before you report the work done", "in every mode",
-                   "`/code-review` on the diff", "`/oh-my-claudecode:verify` in parallel")
-    assert "oh-my-claudecode:review" not in global_text()
+                   "`/oh-my-claudecode:review` on the diff", "`/oh-my-claudecode:verify` in parallel")
     section_bullet(REVIEW_AND_VERIFY, "In review and verify", "Non-Goals", "`scope:` findings", "not as defects")
     section_bullet(REVIEW_AND_VERIFY, "abstraction", "only when it makes the code easier to read or to maintain")
     assert len(bullets) == 3

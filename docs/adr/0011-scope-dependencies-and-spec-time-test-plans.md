@@ -41,7 +41,7 @@ So `tdd` 0 and `minimal-code-discipline` 0: their guidance never reached the mod
    - Name each new dependency in the spec. A dependency found mid-build sends the spec back for approval.
    - Before any code is written, `tdd` and `minimal-code-discipline` load and apply to all of it. A dependency named in the approved spec counts as approved under `minimal-code-discipline`'s "requested or approved".
 5. **Review and verify.**
-   - Before the work is reported done, `/code-review` reviews the diff and `verify` runs, in parallel. OMC's `review` is for plans, not diffs.
+   - Before the work is reported done, `/oh-my-claudecode:review` reviews the diff and `verify` runs, in parallel, so the `spec-scope` gate at `omc-review` fires on that run.
    - Work outside the spec or under its Non-Goals is a `scope:` finding, not a defect.
    - An abstraction is asked for only when it makes the code easier to read or maintain.
    - The lifecycle `pr-body-check` requires a `Spec check:` line in the PR's review section.
