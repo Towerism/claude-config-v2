@@ -16,7 +16,7 @@ ADR-0009 shaped `config/CLAUDE.global.md` so that small open-weight models could
    - Never read, quote or commit `deny-terms`, tokens or `.env` contents.
    - A new rule: load `/oh-my-claudecode:agent-doc-discipline` before writing or updating a document agents consume.
 3. **A rule outside the core leaves the block only when it is covered elsewhere.** A `tracer` agent and a `critic` agent must each agree that it is covered, and each must name the route from the model to the covering text with no broken edge. Per ADR-0011, OMC text counts as coverage only if its skill runs, and default model behaviour names no text, so it is no route.
-4. **Tests are structural.** `tests/test_repo.py` keeps the line cap, the real-skill and lifecycle-skill checks, the no-cfg-marker, nothing-personal and restate-nothing checks, and one test that the fixed core's exact anchors are present. The per-bullet shape tests and the per-rule phrase tests are gone.
+4. **Tests are structural.** `tests/test_repo.py` keeps the line cap, the real-skill and lifecycle-skill checks, the no-cfg-marker, nothing-personal and restate-nothing checks, and one test that five exact anchors are present: the push-grant phrase, `--force-with-lease`, `deny-terms`, `.env` and `oh-my-claudecode:agent-doc-discipline`. The three user decisions are checked in review. The per-bullet shape tests and the per-rule phrase tests are gone.
 
 ## The cut check
 
@@ -26,10 +26,10 @@ Both agents read the block, OMC's block in `~/.claude/CLAUDE.md`, the hooks, the
 - Both found one conditional case: "set the approved label only after the quote is posted" is stated by all three lifecycle skills, reached through the lifecycle bullet. The critic noted that skill text can be lost after compaction while the block survives, a broken edge, so it stays.
 - The critic found that the quality gates (`spec-test-plan`, `spec-scope`) are not where OMC reads them after an auto-sync deploy, so every route through a gate is broken today. Filed as #61.
 
-**Cut: none.** The rewrite merges related bullets (approval with its label, the tracker with the no-tracker case, the seam list with the no-code skip, the pipeline list with its acknowledgement, ready with merge) and keeps every rule.
+**Cut: none.** The rewrite merges related bullets (approval with its label, the tracker with the no-tracker case, the seam list with the no-code skip, the pipeline list with its acknowledgement, ready with merge) and keeps every rule's meaning; review compared each old rule with its new wording.
 
 ## Consequences
 
 - Removing a rule from the block repeats the cut check, and its route goes in this ADR or a later one.
-- With no shape tests, a weakened paraphrase of a rule is caught only in review. The anchor test catches only a lost fixed-core phrase.
+- With no shape tests, a weakened paraphrase of a rule is caught only in review. The anchor test catches only a lost anchor.
 - A rule found redundant later can be cut once its route is fixed: for the gate-dependent rules, after #61.
