@@ -21,9 +21,10 @@ names a clone still to be made; status shows the last line of <home>/claude-conf
 where the hook logs a failed sync.
 
 A deploy also sets the qualityGates key of OMC's user config, $XDG_CONFIG_HOME/claude-omc/config.jsonc
-(<target>/.config/claude-omc/config.jsonc with --target), from config/omc.fragment.json, keeping
-its other keys. state.json records the key's old value as omcGates, which rollback restores while
-the key is still the deployed one; status reports a key changed since.
+(<target>/.config/claude-omc/config.jsonc with a --target other than the real Claude home), from
+config/omc.fragment.json, keeping its other keys. state.json records the key's old value as
+omcGates, which rollback restores while the key is still the deployed one; status reports a key
+changed since.
 
 The Claude home is --target, else $CLAUDE_CONFIG_DIR, else ~/.claude.
 Standard library only: it runs on a machine with nothing installed but Python.
@@ -121,8 +122,9 @@ def claude_home(arg: str | None) -> Path:
 
 def gate_config(target: str | None) -> Path:
     """OMC's user config, which holds the quality gates. A --target deploy keeps it under the
-    target, so a trial deploy never writes the real one."""
-    if target:
+    target, so a trial deploy never writes the real one, unless the target is the real Claude
+    home, as in auto sync's deploys."""
+    if target and Path(target).resolve() != claude_home(None).resolve():
         return Path(target).resolve() / ".config" / "claude-omc" / "config.jsonc"
     xdg = os.environ.get("XDG_CONFIG_HOME")
     base = Path(xdg) if xdg and os.path.isabs(xdg) else Path.home() / ".config"
