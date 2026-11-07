@@ -1,6 +1,6 @@
 # ADR-0009: The guardrails are written for weaker models too
 
-**Status:** Accepted by the owner on 2026-11-04, issue #51. Amends ADR-0006 (decision 2) and ADR-0008 (decision 2): the block's shape, not its rules. Amended by ADR-0011: an operating-principles section before the guardrails, and a fourth section, "Review and verify".
+**Status:** Accepted by the owner on 2026-11-04, issue #51. Amends ADR-0006 (decision 2) and ADR-0008 (decision 2): the block's shape, not its rules. Amended by ADR-0011: an operating-principles section before the guardrails, and a fourth section, "Review and verify". Superseded by ADR-0012 (issue #60): the block is read only by Anthropic models.
 
 ## Context
 

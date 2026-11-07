@@ -1,6 +1,6 @@
 # ADR-0008: OMC pushes the feature branch and opens a draft PR in any mode
 
-**Status:** Accepted by the owner on 2026-10-30, issue #48. Amends ADR-0004 ("Layering with OMC") and ADR-0006 (decision 2). Decision 2's wording amended by ADR-0009.
+**Status:** Accepted by the owner on 2026-10-30, issue #48. Amends ADR-0004 ("Layering with OMC") and ADR-0006 (decision 2). Decision 2's wording amended by ADR-0009, superseded by ADR-0012; the push-grant phrase stays word for word.
 
 ## Context
 

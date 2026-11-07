@@ -17,7 +17,7 @@ One entry per term: definition, boundaries, one resolved ambiguity. Write here t
 - Boundary: the repo's own CLAUDE.md overrides it; a top-level `defaultTracker` in `local.json` is ignored.
 
 ## Guardrails
-- Definition: the marked block in `config/CLAUDE.global.md`, shaped as ADR-0009 records; each rule states something no OMC text, lifecycle skill or hook already states (ADR-0006, ADR-0008, ADR-0009, ADR-0011).
+- Definition: the marked block in `config/CLAUDE.global.md`, written for Anthropic models only (ADR-0012); each rule states something no OMC text, lifecycle skill or hook already states (ADR-0006, ADR-0008, ADR-0011, ADR-0012).
 - Boundary: a rule already stated by OMC, a skill or a hook is not repeated there; the guardrails never choose OMC's stages, agents or runner. OMC text counts as coverage only if the skill runs; otherwise the guardrails name when to load it (ADR-0011).
 - Resolved ambiguity: ADR-0006 amends ADR-0001's gap list; approving the spec, marking a PR ready and merging, each on the user's word, are the only fixed rules (ADR-0008).
 
