@@ -689,6 +689,22 @@ def test_a_target_deploy_never_touches_the_real_gate_config(home, fresh_home):
     assert not (fresh_home / ".config" / "claude-omc").exists()
 
 
+@pytest.mark.parametrize("spelling", ["same", "symlink", "dotdot"])
+def test_a_target_that_is_the_real_claude_home_writes_the_gates_where_omc_reads_them(tmp_path, monkeypatch, spelling):
+    real = tmp_path / "claude"
+    (real / "sub").mkdir(parents=True)
+    target = {"same": real, "symlink": tmp_path / "link", "dotdot": real / "sub" / ".."}[spelling]
+    if spelling == "symlink":
+        target.symlink_to(real)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(real))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    assert run(target, "deploy", "--host", "personal", "--yes") == 0
+    path = tmp_path / "xdg" / "claude-omc" / "config.jsonc"
+    assert json.loads(path.read_text()) == {"qualityGates": GATES}
+    assert json.loads((real / "claude-config" / "state.json").read_text())["omcGates"]["path"] == str(path)
+    assert not (real / ".config").exists()
+
+
 def test_without_a_target_the_gate_config_follows_xdg_config_home(tmp_path, monkeypatch, fresh_home):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
