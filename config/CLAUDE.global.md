@@ -13,10 +13,15 @@ In every repo the user holds three decisions: approving the spec before any code
 - A new feature, or a change spanning more than one component, starts with `/oh-my-claudecode:deep-interview`.
 - A spec that changes code carries a seam list from `oh-my-claudecode:test-engineer`, planned without writing files: one line per seam with what it catches and what it misses, sized to the risk. Approving the spec approves the seams. A spec that changes no code marks the test plan `skipped:` with the reason in the pipeline list.
 - Build every item in the approved spec and nothing outside it. Ideas that come up along the way go under Non-Goals or into a follow-up issue, unbuilt.
-- Pick the correct option with the least complexity to own, counting your own code plus each dependency's upkeep, and bundle size for code that ships to a browser. Name each new dependency in the spec with what it replaces (and its size, for browser code); one found mid-build goes into the spec first, and the spec goes back for approval. A dependency named in the approved spec counts as approved.
 - Before writing code, in every mode and including delegated work, load `/oh-my-claudecode:tdd` and `/oh-my-claudecode:minimal-code-discipline` and follow both for all of it.
 - With the spec, show the full OMC pipeline for the change, one stage per line, each marked `will run` or `skipped:` with the reason (e.g. `review: skipped: docs-only change`). Approving the spec acknowledges it; it needs no separate approval.
 - Before running an approved spec with `autopilot`, save it as `.omc/plans/ralplan-<slug>.md`.
+
+### Dependencies and tests
+- **Least own code wins.** Add as many proven, widely used dependencies as it takes to keep your own code smallest; having few dependencies is not a goal. Why: your code is what we maintain, and a mature library has already handled its edge cases. For code that ships to a browser, also count bundle size.
+- Name each new dependency in the spec with what it replaces (and its size, for browser code); one found mid-build goes into the spec first, and the spec goes back for approval. A dependency named in the approved spec counts as approved.
+- **Weigh each edge case before handling it.** Add handling only when it is realistic for how the code is actually used and the code to catch it is small next to the risk. Otherwise leave it out and say why in the spec. Why: gold plating costs upkeep and protects nothing.
+- **Test real logic only.** Drop a test that just repeats the code line by line (literal paths, fixed command lists), and don't re-test what a linter in the same pipeline already checks. List each behaviour left untested in a `Not tested, and why` list in the spec's test plan.
 
 ### Review and verify
 - Before reporting work done, in every mode, run `/oh-my-claudecode:review` on the diff and `/oh-my-claudecode:verify` in parallel.
