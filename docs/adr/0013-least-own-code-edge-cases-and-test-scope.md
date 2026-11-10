@@ -4,7 +4,7 @@
 
 ## Context
 
-ADR-0011 told the agent to pick the option with the least complexity to own, counting its own code plus each dependency's upkeep. In practice that wording made the agent hand-write small utilities rather than add a proven library, added edge-case handling no real use needed, and wrote tests that repeat the code line by line or re-check what a linter already checks.
+ADR-0011 told the agent to pick the option with the least complexity to own, counting its own code plus each dependency's upkeep. The owner asked for three rules in its place, each with its reason: our own code is what we maintain and a mature library has already handled its edge cases; gold plating costs upkeep and protects nothing; and a test that repeats the code, or re-checks what a linter in the same pipeline checks, protects nothing either.
 
 ## Decision
 
