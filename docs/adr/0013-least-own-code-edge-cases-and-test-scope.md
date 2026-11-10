@@ -4,7 +4,7 @@
 
 ## Context
 
-ADR-0011 told the agent to pick the option with the least complexity to own, counting its own code plus each dependency's upkeep. The owner asked for three rules in its place, each with its reason: our own code is what we maintain and a mature library has already handled its edge cases; gold plating costs upkeep and protects nothing; and a test that repeats the code, or re-checks what a linter in the same pipeline checks, protects nothing either.
+ADR-0011 told the agent to pick the option with the least complexity to own, counting its own code plus each dependency's upkeep. The owner asked for three rules: the first replaces that principle, and the other two are new. The owner gave a reason for the first two: our own code is what we maintain, and a mature library has already handled its edge cases; gold plating costs upkeep and protects nothing.
 
 ## Decision
 
@@ -16,5 +16,5 @@ The rules live in `config/CLAUDE.global.md` under `### Dependencies and tests`.
 
 ## Consequences
 
-- The `Not tested, and why` list is text only. `spec-check` does not enforce it (the owner's choice), so a missing list is caught only in review.
-- ADR-0003 (stdlib-only skill scripts) is unchanged and still overrides decision 1 for skill scripts.
+- The `Not tested, and why` list is text only: by the owner's choice, `spec-check` does not enforce it.
+- ADR-0003 is unchanged: this repo's skill scripts stay standard-library only, as its CLAUDE.md says, whatever decision 1 says elsewhere.
