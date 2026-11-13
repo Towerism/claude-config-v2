@@ -10,7 +10,7 @@ Checked against tea 0.16.0.
 |---|---|
 | Who am I | `GET user` → `login` |
 | Read | `GET repos/<o>/<r>/issues/N`; a non-null `pull_request` means N is a PR, not an issue |
-| Search | `GET "repos/<o>/<r>/issues?state=open&type=issues&limit=10&q=<words>"`, then `state=all` |
+| Search | `GET "repos/<o>/<r>/issues?state=open&type=issues&limit=10&q=<words>"`, then `state=all`; join the words with `+` (`q=fix+login`), as tea sends the URL unencoded and a space gets a 400 |
 | Create | `-X POST repos/<o>/<r>/issues` with `{"title": …, "body": …, "assignees": ["<login>"]}` |
 | Assign | `-X PATCH repos/<o>/<r>/issues/N` with `{"assignees": ["<login>"]}` |
 | Description | `-X PATCH repos/<o>/<r>/issues/N` with `{"body": …}` |

@@ -15,7 +15,7 @@ Read the `jira` object in `$XDG_CONFIG_HOME/claude-config/local.json` (`~/.confi
 }
 ```
 
-`project` and the three `states` are required: when one is missing, stop and show the user this example. `defaultIssueType` defaults to `Task`; `addToActiveSprint` to `false`. The values are invented; each project sets its own.
+`project` and the three `states` are required: when one is missing, skip the Jira update and show the user this example. `defaultIssueType` defaults to `Task`; `addToActiveSprint` to `false`. The values are invented; each project sets its own.
 
 ## Commands
 
@@ -25,7 +25,7 @@ Read the `jira` object in `$XDG_CONFIG_HOME/claude-config/local.json` (`~/.confi
 |---|---|
 | Who am I | `jira me` |
 | Read | `jira issue view KEY --raw` (`fields.status.name`, `fields.assignee`) |
-| Search | `jira issue list -p <project> -q "statusCategory != Done" --plain --no-headers --columns key,summary,status,assignee --paginate 0:10 -- "<words>"`, then without `-q` |
+| Search | `jira issue list -p <project> -q "statusCategory != Done" --plain --no-headers --columns key,summary,status,assignee --paginate 0:10 -- "<words>"`, then without `-q`; exit 1 with "No result found" means no match |
 | Create | `jira issue create -p <project> -t <defaultIssueType> -s "<title>" --template "$tmp/body.md" -a "$(jira me)" --no-input`; the new key is in the output |
 | Assign | `jira issue assign KEY "$(jira me)"` |
 | Move | `jira issue move KEY "<state>"`; skip it when the ticket is already there |

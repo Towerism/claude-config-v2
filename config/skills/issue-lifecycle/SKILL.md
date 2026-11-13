@@ -26,7 +26,7 @@ Done when you can name the key and it is assigned to you.
 
 ### 2. The user asks only to file an issue
 
-Create it as in step 1.1 and report its key and URL. Done there: no assignment, no state change.
+Create it as in step 1.1 and report its key and URL. Done there: no state change.
 
 ### 3. What is being built, or why, changes
 
@@ -39,7 +39,9 @@ Post one comment per decision: what was decided, why, and what was passed over. 
 ### 5. A PR for the work opens
 
 - GitHub, Gitea: the PR body carries `Closes #N`, so the merge closes the issue.
-- Jira: the PR title carries the key; move the ticket to `states.review`.
+- Jira: move the ticket to `states.review`.
+
+Done when the PR body carries `Closes #N`, or the ticket is in `states.review`.
 
 ### 6. The PR merged, or the work finished without a PR
 
