@@ -1,6 +1,6 @@
 # ADR-0001: OMC is the base; this repo only fills gaps
 
-**Status:** Accepted 2026-10-24 (autopilot run; veto by opening a new ADR). Gap list amended by ADR-0006.
+**Status:** Accepted 2026-10-24 (autopilot run; veto by opening a new ADR). Gap list amended by ADR-0006. Lifecycle consequences amended 2026-11-12 by ADR-0014: one `issue-lifecycle` skill replaces the three, and it owns no approval or merge.
 
 ## Context
 

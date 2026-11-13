@@ -1,6 +1,6 @@
 # ADR-0006: OMC leads the pipeline; the user approves and merges
 
-**Status:** Accepted by the owner on 2026-10-29, issue #42. Decision 2 amended by ADR-0008 (the feature-branch push grant) and ADR-0009 (the block's shape), which ADR-0012 supersedes. Decision 6 amended by ADR-0010 (`merge_confirm.py` removed). The dropped test-plan rule is restored by ADR-0011, which also limits decision 2: OMC text counts as coverage only if the skill runs, and otherwise the block names when to load it.
+**Status:** Accepted by the owner on 2026-10-29, issue #42. Decision 2 amended by ADR-0008 (the feature-branch push grant) and ADR-0009 (the block's shape), which ADR-0012 supersedes. Decision 6 amended by ADR-0010 (`merge_confirm.py` removed). The dropped test-plan rule is restored by ADR-0011, which also limits decision 2: OMC text counts as coverage only if the skill runs, and otherwise the block names when to load it. Decisions 3-5 and the "Sentences left to others" table superseded 2026-11-12 by ADR-0014: one markdown `issue-lifecycle` skill, and approval recorded only in the chat.
 
 ## Context
 

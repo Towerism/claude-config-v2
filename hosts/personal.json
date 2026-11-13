@@ -3,9 +3,7 @@
   "defaultTracker": "github",
   "hooks": ["host_default.py", "auto_sync.py"],
   "skills": [
-    "github-issue-lifecycle",
-    "gitea-issue-lifecycle",
-    "jira-ticket-lifecycle",
+    "issue-lifecycle",
     "fresh-session-handoff",
     "linux-troubleshooting",
     "architecture-backfill",

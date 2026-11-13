@@ -7,19 +7,19 @@ V1 (`claude-config`) built its own pipeline from 24 skills, overlays and three h
 ## Design philosophies
 
 1. **Two machines are one JSON file apart.** A host profile in `hosts/` selects skills, hooks and plugins. The personal and work profiles differ only in `name` and `defaultTracker` (a test enforces it).
-2. **Skills have zero dependencies.** No third-party packages and nothing to install: a skill is markdown, plus standard-library Python under `scripts/` where determinism matters (the lifecycle skills), so a new machine needs only `python3` and the tracker's CLI. Each skill is self-contained. Plumbing (`tools/`, the hooks) may use whatever it needs to keep the repo lean; today it needs only Python 3.11+. See [ADR-0003](docs/adr/0003-skills-zero-dependency.md).
+2. **Skills have zero dependencies.** No third-party packages and nothing to install: a skill is markdown, plus standard-library Python under `scripts/` where determinism matters (no skill ships a script today), so a new machine needs only the tracker's CLI and `python3`. Each skill is self-contained. Plumbing (`tools/`, the hooks) may use whatever it needs to keep the repo lean; today it needs only Python 3.11+. See [ADR-0003](docs/adr/0003-skills-zero-dependency.md).
 
 ## What is here
 
 | Path | What it holds |
 |---|---|
-| `config/CLAUDE.global.md` | The guardrails, written for Anthropic models only ([ADR-0012](docs/adr/0012-guardrails-for-anthropic-models-only.md)), deployed into `~/.claude/CLAUDE.md` as a marked block, normally after OMC's own. They state only what OMC, the lifecycle skills and the hooks don't: the user approves every spec and every merge ([ADR-0006](docs/adr/0006-omc-leads-the-pipeline.md); no hook enforces the merge rule since [ADR-0010](docs/adr/0010-no-merge-hook.md)) and decides when a PR is marked ready ([ADR-0008](docs/adr/0008-omc-pushes-feature-branches.md)), and OMC may push its feature branch and open a draft PR in any mode ([ADR-0008](docs/adr/0008-omc-pushes-feature-branches.md)) |
-| `config/skills/` | `github-issue-lifecycle`, `gitea-issue-lifecycle`, `jira-ticket-lifecycle` (each with a stdlib script for its checks and tracker steps), `fresh-session-handoff`, `linux-troubleshooting`, `architecture-backfill` (docs a repo's architecture and past decisions from code and history, each claim labeled verified or inferred), and the OMC quality-gate skills `spec-test-plan` and `spec-scope` ([ADR-0011](docs/adr/0011-scope-dependencies-and-spec-time-test-plans.md)). Prose rules come from OMC's `minimal-prose-discipline` and `agent-doc-discipline` |
+| `config/CLAUDE.global.md` | The guardrails, written for Anthropic models only ([ADR-0012](docs/adr/0012-guardrails-for-anthropic-models-only.md)), deployed into `~/.claude/CLAUDE.md` as a marked block, normally after OMC's own. They state only what OMC, the skills and the hooks don't: the user approves every spec and every merge ([ADR-0006](docs/adr/0006-omc-leads-the-pipeline.md); no hook enforces the merge rule since [ADR-0010](docs/adr/0010-no-merge-hook.md)) and decides when a PR is marked ready ([ADR-0008](docs/adr/0008-omc-pushes-feature-branches.md)), and OMC may push its feature branch and open a draft PR in any mode ([ADR-0008](docs/adr/0008-omc-pushes-feature-branches.md)) |
+| `config/skills/` | `issue-lifecycle` (markdown only: pairs the work to a GitHub, Gitea or Jira issue, keeps its description current and closes it, [ADR-0014](docs/adr/0014-one-issue-lifecycle-skill.md)), `fresh-session-handoff`, `linux-troubleshooting`, `architecture-backfill` (docs a repo's architecture and past decisions from code and history, each claim labeled verified or inferred), and the OMC quality-gate skills `spec-test-plan` and `spec-scope` ([ADR-0011](docs/adr/0011-scope-dependencies-and-spec-time-test-plans.md)). Prose rules come from OMC's `minimal-prose-discipline` and `agent-doc-discipline` |
 | `config/hooks/` | `host_default.py` (states the repo's tracker at session start, from its history, its `origin` and the host profile) and `auto_sync.py` (deploys `main` from `origin` at the start of each new session, [ADR-0007](docs/adr/0007-auto-sync-at-session-start.md)) |
 | `config/omc.fragment.json` | The `qualityGates` that `cfg.py` merges into OMC's user config: `spec-test-plan` blocks at `deep-interview` and `ralplan`, `spec-scope` advises at `omc-review` |
 | `hosts/` | `personal.json`, `work.json` |
 | `tools/cfg.py` | plan, deploy, status and rollback |
-| `tests/` | repo invariants, hooks, `cfg.py`, and the lifecycle scripts (`tests/skills/`, against a fake `gh` and `jira`) |
+| `tests/` | repo invariants, hooks, `cfg.py` and the quality-gate skills |
 | `docs/` | gap analysis and decision records |
 
 ## Set up a machine
@@ -43,7 +43,7 @@ V1 (`claude-config`) built its own pipeline from 24 skills, overlays and three h
    - Anyone who can push to `main` changes every synced machine at its next session start, so protect `main` with branch protection.
 4. `make status` lists files edited since the last deploy, changes still pending and the last failed sync. A deploy stops on an edited file until you pass `FORCE=1` (`--force`; the old copy is backed up). `make rollback` undoes the last deploy. A `HOST` or `TARGET` holding `'` or `$` needs the raw command. Only values typed after `make` count; exported variables are ignored.
 
-Per-machine values that never enter the repo live in `~/.config/claude-config/local.json`: `autoSync` (above), and the `jira` settings that tailor `jira-ticket-lifecycle` to your Jira project (see its `references/settings.md`). A top-level `defaultTracker` there is ignored; the host profile holds the default.
+Per-machine values that never enter the repo live in `~/.config/claude-config/local.json`: `autoSync` (above), and the `jira` settings that tailor `issue-lifecycle` to your Jira project (see its `references/jira.md`). A top-level `defaultTracker` there is ignored; the host profile holds the default.
 
 ## Add a second machine, a skill or a hook
 

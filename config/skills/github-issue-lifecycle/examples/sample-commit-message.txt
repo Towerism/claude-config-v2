@@ -1,3 +1,0 @@
-feat(roster): add CSV export (#42)
-
-Adds an export button that streams the roster as CSV.

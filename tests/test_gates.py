@@ -53,4 +53,4 @@ def test_spec_scope_checks_the_reviewed_diff_and_its_verdict_rules_agree():
 
 def test_spec_test_plan_accepts_a_skip_line_anywhere_without_a_section():
     text = (SKILLS / "spec-test-plan" / "SKILL.md").read_text()
-    assert "with no `## Test plan` section" in text and "anywhere in the spec" in text  # as spec-check reads it
+    assert "with no `## Test plan` section" in text and "anywhere in the spec" in text

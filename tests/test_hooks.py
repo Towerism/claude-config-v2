@@ -60,7 +60,7 @@ def test_host_default_states_the_deployed_tracker(machine):
     out = start(home, env)
     assert out["hookEventName"] == "SessionStart"
     text = out["additionalContext"]
-    assert "Default issue tracker: jira. Use the jira-ticket-lifecycle skill" in text
+    assert "Default issue tracker: jira. Use the issue-lifecycle skill" in text
     assert "Host profile: work." in text
     assert start(home, env, "SubagentStart")["hookEventName"] == "SubagentStart"
 
@@ -70,7 +70,7 @@ def test_local_default_tracker_is_ignored(machine):
     (tmp / "xdg" / "claude-config").mkdir(parents=True)
     (tmp / "xdg" / "claude-config" / "local.json").write_text(json.dumps({"defaultTracker": "gitea"}))
     text = start(home, env)["additionalContext"]
-    assert "tracker: jira. Use the jira-ticket-lifecycle skill" in text
+    assert "tracker: jira. Use the issue-lifecycle skill" in text
     assert text.endswith(" Source: host profile.")
 
 
@@ -78,7 +78,7 @@ def test_github_maps_to_its_skill(machine):
     home, env, _ = machine
     (home / "claude-config" / "state.json").write_text(json.dumps({"defaultTracker": "github"}))
     text = start(home, env)["additionalContext"]
-    assert text.startswith("Default issue tracker: github. Use the github-issue-lifecycle skill")
+    assert text.startswith("Default issue tracker: github. Use the issue-lifecycle skill")
 
 
 @pytest.mark.parametrize(
@@ -116,7 +116,7 @@ def tracker_line(machine, cwd, **extra):
 
 
 def from_profile(text):
-    return text == f"Host profile: work. Default issue tracker: jira. Use the jira-ticket-lifecycle skill {WINS} Source: host profile."
+    return text == f"Host profile: work. Default issue tracker: jira. Use the issue-lifecycle skill {WINS} Source: host profile."
 
 
 def test_a_jira_key_in_commit_subjects_names_jira(machine, repo):
@@ -125,7 +125,7 @@ def test_a_jira_key_in_commit_subjects_names_jira(machine, repo):
     assert from_profile(tracker_line(machine, repo))  # one bare key is not enough
     commit(repo, "fix: the PAY-2 crash")
     assert tracker_line(machine, repo) == (
-        f"Host profile: work. Default issue tracker: jira. Use the jira-ticket-lifecycle skill {WINS} "
+        f"Host profile: work. Default issue tracker: jira. Use the issue-lifecycle skill {WINS} "
         "Source: jira key in history."
     )
 
@@ -167,7 +167,7 @@ def test_a_jira_key_beats_a_github_origin(machine, repo):
 def test_a_github_origin_names_github(machine, repo, url):
     git(repo, "remote", "set-url", "origin", url)
     text = tracker_line(machine, repo)
-    assert "Default issue tracker: github. Use the github-issue-lifecycle skill" in text
+    assert "Default issue tracker: github. Use the issue-lifecycle skill" in text
     assert " Source: origin." in text
 
 
@@ -202,7 +202,7 @@ def test_a_tea_login_host_names_gitea(machine, repo, monkeypatch, url):
     hook = tea_hook(machine, monkeypatch, calls)
     git(repo, "remote", "set-url", "origin", url)
     text = hook.message(home, tmp / "xdg", str(repo))
-    assert "Default issue tracker: gitea. Use the gitea-issue-lifecycle skill" in text
+    assert "Default issue tracker: gitea. Use the issue-lifecycle skill" in text
     assert text.endswith(" Source: origin. Host profile default: jira.")
     assert ("tea", ["logins", "list", "-o", "csv"]) in calls
     git(repo, "remote", "set-url", "origin", "https://elsewhere.example.org/o/r.git")
@@ -221,7 +221,7 @@ def test_tea_is_not_run_without_a_tea_config(machine, repo, monkeypatch):
 def test_a_github_origin_on_a_jira_host_names_both(machine, repo):
     git(repo, "remote", "set-url", "origin", "https://github.com/o/r.git")
     assert tracker_line(machine, repo) == (
-        f"Host profile: work. Default issue tracker: github. Use the github-issue-lifecycle skill {WINS} "
+        f"Host profile: work. Default issue tracker: github. Use the issue-lifecycle skill {WINS} "
         "Source: origin. Host profile default: jira."
     )
 
@@ -246,7 +246,7 @@ def test_no_host_profile_and_no_signals_prints_nothing(machine, repo):
     assert tracker_line(machine, repo) is None
     git(repo, "remote", "set-url", "origin", "https://github.com/o/r.git")
     assert tracker_line(machine, repo) == (
-        f"Host profile: work. Default issue tracker: github. Use the github-issue-lifecycle skill {WINS} Source: origin."
+        f"Host profile: work. Default issue tracker: github. Use the issue-lifecycle skill {WINS} Source: origin."
     )
 
 
@@ -536,7 +536,7 @@ EVENT_ONLY = {
 }
 HOST_CONTEXT = (
     b'{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "Host profile: work. '
-    b"Default issue tracker: jira. Use the jira-ticket-lifecycle skill unless the repo's CLAUDE.md names "
+    b"Default issue tracker: jira. Use the issue-lifecycle skill unless the repo's CLAUDE.md names "
     b'another tracker; the repo\'s choice wins. Source: host profile."}}\n'
 )
 MALFORMED = [b"{}", b'{"tool_input": {}}', b'{"tool_name": 1}', b"null", b"", b"{", b"\xff\xfe"]

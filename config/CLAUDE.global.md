@@ -12,8 +12,8 @@ In every repo the user holds three decisions: approving the final plan before an
 
 ### Before you write code
 
-- Approval is the user's own explicit words; record it by quoting them (`Approved by the user: "build exactly this"`), and set the approved label only after you have quoted them. A plan that needs approval requires this before code is written.
-- In a repo with a tracker, start every code change with its lifecycle skill before editing anything: `github-issue-lifecycle` for GitHub, `gitea-issue-lifecycle` for Gitea, `jira-ticket-lifecycle` for Jira. Without a tracker or when the user waives the lifecycle, show the plan in the chat and get approval there.
+- Approval is the user's own explicit words in the chat; record it by quoting them (`Approved by the user: "build exactly this"`). A plan that needs approval requires this before code is written.
+- In a repo with a tracker, load `issue-lifecycle` when a code change starts, and again at each event it lists, unless the user waives the lifecycle.
 - A plan that changes code carries a seam list from `oh-my-claudecode:test-engineer`, planned without writing files: one line per seam with what it catches and what it misses, sized to the risk. Approving the plan approves the seams. A plan that changes no code marks the test plan `skipped:` with the reason in the pipeline list.
 - Before writing code, in every workflow and including delegated work, load `/oh-my-claudecode:tdd` and `/oh-my-claudecode:minimal-code-discipline` and follow both for all of it.
 

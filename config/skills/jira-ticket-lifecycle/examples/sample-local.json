@@ -1,9 +1,0 @@
-{
-  "jira": {
-    "project": "PAY",
-    "site": "https://example.atlassian.net",
-    "states": { "inProgress": "In Progress", "review": "In Review", "done": "Done" },
-    "stateOrder": ["To Do", "In Progress", "In Review", "Done"],
-    "addToActiveSprint": true
-  }
-}

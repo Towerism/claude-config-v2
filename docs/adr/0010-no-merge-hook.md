@@ -1,6 +1,6 @@
 # ADR-0010: The merge hook is removed
 
-**Status:** Accepted by the owner on 2026-11-06, issue #57. Amends ADR-0006 (decision 6: the hooks).
+**Status:** Accepted by the owner on 2026-11-06, issue #57. Amends ADR-0006 (decision 6: the hooks). Amended 2026-11-12 by ADR-0014: the lifecycle skills' step 8 is gone, so it states nothing for ADR-0006's merge rows, and "never squash" is stated nowhere.
 
 ## Context
 

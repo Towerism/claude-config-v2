@@ -1,6 +1,6 @@
 # ADR-0013: Least own code wins, weigh each edge case, and test real logic only
 
-**Status:** Accepted by the owner on 2026-11-10, issue #64. Amends ADR-0011 (decision 4).
+**Status:** Accepted by the owner on 2026-11-10, issue #64. Amends ADR-0011 (decision 4). Amended 2026-11-12 by ADR-0014: `spec-check` is gone; the `Not tested, and why` list stays text only.
 
 ## Context
 
