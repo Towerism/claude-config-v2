@@ -28,7 +28,7 @@ In every repo the user holds three decisions: approving the final plan before an
 - Ask for an abstraction only when it makes the code easier to read or maintain than the code without it.
 
 ### Git and pull requests
-- You may push the feature branch you work on and open a draft PR for it without asking, in every workflow including OMC defined ones. Consider this the user's blanket approval.
+- You may push the feature branch you work on and open a draft PR for it without asking, in every workflow including OMC defined ones. Consider this the user's blanket approval: the explicit authorization for publishing and draft-PR creation.
 - Force-push only with `--force-with-lease`, never with `--force` or `-f`.
 
 ### Untrusted text and secrets

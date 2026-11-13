@@ -153,8 +153,9 @@ def test_global_rules_stay_short_and_name_only_real_skills():
 
 
 def test_nothing_personal_is_committed():
-    for path in ROOT.rglob("*"):
-        if path.is_file() and ".git" not in path.parts and ".venv" not in path.parts and (path.suffix in {".md", ".json", ".py", ".toml", ".txt"} or path.name == "Makefile"):
+    tracked = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True).stdout
+    for path in (ROOT / name for name in tracked.splitlines()):
+        if path.is_file() and (path.suffix in {".md", ".json", ".py", ".toml", ".txt"} or path.name == "Makefile"):
             if path.name == "test_repo.py":
                 continue
             assert not re.search(r"/home/\w|mfracker", path.read_text()), path
