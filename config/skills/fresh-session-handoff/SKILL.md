@@ -1,6 +1,6 @@
 ---
 name: fresh-session-handoff
-description: Writes a handoff note so the remaining work of a long session continues in a fresh one, with the context cleared and the critical progress kept. Use when the user asks to hand work off to a new session, says the context is getting long or bloated, wants to start fresh but keep their progress, asks for a handoff note, or says "save where we are so I can clear". It records the goal, state, the user's decisions and approvals, repo state, open questions, dead ends and running work, then prints a prompt that starts the new session. Not for summarising the session to the user, for /compact, for a pull request description, or for closing out an issue with the lifecycle skill (github-issue-lifecycle, gitea-issue-lifecycle or jira-ticket-lifecycle).
+description: Writes a handoff note so the remaining work of a long session continues in a fresh one, with the context cleared and the critical progress kept. Use when the user asks to hand work off to a new session, says the context is getting long or bloated, wants to start fresh but keep their progress, asks for a handoff note, or says "save where we are so I can clear". It records the goal, state, the user's decisions and approvals, repo state, open questions, dead ends and running work, then prints a prompt that starts the new session. Not for summarising the session to the user, for /compact, for a pull request description, or for closing out an issue (issue-lifecycle does that).
 ---
 
 # Fresh-session handoff
@@ -17,7 +17,7 @@ A session that has run long carries context that no longer helps. The goal is a 
 
 - The user wants a summary for themselves: answer in chat.
 - The user wants `/compact`: that shrinks this session in place; say so and stop.
-- The user is closing out an issue or opening a PR: the lifecycle skill for the tracker does that.
+- The user is closing out an issue: `issue-lifecycle` does that. Opening a PR is not a handoff either.
 - Nothing is left to do: say so and suggest ending the session. No note is needed.
 
 ## 1. Stop and look
@@ -67,7 +67,7 @@ Use these sections, in this order. Write "None" for an empty one.
 
 1. **Goal.** What the user asked for, in their own words, quoted, and the reason if they gave one.
 2. **State.** Done, in progress, next: one line each. A done item names its evidence (a commit, a file, a result) or says there is none. Each uncommitted file gets a line saying what the change is for. Flag any file that exists only in a place that may be deleted, such as a temporary or job directory, and say where.
-3. **Decisions and approvals.** Each decision the user made, with their quoted words. Each approval names what was approved (a commit SHA or the spec's last-edit state), where it is recorded (an issue label, a spec's Status line) and who recorded it. An approval the user gave in chat that nobody has recorded is listed as "unrecorded", with their words. Never mark anything approved on your own authority, and a label that Claude set is not the user's words.
+3. **Decisions and approvals.** Each decision the user made, with their quoted words. Each approval names what was approved (a commit SHA or the spec's last-edit state), where it is recorded (a quoted approval line in a plan file, a spec's Status line) and who recorded it. An approval the user gave in chat that no file records is listed as "unrecorded", with their words. Never mark anything approved on your own authority.
 4. **Repo state.** The facts from step 1, one block per repo or worktree, with its path.
 5. **Open questions.** What waits on the user or someone else, as specific questions.
 6. **Tried and ruled out.** Each approach that failed or was rejected, with the reason, so the new session doesn't repeat it.
@@ -119,9 +119,9 @@ coaches want to open the roster in a spreadsheet.
 
 ## Decisions and approvals
 - Spec approved: "i approve the spec" (2026-10-21), for #42 as of commit 9d0e4b7.
-  Recorded by the owner's `approved` label on #42.
-- Unrecorded: "use semicolons if the locale uses commas for decimals". No label or
-  note records it; ask the owner to confirm.
+  Recorded as a quoted approval line in `.omc/plans/csv-export.md`.
+- Unrecorded: "use semicolons if the locale uses commas for decimals". No plan file
+  records it; ask the owner to confirm.
 
 ## Repo state
 /work/roster-app, branch feature/42-csv-export, 3 commits ahead of main.

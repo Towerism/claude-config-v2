@@ -81,7 +81,7 @@ def test_deployed_blocks_are_identical_across_hosts(tmp_path):
         assert run(home, "deploy", "--host", host, "--yes") == 0
         md = (home / "CLAUDE.md").read_text()
         blocks.append(md[md.index(cfg.START):md.index(cfg.END)])
-    assert blocks[0] == blocks[1] and "Guardrails" in blocks[0]
+    assert blocks[0] == blocks[1] and "## Rules" in blocks[0]
 
 
 def test_deploy_is_idempotent(home, capsys):
@@ -102,7 +102,7 @@ def test_existing_settings_and_omc_block_survive(home):
     assert settings["theme"] == "dark" and "Stop" in settings["hooks"]
     md = (home / "CLAUDE.md").read_text()
     assert md.startswith("<!-- OMC:START -->\nomc rules\n<!-- OMC:END -->")
-    assert md.count(cfg.START) == 1 and "Guardrails" in md
+    assert md.count(cfg.START) == 1 and "## Rules" in md
 
 
 def test_claude_md_block_is_replaced_not_duplicated(home):
@@ -120,11 +120,12 @@ def test_switching_host_removes_what_the_new_host_lacks(home, tmp_path, monkeypa
     small.update(name="small", skills=["linux-troubleshooting"], hooks=["host_default.py"])
     (hosts / "small.json").write_text(json.dumps(small))
     run(home, "deploy", "--host", "personal", "--yes")
+    assert (home / "skills" / "issue-lifecycle" / "SKILL.md").is_file()
     monkeypatch.setattr(cfg, "ROOT", ROOT)
     real = cfg.load_host
     monkeypatch.setattr(cfg, "load_host", lambda name: small if name == "small" else real(name))
     assert run(home, "deploy", "--host", "small", "--yes") == 0
-    assert not (home / "skills" / "github-issue-lifecycle").exists()
+    assert not (home / "skills" / "issue-lifecycle").exists()
     assert not (home / "hooks" / "auto_sync.py").exists()
     settings = json.loads((home / "settings.json").read_text())
     assert "auto_sync.py" not in json.dumps(settings)

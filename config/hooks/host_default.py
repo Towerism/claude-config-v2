@@ -41,11 +41,11 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
-# Each tracker has its own lifecycle skill.
+# One lifecycle skill covers every tracker; the line still names the tracker.
 TRACKERS = {
-    "github": "github-issue-lifecycle",
-    "gitea": "gitea-issue-lifecycle",
-    "jira": "jira-ticket-lifecycle",
+    "github": "issue-lifecycle",
+    "gitea": "issue-lifecycle",
+    "jira": "issue-lifecycle",
 }
 CAP = 64 * 1024
 DEADLINE_SECONDS = 5

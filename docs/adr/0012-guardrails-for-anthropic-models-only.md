@@ -1,6 +1,6 @@
 # ADR-0012: The guardrails are written for Anthropic models only
 
-**Status:** Accepted by the owner on 2026-11-07, issue #60. Supersedes ADR-0009. Amends ADR-0011 where it amends ADR-0009 (scenarios 14-17 and the context-limit note retire with it).
+**Status:** Accepted by the owner on 2026-11-07, issue #60. Supersedes ADR-0009. Amends ADR-0011 where it amends ADR-0009 (scenarios 14-17 and the context-limit note retire with it). Amended 2026-11-12 by ADR-0014: the cut check's conditional case, the approved label, is moot; the label is gone and approval is recorded only in the chat.
 
 ## Context
 

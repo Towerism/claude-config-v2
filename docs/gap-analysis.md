@@ -7,9 +7,9 @@ Compared on 2026-10-24 against V1 (`claude-config`, 24 skills, 9 overlays, 3 hoo
 | V1 stage | V1 skill | OMC equivalent | V2 |
 |---|---|---|---|
 | Design | `senior-architect` | `/drydock`, `/ralplan`, architect agent | Covered |
-| Start | `github-`, `gitea-`, `jira-…lifecycle` | Partial: `launch`, `harbor`, `drydock` (GitHub only), `project-session-manager` (worktrees for GitHub, Jira, Gitea issues), `ask-navigator`. None claims an issue, records the user's spec approval, stores the spec on the issue or merges and closes out | **Kept** as `github-issue-lifecycle`, `gitea-issue-lifecycle` and `jira-ticket-lifecycle`, with V1's stdlib scripts for the checks, spec-marker edits and Jira steps (ADR-0003, amended); the first guardrail line makes them the start of every code change ([ADR-0006](adr/0006-omc-leads-the-pipeline.md)) |
+| Start | `github-`, `gitea-`, `jira-…lifecycle` | Partial: `launch`, `harbor`, `drydock` (GitHub only), `project-session-manager` (worktrees for GitHub, Jira, Gitea issues), `ask-navigator`. None claims an issue, records the user's spec approval, stores the spec on the issue or merges and closes out | **Kept**, cut down to one markdown skill, `issue-lifecycle`: it pairs the work to an issue, keeps its description current and closes it ([ADR-0014](adr/0014-one-issue-lifecycle-skill.md)); the lifecycle guardrail line loads it when a code change starts |
 | Spec | `spec-driven-workflow` | `/deep-interview`, `/ralplan` | Covered; the user's quoted approval kept as a guardrail |
-| Test plan | `senior-qa`, `api-test-suite-builder`, `ci-cd-pipeline-builder` | `/tdd`, test-engineer agent; no planning skill calls it | A guardrail: `test-engineer` plans the seams before the spec is shown; the lifecycle `spec-check` and the `spec-test-plan` gate enforce it ([ADR-0011](adr/0011-scope-dependencies-and-spec-time-test-plans.md)) |
+| Test plan | `senior-qa`, `api-test-suite-builder`, `ci-cd-pipeline-builder` | `/tdd`, test-engineer agent; no planning skill calls it | A guardrail: `test-engineer` plans the seams before the spec is shown; the `spec-test-plan` gate enforces it ([ADR-0011](adr/0011-scope-dependencies-and-spec-time-test-plans.md), [ADR-0014](adr/0014-one-issue-lifecycle-skill.md)) |
 | Implement | `tdd-guide` | `/tdd`, `/execute` | Covered |
 | Review | `adversarial-reviewer` | `/review`, critic and code-reviewer agents | Covered; OMC chooses the review depth (ADR-0006) |
 | Merge | `ship-gate` | `/verify`, `/pr` | Covered; the merge hook removed ([ADR-0010](adr/0010-no-merge-hook.md)) |
@@ -21,7 +21,7 @@ Compared on 2026-10-24 against V1 (`claude-config`, 24 skills, 9 overlays, 3 hoo
 | `merge_confirm.py` hook | Kept, then removed ([ADR-0010](adr/0010-no-merge-hook.md)) | Kept because a merge once happened without the owner's click; removed because it got in the way of OMC's workflows. The merge rule is text only |
 | `lifecycle_default.py` hook | Replaced by `host_default.py` | Same job (state the machine's default tracker), simpler state, renamed for trackers (rewritten in ADR-0006: repo signals first) |
 | `skill_overlay.py` hook, 9 overlays | Dropped | Overlays existed to bend vendored skills; V2 has none. Guardrails live in `CLAUDE.global.md` |
-| Approval modes, git conventions, split rules | Retired or dropped (ADR-0006) | Approval and merge on the user's word are fixed rules; the approved label, default-branch, secret and naming rules are text-only or unenforced |
+| Approval modes, git conventions, split rules | Retired or dropped (ADR-0006) | Approval and merge on the user's word are fixed rules, and approval is recorded only in the chat (ADR-0014); default-branch, secret and naming rules are text-only or unenforced |
 | `plain-prose`, `writing-docs` (with lint scripts) | Dropped; use OMC's `minimal-prose-discipline` and `agent-doc-discipline` | OMC's `minimal-prose-discipline` is relied on for prose a person reads (ADR-0006 dropped the cold-reader line). The lifecycle scripts no longer list AI-writing tells |
 | `fresh-session-handoff` | Kept | OMC's `launch` posts handoffs as tracker comments and `ultragoal` prints `/goal` text, but nothing writes a cold-start note for an arbitrary session. During a `/launch` run, launch's handoff wins |
 | `linux-troubleshooting` | Rewritten | V1's version pointed at skills that aren't installed; V2's is self-contained |
@@ -39,7 +39,7 @@ These guesses stand in for answers nobody was available to give. Veto any of the
 
 1. **Repo location and name.** V2 lives in a sibling directory, `claude-config-v2`, not a rewrite in place.
 2. **Git hooks not ported.** V1's commit and push checks (private-word list, secrets, noreply identity) aren't in V2. If you want them, they belong in `tools/` with `gitleaks` as the dependency.
-3. **Jira unverified live.** As in V1, `jira-ticket-lifecycle` drives Jira through its script; the tests run it against a fake `jira` CLI and a local REST server. V2 has not run it against a live Jira.
+3. **Jira unverified live.** `issue-lifecycle` drives Jira through `jira-cli` commands checked against the 1.7.0 `--help` output. V2 has not run them against a live Jira.
 4. **Copy, not symlink.** V1 recorded evidence on symlinked deploys; V2 copies files, which costs a re-deploy after each edit but avoids that question.
 5. **No merge guard.** The merge hook is gone ([ADR-0010](adr/0010-no-merge-hook.md)); "merge only when the user says so" is text only. Use branch protection for a hard stop.
 6. **Plugins are only added.** A deploy enables a host's plugins; it never disables one removed from a profile.

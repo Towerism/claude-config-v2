@@ -1,6 +1,6 @@
 # ADR-0003: Skills have no third-party dependencies and nothing to install
 
-**Status:** Accepted 2026-10-24. Amended 2026-10-25 (#2): development tooling may use make, a venv and ruff. Amended 2026-10-24 at the user's direction: the lifecycle skills carry deterministic stdlib-only scripts; "zero dependency" now means no third-party packages and no install step, only `python3`.
+**Status:** Accepted 2026-10-24. Amended 2026-10-25 (#2): development tooling may use make, a venv and ruff. Amended 2026-10-24 at the user's direction: the lifecycle skills carry deterministic stdlib-only scripts; "zero dependency" now means no third-party packages and no install step, only `python3`. Amended 2026-11-12 by ADR-0014: the lifecycle scripts are gone and no skill ships a script today; the rule for scripts stands.
 
 ## Context
 

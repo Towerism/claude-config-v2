@@ -118,12 +118,11 @@ def test_every_tracker_maps_to_a_shipped_lifecycle_skill():
         assert (ROOT / "config" / "skills" / skill / "SKILL.md").is_file(), skill
 
 
-def test_gitea_ships_the_same_script_as_github():
-    """The copy keeps each skill self-contained; this keeps the two copies from drifting."""
-    skills = ROOT / "config" / "skills"
-    github = skills / "github-issue-lifecycle" / "scripts" / "issue_lifecycle.py"
-    gitea = skills / "gitea-issue-lifecycle" / "scripts" / "issue_lifecycle.py"
-    assert github.read_bytes() == gitea.read_bytes()
+def test_issue_lifecycle_ships_no_scripts():
+    """ADR-0014: the lifecycle skill is markdown only."""
+    skill = ROOT / "config" / "skills" / "issue-lifecycle"
+    assert not (skill / "scripts").exists()
+    assert not list(skill.rglob("*.py"))
 
 
 def test_hosts_differ_only_where_machines_differ():
@@ -154,8 +153,9 @@ def test_global_rules_stay_short_and_name_only_real_skills():
 
 
 def test_nothing_personal_is_committed():
-    for path in ROOT.rglob("*"):
-        if path.is_file() and ".git" not in path.parts and ".venv" not in path.parts and (path.suffix in {".md", ".json", ".py", ".toml", ".txt"} or path.name == "Makefile"):
+    tracked = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True).stdout
+    for path in (ROOT / name for name in tracked.splitlines()):
+        if path.is_file() and (path.suffix in {".md", ".json", ".py", ".toml", ".txt"} or path.name == "Makefile"):
             if path.name == "test_repo.py":
                 continue
             assert not re.search(r"/home/\w|mfracker", path.read_text()), path
@@ -197,7 +197,7 @@ def test_global_rules_keep_the_fixed_core():
 
 
 def test_global_rules_restate_nothing_said_elsewhere():
-    """Each phrase is already said by OMC, a lifecycle skill or a hook (plan section 4).
+    """Each phrase is said by OMC or a hook, or was retired with the old lifecycle skills (ADR-0014).
     Built by concatenation so a grep for them never matches this test."""
     text = global_text()
     for phrase in ("runs the " + "development workflow", "repo " + "wins", "repo's CLAUDE.md " + "wins",
@@ -206,39 +206,6 @@ def test_global_rules_restate_nothing_said_elsewhere():
                    "By" + "pass", "first " + "prompt", "(advis" + "ory:"):
         assert phrase not in text, phrase
     assert not re.search(r"^\d+\. ", text, re.MULTILINE)
-
-
-def test_lifecycle_skills_carry_the_trimmed_rules():
-    """The global text leaves these to the skills, so each skill must keep them."""
-    for skill in ("github-issue-lifecycle", "gitea-issue-lifecycle", "jira-ticket-lifecycle"):
-        text = (ROOT / "config" / "skills" / skill / "SKILL.md").read_text().replace("`", "")
-        for needle in (r"is not approval", r"returns (it|the ticket) to draft", r"never stands in",
-                       r"report the merge as waiting|merge waits on the user"):
-            assert re.search(needle, text), f"{skill}: {needle}"
-
-
-@pytest.mark.parametrize("skill", ("github-issue-lifecycle", "gitea-issue-lifecycle", "jira-ticket-lifecycle"))
-def test_lifecycle_skills_limit_branch_names_built_from_issue_text(skill):
-    """Issue text can hold shell syntax; a branch name built from it must not carry it."""
-    text = section((ROOT / "config" / "skills" / skill / "SKILL.md").read_text(), "### 6. Branch, worktree, commits")
-    assert re.search(r"(?i)a name built from issue text holds only letters, digits, `-` and `/`", text)
-
-
-@pytest.mark.parametrize("skill", ("github-issue-lifecycle", "gitea-issue-lifecycle", "jira-ticket-lifecycle"))
-def test_git_workflow_has_no_rewrite_of_a_pushed_commit(skill):
-    """Rewriting a pushed commit for its message went with commit-check (ADR-0006)."""
-    text = (ROOT / "config" / "skills" / skill / "references" / "git-workflow.md").read_text()
-    assert "**pushed** commit" not in text
-
-
-@pytest.mark.parametrize("path,label", [
-    ("github-issue-lifecycle/SKILL.md", 'gh label create "in progress" --color FBCA04 --description "Spec approved; work under way"'),
-    ("gitea-issue-lifecycle/references/gitea-commands.md",
-     '{"name": "in progress", "color": "FBCA04", "description": "Spec approved; work under way"}'),
-])
-def test_in_progress_label_says_it_starts_at_approval(path, label):
-    """in progress is set at approval, not at the claim (ADR-0006)."""
-    assert label in (ROOT / "config" / "skills" / path).read_text()
 
 
 def test_adr_records_the_pathway_departure():
@@ -250,63 +217,12 @@ def test_adr_records_the_pathway_departure():
         assert re.search(rf"\b{re.escape(agent)}\b", text), agent
 
 
-LIFECYCLE_SKILLS = ("github-issue-lifecycle", "gitea-issue-lifecycle", "jira-ticket-lifecycle")
-
-
-@pytest.mark.parametrize("skill", LIFECYCLE_SKILLS)
-def test_lifecycle_skills_carry_no_retired_steps(skill):
-    """Approval modes, the path declaration, its stamp and the commit and branch checks are
-    retired (ADR-0006). Needles are built by concatenation so a grep never matches this test."""
-    needles = ("declaration" + "-check", "path-" + "declaration", "Path " + "declaration",
-               "approval" + ": ", "approval" + "-manual", "approval" + "-adversarial",
-               "approval" + "-no-review", "set" + "-mode", "--" + "mode", "commit" + "-check",
-               "branch" + "-name", "check_" + "commit", "slug" + "ify", "--" + "stamp",
-               "approval " + "mode", "Adversarial " + "approval", "No " + "review",
-               "Review the proposed " + "pipeline")
-    for path in sorted(skill_files(ROOT / "config" / "skills" / skill)):
-        text = path.read_text()
-        for needle in needles:
-            assert needle not in text, f"{path.relative_to(ROOT)}: {needle}"
-
-
-
 def section(text, heading):
     """The text from a `### ` or `## ` heading up to the next heading of any level."""
     start = text.index(heading)
     end = re.search(r"^#{2,3} ", text[start + len(heading):], re.MULTILINE)
     return text[start:start + len(heading) + end.start()] if end else text[start:]
 
-
-def test_gitea_claim_assigns_only_and_approval_sets_both():
-    """Gitea has no fake tea, so its claim and approval are pinned in the text."""
-    text = (ROOT / "config" / "skills" / "gitea-issue-lifecycle" / "SKILL.md").read_text()
-    claim = section(text, "### 2. Claim it")
-    assert '{"assignees": ["<login>"]}' in claim
-    assert "issues/N/labels" not in claim and "add `in progress`" not in claim
-    approval = section(text, "### 5. Approval and labels")
-    quote = approval.index("POST repos/<o>/<r>/issues/N/comments")
-    labels = approval.index("POST repos/<o>/<r>/issues/N/labels")
-    assert quote < labels
-    assert "`approved` and `in progress` together" in approval
-    assert "remove `draft`" in approval
-
-
-PROMPT_TAG = re.compile(r"\(prompt: (approval|merge|takeover)\)")
-# Built by concatenation so the scan of config/skills never finds this test's own words.
-ASK = re.compile(r"(?i)\b(stop and " + "ask|ask (the user|before|for|if|whether)|then " + "ask)\b")
-
-
-@pytest.mark.parametrize("skill", LIFECYCLE_SKILLS)
-def test_lifecycle_skills_prompt_only_at_the_gates(skill):
-    """The skills ask the user only for spec approval, merge, and takeover or reopen."""
-    folder = ROOT / "config" / "skills" / skill
-    text = (folder / "SKILL.md").read_text()
-    bullets = [l for l in section(text, "## Prompts").splitlines() if l.startswith("- ")]
-    assert [b.split("**")[1] for b in bullets] == ["Spec approval", "Merge", "Takeover or reopen"]
-    for path in [folder / "SKILL.md", *sorted((folder / "references").glob("*.md"))]:
-        for n, line in enumerate(path.read_text().splitlines(), 1):
-            asks = "AskUser" + "Question" in line or ASK.search(line)
-            assert not asks or PROMPT_TAG.search(line), f"{path.relative_to(ROOT)}:{n}: {line}"
 
 def adr(number):
     paths = sorted((ROOT / "docs" / "adr").glob(f"{number:04d}-*.md"))
@@ -329,7 +245,7 @@ def test_adr_0006_supersedes_0004_and_0005():
                    "share one login", "Residual risks", "Heuristic limits"):
         assert needle in text, needle
     assert status(adr(5)).endswith(" Superseded by ADR-0006.")
-    assert status(adr(1)).endswith(" Gap list amended by ADR-0006.")
+    assert "Gap list amended by ADR-0006." in status(adr(1))
     line = status(adr(4))
     assert "#7" in line and "Superseded in part by ADR-0006" in line
     assert "merge_confirm.py" in line and "host_default.py" in line
@@ -415,14 +331,14 @@ def test_omc_text_counts_only_if_the_skill_runs():
 
 def test_gap_analysis_test_plan_row_is_not_covered():
     row = next(l for l in (ROOT / "docs" / "gap-analysis.md").read_text().splitlines() if l.startswith("| Test plan"))
-    assert "Covered" not in row and "ADR-0011" in row and "spec-check" in row and "spec-test-plan" in row
+    assert "Covered" not in row and "ADR-0011" in row and "spec-test-plan" in row
 
 
 def test_glossary_names_the_seam_list_and_the_scope_finding():
     text = (ROOT / "GLOSSARY.md").read_text()
     assert "## Guardrails" in text
     seams, scope = section(text, "## Seam list"), section(text, "## Scope finding")
-    assert "`test-engineer`" in seams and "`skipped:`" in seams and "`spec-check`" in seams
+    assert "`test-engineer`" in seams and "`skipped:`" in seams and "`spec-test-plan`" in seams
     assert "`scope:`" in scope and "not a defect" in scope and "`spec-scope`" in scope and "verify" in scope
 
 
