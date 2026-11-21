@@ -21,6 +21,21 @@ What the tests showed, on 16 development texts with a Sonnet writer:
 - **On 24 held-out texts in real sessions, with an Opus writer,** the new skill wrote texts with errors in 6 of 24 against the old skill's 15 (human originals: 4, the judges' noise floor), and edits with errors in 7 of 24 against 20. It read less like AI (P(AI) 49 against 60 written, 19 against 57 edited) and took about 10 seconds per text against 48.
 - **Third-party rule sets did worse.** stop-slop, humanizer and WRITING.md (full, compact and as a skill) invented three to four times as many facts and read more like AI, at higher cost.
 
+## Drivers
+
+- No invented facts, and no fact, name or stated reason lost in an edit.
+- A cost low enough to run on every commit message and chat reply.
+- Text that does not read as AI-written, without faking typos or quirks.
+- No step that stops a session for a person.
+
+## Alternatives considered
+
+- **Writing in a single pass with no check.** More invented facts in every paired comparison on the development texts.
+- **An in-call audit that prints a draft, a list of problems and a final text.** About as accurate as the private check, but slower, and its draft and list land in the delivered text in a real session.
+- **A second checker agent for every text, for some types, or by length.** Measured per type on held-out texts; it added more errors than it removed (Decision 4).
+- **Rules for each kind of text in reference files.** Cheaper per text, but reading them prompted for permission in default mode (Decision 1).
+- **Third-party rule sets** (stop-slop, humanizer, WRITING.md). More invented facts, more AI-like, higher cost.
+
 ## Decision
 
 1. **One skill, `human-prose`, in one file,** for every text a person reads. Rules for a single kind of text (text the user sends as themselves, PR reviews, design docs, tickets and PRs) are sections of `SKILL.md`, not separate files. Why: in default permission mode, reading a file next to the skill stopped the session for a permission prompt, and a tool grant in the skill's front matter made loading the skill itself need approval. One file needs no read and no grant.
@@ -32,7 +47,12 @@ What the tests showed, on 16 development texts with a Sonnet writer:
 
 ## Consequences
 
-- Texts written from facts still invent some facts, and blind judges can still tell them from human writing. The skill does not fake typos or quirks to close that gap.
+- Texts written from facts still invent some facts, and blind judges can still tell them from human writing. The skill does not add typos or quirks to close that gap; text the user sends as themselves copies the user's own habits, which is a matter of voice, not disguise.
 - Whether the private check is real checking or just the effect of the instruction is unknown; it costs nothing measurable either way.
-- Every session pays about 1.7k input tokens for the skill being installed, and every text about 3.7k tokens of rules. A commit message costs about the same as with the old skill and takes less time.
-- The evaluation corpus, harness and judge outputs stay outside this repo, so the evaluation can't be rerun from the repo alone. Rerun it when the session's writer model changes.
+- A near-empty session with the skill installed read about 1.7k more input tokens than one without it. The description and the global rules line account for about 180 of them; the rest was not traced. Every text pays about 3.7k tokens of rules. A commit message costs about the same as with the old skill and takes less time.
+- The evaluation corpus, harness and judge outputs stay outside this repo, so the evaluation can't be rerun from the repo alone.
+
+## Follow-ups
+
+- Collect PR reviews and chat messages written by people for a later corpus; the evaluation had none, so those rules were reviewed by reading, not measured.
+- Rerun the evaluation when the session's writer model changes.

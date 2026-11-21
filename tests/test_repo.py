@@ -352,20 +352,23 @@ def test_readme_lists_the_gate_skills_and_their_config():
 def test_skill_routes_to_every_reference_file(skill):
     """A reference file SKILL.md never names is one no agent is ever told to read."""
     text = (skill / "SKILL.md").read_text()
-    for ref in (skill / "references").glob("*.md"):
-        assert f"references/{ref.name}" in text, ref.name
+    for ref in skill_files(skill):
+        rel = ref.relative_to(skill)
+        if rel.parts[0] == "references":
+            assert rel.as_posix() in text, rel
 
 
 def test_readme_names_every_skill():
-    """A skill that ships and syncs but has no README entry is one readers can't find."""
-    readme = (ROOT / "README.md").read_text()
+    """A skill that ships and syncs but has no entry in the README's skills row is one readers can't find."""
+    row = next(line for line in (ROOT / "README.md").read_text().splitlines() if line.startswith("| `config/skills/` |"))
     for skill in SKILLS:
-        assert f"`{skill.name}`" in readme, skill.name
+        assert f"`{skill.name}`" in row, skill.name
 
 
 def test_skills_the_global_rules_load_exist():
     """A misspelled name in a load line silently stops that skill from loading."""
-    for name in re.findall(r"\bload `/?([a-z][a-z:-]*)`", global_text()):
-        if not name.startswith("oh-my-claudecode:"):
-            assert (ROOT / "config" / "skills" / name).is_dir(), name
-    assert "load `human-prose`" in global_text()
+    names = [n for n in re.findall(r"\bload `/?([\w:-]+)`", global_text(), re.IGNORECASE)
+             if not n.startswith("oh-my-claudecode:")]
+    assert names, "no load line names a repo skill"
+    for name in names:
+        assert (ROOT / "config" / "skills" / name / "SKILL.md").is_file(), name

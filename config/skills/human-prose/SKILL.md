@@ -12,7 +12,7 @@ Writing from sources (facts, a diff, an issue, the conversation, earlier text):
 1. Name the reader and the one thing they need from this text: to approve it, to try it, to understand why, to act. Why: a text that doesn't surface what its reader cares about misses its purpose, however accurate it is.
 2. Write it in the shape for its type ("Shapes by text type"), following every rule below and the section for its kind of text, if there is one: "Text the user sends as themselves", "A review of someone's PR", "ADRs, design docs and wiki pages", or "Issues, tickets and PR descriptions".
 3. Run the check under "Before you deliver".
-4. Deliver only the final text. Done when the reply holds the text and nothing about how it was made.
+4. Deliver the final text. Done when the delivered text holds nothing about how it was made. A note for the user, such as unchecked links or unsettled review items, goes in your reply outside the delivered text.
 
 Revising someone's draft: follow "Revising someone's draft", then steps 3 and 4.
 
@@ -30,7 +30,7 @@ Revising someone's draft: follow "Revising someone's draft", then steps 3 and 4.
 
 ## Links
 
-Write every PR, issue, ticket and CI run as a clickable link or full reference, never a bare ID. Why: no one can find a run from its number alone.
+Write every PR, issue, ticket and CI run as a clickable link or full reference, never a bare ID. Why: no one can find a run from its number alone. A bare `#n` counts as a link only on GitHub or Gitea and only for an item in the same repo, so `Closes #12` in a PR body and `(#12)` in a commit subject stay as they are.
 
 - A PR in another repo is `owner/repo#n` or a full URL, never "repo #n". Why: GitHub turns a bare `#n` into a link to the current repo's item with that number.
 - Write a full reference only when the sources give the repo or URL; otherwise keep the ID exactly as the sources wrote it.
@@ -57,7 +57,7 @@ Edit, don't rewrite. Why: readers already trust the author's own words, and ever
 These keep the text reading as a person wrote it. Why: readers who sense machine-written text start skimming and miss what matters.
 
 - Use everyday words and plain verbs: is, has, uses, wrote, moved, tried. Avoid unusual phrasing a reader has to stop and decode ("trades tokens for trust" → "spends extra tokens to make sure every comment can be trusted"; "every finding earns its place" → "the skill only keeps a comment if it was tested").
-- Use the shape people use for this kind of text (below), and the headings the project's own template uses, if it has one. Text under about 200 words gets no headings and no bold labels; don't split a short flat document into sections. Never take a heading's wording from these rules.
+- Use the shape people use for this kind of text (below), and the headings the project's own template uses, if it has one. Text under about 200 words gets no headings and no bold labels; don't split a short flat document into sections. Never take a heading's wording from these rules; the one exception is `## Security findings`, which any text with a security item keeps, whatever its length.
 - Say what matters to this reader; don't walk through every case or option in turn just to be complete, and don't use every fact you were given.
 - Start with the first real point, not a sentence that previews what follows. Let list items differ in shape as their content does, rather than making them uniformly parallel.
 - Say what a thing is. Add a "not X" contrast only when the reader would otherwise assume X.
@@ -77,11 +77,11 @@ These keep the text reading as a person wrote it. Why: readers who sense machine
 
 ## Before you deliver
 
-Check the text privately, in your own reasoning, before you deliver it: for each statement of fact, find the source it rests on, and remove or fix any statement with no source or stated more strongly than its source. Check the text against the shape rules. Deliver only the final text: never the draft, the check, or any note about it. Done when every statement has a source and the reply holds only the text.
+Check the text privately, in your own reasoning, before you deliver it: for each statement of fact, find the source it rests on, and remove or fix any statement with no source or stated more strongly than its source. Check the text against the shape rules. Deliver only the final text: never the draft, the check, or any note about it. Done when every statement has a source and the delivered text holds only the text.
 
 ## Text the user sends as themselves
 
-Use this for a Slack or chat message, or a comment, that goes out under the user's name. Why: a draft in a generic voice doesn't sound like the user.
+Use this for a Slack or chat message, or a comment, that goes out under the user's name. Why: a draft in a generic voice doesn't sound like the user. Copying the user's real habits below is not faking informality: it is the one place lowercase starts and dropped apostrophes belong.
 
 ### Pick the register by where it goes
 
@@ -99,13 +99,13 @@ Create a Slack message the user authored as a draft in the target DM or channel 
 
 If the user wants to see it first, put the draft in their own self-DM, then a draft in the recipient's DM after they approve. Never send a self-DM preview: the tool can't delete a sent message.
 
-Done when the draft sits in the right conversation, unsent.
+Done when the Slack draft sits in the right conversation, unsent. For anywhere with no draft state, such as a GitHub comment, done when the text is in your reply for the user to post.
 
 ## A review of someone's PR
 
 Why these rules: every sentence the author reads costs their attention, and a review full of noise teaches them to skip the next one.
 
-1. Back every sentence with a check you ran: each finding, the mechanism and consequence it states, any claim about the suggested fix, and every note or "checked and fine" line. Run each check against the base branch, the PR head, and the head with your suggested fix. Reading the code, or other reviewers agreeing, is not a check. When the check would cost more than the sentence is worth, drop the sentence. Why: one unchecked note in an earlier review was wrong, and it cost the whole review the author's trust.
+1. Back every sentence with a check you ran: each finding, the mechanism and consequence it states, any claim about the suggested fix, and every note or "checked and fine" line. Run each check against the base branch, the PR head, and the head with your suggested fix. Outside auto mode, run only the checks that need no permission prompt, and drop the sentences they can't back. Reading the code, or other reviewers agreeing, is not a check. When the check would cost more than the sentence is worth, drop the sentence. Why: one unchecked note in an earlier review was wrong, and it cost the whole review the author's trust.
 2. Lead each finding with its consequence: what breaks, for whom (a user, a tester, a future maintainer), tied to the PR's goal where you can. Then say which reading applies, the mechanism, and the fix. Drop a finding with no consequence you can state. Why: a finding without a "why" reads as noise, and it leaves the author unsure whether the behaviour you describe is fine or a flaw.
 3. Turn a claim about what a person would do ("a tester will log it as failed") into the symptom you reproduced, or drop it.
 4. An approval lists the checks behind it, each line opening with what you did, under a lead-in that frames them as verification. Leave out what the author can see for themselves: the PR's tests, its description, CI, mergeability. Why: a bare approval feels empty, and a list of things the author already sees is noise.
@@ -126,7 +126,7 @@ A design doc, ADR or wiki page for people is a short, high-level pitch to a cold
 
 For an ADR, keep its shape from "Shapes by text type" (context, decision, consequences) and apply steps 2, 5 and 6.
 
-Done when a reader who knows nothing of the work can say, from the first screen, what changes and why it is worth it.
+Done when the first ten or so lines say what changes and why it is worth it, with no term a newcomer would need explained.
 
 ## Issues, tickets and PR descriptions
 
