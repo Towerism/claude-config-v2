@@ -429,7 +429,7 @@ def test_every_hook_entry_outlasts_the_hooks_own_deadline():
                     assert hook["timeout"] >= sync.FETCH_SECONDS + 3 * sync.LOCAL_SECONDS + 60
                 elif hook["command"].endswith("/global_memory.py"):
                     memory = hook_module("global_memory.py")
-                    assert hook["timeout"] >= memory.FETCH_SECONDS + 3 * memory.LOCAL_SECONDS + 60
+                    assert hook["timeout"] >= 3 * memory.FETCH_SECONDS + memory.LOCAL_SECONDS  # clone, fetch, push, and a local step
                 else:
                     assert hook["timeout"] == 10, hook["command"]
     assert hook_module("host_default.py").DEADLINE_SECONDS == 5

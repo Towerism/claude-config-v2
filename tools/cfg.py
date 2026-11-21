@@ -553,6 +553,8 @@ def unmerge_settings(text: str, state: dict) -> str:
     if not env:
         data.pop("env", None)
     perms = data.get("permissions", {})
+    if not isinstance(perms.get("allow", []), list):
+        raise CfgError("settings.json: 'permissions.allow' must be a list")
     if "allow" in perms:
         perms["allow"] = [r for r in perms["allow"] if r not in state.get("allowRules", [])]
         if not perms["allow"]:

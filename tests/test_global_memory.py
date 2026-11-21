@@ -104,6 +104,14 @@ def test_a_memory_naming_a_deny_term_stays_local_and_untracked(tmp_path, origin)
     assert git(m.store, "ls-files", "denied.md") == ""
 
 
+def test_a_deny_terms_file_with_a_byte_order_mark_still_guards(tmp_path, origin):
+    m = started(tmp_path, origin, terms="\ufeff" + TERM + "\n")
+    remember(m, "clean.md")
+    remember(m, "denied.md", body="About acmecorp.\n")
+    assert quiet(m) == {}
+    assert remote_files(origin) == {"clean.md"}
+
+
 def test_a_denied_file_already_committed_is_never_pushed(tmp_path, origin):
     m = started(tmp_path, origin)
     remember(m, "clean.md")
@@ -121,7 +129,7 @@ def test_a_denied_file_already_committed_is_never_pushed(tmp_path, origin):
 
 
 @pytest.mark.parametrize("terms", [None, "", "\n  \n", "unreadable"])
-def test_without_usable_deny_terms_it_commits_locally_and_pushes_nothing(tmp_path, origin, terms):
+def test_without_usable_deny_terms_it_commits_and_pushes_nothing(tmp_path, origin, terms):
     m = started(tmp_path, origin, terms="x\n" if terms == "unreadable" else terms)
     if terms == "unreadable":
         (m.xdg / "claude-config" / "deny-terms").chmod(0)
@@ -130,7 +138,67 @@ def test_without_usable_deny_terms_it_commits_locally_and_pushes_nothing(tmp_pat
     assert (code, err) == (0, b"")
     warned(out, "no-deny-terms")
     assert remote_files(origin) == set()
-    assert git(m.store, "ls-tree", "-r", "--name-only", "main") == "clean.md"
+    assert git(m.store, "status", "--porcelain") == "?? clean.md"  # untracked: no commit was made
+
+
+def test_memories_written_without_deny_terms_sync_once_terms_exist(tmp_path, origin):
+    m = started(tmp_path, origin, terms=None)
+    remember(m, "clean.md")
+    remember(m, "denied.md", body="AcmeCorp secret\n")
+    warned(hook(m)[1], "no-deny-terms")
+    (m.xdg / "claude-config" / "deny-terms").write_text(TERM + "\n")
+    assert quiet(m) == {}
+    assert remote_files(origin) == {"clean.md"}
+    assert git(m.store, "ls-files", "denied.md") == ""
+    assert TERM.casefold() not in git(origin, "log", "-p", "--all").casefold()
+
+
+def test_a_term_in_an_earlier_commit_blocks_the_push_even_once_the_file_is_gone(tmp_path, origin):
+    m = started(tmp_path, origin)
+    remember(m, "clean.md")
+    quiet(m)
+    remember(m, "denied.md", body="Notes from the ACMECORP engagement.\n")
+    git(m.store, "add", "denied.md")
+    git(m.store, "commit", "-q", "-m", "by hand")
+    git(m.store, "rm", "-q", "denied.md")
+    git(m.store, "commit", "-q", "-m", "removed by hand")
+    remember(m, "later.md")
+    code, out, err = hook(m)
+    assert (code, err) == (0, b"")
+    warned(out, "blocked-files")
+    assert remote_files(origin) == {"clean.md"}
+    assert TERM.casefold() not in git(origin, "log", "-p", "--all").casefold()
+
+
+def test_a_term_in_a_binary_file_blocks_the_push(tmp_path, origin):
+    m = started(tmp_path, origin)
+    (m.store / "blob.bin").write_bytes(b"\x00\x01 acmecorp \x00")
+    git(m.store, "add", "blob.bin")
+    git(m.store, "commit", "-q", "-m", "by hand")
+    code, out, err = hook(m)
+    assert (code, err) == (0, b"")
+    warned(out, "blocked-files")
+    assert remote_files(origin) == set()
+
+
+def test_a_term_in_a_commit_message_blocks_the_push(tmp_path, origin):
+    m = started(tmp_path, origin)
+    remember(m, "clean.md")
+    git(m.store, "add", "clean.md")
+    git(m.store, "commit", "-q", "-m", "learned at acmecorp")
+    code, out, err = hook(m)
+    assert (code, err) == (0, b"")
+    warned(out, "blocked-files")
+    assert remote_files(origin) == set()
+
+
+def test_memory_md_and_dot_files_are_never_synced(tmp_path, origin):
+    m = started(tmp_path, origin)
+    remember(m, "normal.md")
+    (m.store / "MEMORY.md").write_text("- [Normal](normal.md)\n")
+    (m.store / ".swap.md.swp").write_text("editor state")
+    assert quiet(m) == {}
+    assert remote_files(origin) == {"normal.md"}
 
 
 # --- sync between machines ---------------------------------------------------------------
@@ -175,6 +243,30 @@ def test_edits_to_the_same_memory_on_two_machines_keep_the_local_text_and_warn(t
     assert "B's version." in git(b.store, "show", "main:shared.md")
     assert git(b.store, "status", "--porcelain") == ""
     assert not (b.store / ".git" / "rebase-merge").exists() and not (b.store / ".git" / "rebase-apply").exists()
+
+
+@pytest.mark.parametrize("command,state", [("rebase", "rebase-merge"), ("merge", "MERGE_HEAD")])
+def test_a_store_left_mid_rebase_or_merge_is_not_touched(tmp_path, origin, command, state):
+    a = started(tmp_path, origin, "a")
+    remember(a, "x.md", body="Base.\n")
+    quiet(a)
+    b = started(tmp_path, origin, "b")
+    remember(a, "x.md", body="A.\n")
+    quiet(a)
+    remember(b, "x.md", body="B.\n")
+    git(b.store, "commit", "-q", "-am", "b")
+    git(b.store, "fetch", "-q", "origin")
+    # A hand rebase or merge that stopped on its conflict, as when the user left it or git was killed.
+    subprocess.run(["git", "-C", str(b.store), command, "origin/main"], capture_output=True, env=GIT_ENV, check=False)
+    assert (b.store / ".git" / state).exists()
+    before = git(b.store, "status", "--porcelain")
+    remember(b, "new.md", body="Precious.\n")
+    code, out, err = hook(b)
+    assert (code, err) == (0, b"")
+    warned(out, "conflict")
+    assert (b.store / "new.md").read_text().endswith("Precious.\n")
+    assert (b.store / ".git" / state).exists()
+    assert git(b.store, "status", "--porcelain") == before + "\n?? new.md"
 
 
 def test_a_failed_fetch_or_push_keeps_the_new_memory(tmp_path, origin):
@@ -367,3 +459,27 @@ def test_a_pushed_memory_edited_to_name_a_deny_term_keeps_its_edit_local(tmp_pat
         assert (a.store / "shared.md").read_text() == edited
         assert (a.store / "other.md").read_text() == (b.store / "other.md").read_text()
         assert git(a.store, "rev-parse", "main") == git(origin, "rev-parse", "main")
+
+
+def test_a_skills_symlink_from_the_remote_never_leads_outside_the_store(tmp_path, origin):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    seed = tmp_path / "seed"
+    subprocess.run(["git", "clone", "-q", str(origin), str(seed)], check=True, capture_output=True, env=GIT_ENV)
+    (seed / "skills").symlink_to(outside)
+    git(seed, "add", "-A")
+    git(seed, "commit", "-q", "-m", "tampered")
+    git(seed, "push", "-q", "origin", "HEAD:main")
+    m = started(tmp_path, origin)
+    assert not (m.store / "skills").is_symlink()
+    link = m.home / ".omc" / "skills"
+    assert not link.exists() or link.resolve().is_relative_to(m.store.resolve())
+
+
+def test_a_relative_xdg_config_home_is_ignored(tmp_path, origin):
+    m = machine(tmp_path, origin)
+    (m.home / ".config").mkdir()
+    (m.xdg / "claude-config").rename(m.home / ".config" / "claude-config")
+    m.env["XDG_CONFIG_HOME"] = "no-such-relative-dir"
+    quiet(m, STARTUP)
+    assert (m.store / ".git").is_dir()

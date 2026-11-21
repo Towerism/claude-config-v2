@@ -806,21 +806,24 @@ def test_status_names_an_unreadable_gate_config_on_a_state_from_before_the_gates
     assert f"unreadable {gate_config(home)}" in capsys.readouterr().out
 
 
-def memory_rule(tmp_path, monkeypatch):
-    """The rule a deploy should add for a memory store under a fresh XDG_DATA_HOME, in Claude Code's absolute-path form."""
+def memory_rules(tmp_path, monkeypatch):
+    """The two rules a deploy should add for a memory store under a fresh XDG_DATA_HOME.
+
+    Absolute paths take a leading double slash in Claude Code. Neither rule may reach <store>/.git.
+    """
     xdg = tmp_path / "xdg"
     monkeypatch.setenv("XDG_DATA_HOME", str(xdg))
-    return f"Edit(/{xdg}/claude-memory/**)"  # the leading double slash marks an absolute path
+    return [f"Edit(/{xdg}/claude-memory/*.md)", f"Edit(/{xdg}/claude-memory/skills/**)"]
 
 
-def test_rollback_removes_only_the_memory_rule_it_added(home, tmp_path, monkeypatch):
-    rule = memory_rule(tmp_path, monkeypatch)
+def test_rollback_removes_only_the_memory_rules_it_added(home, tmp_path, monkeypatch):
+    rules = memory_rules(tmp_path, monkeypatch)
     home.mkdir()
     (home / "settings.json").write_text('{"permissions": {"allow": ["Bash(ls:*)"], "deny": ["Read(.env)"]}}\n')
     run(home, "deploy", "--host", "personal", "--yes")
-    run(home, "deploy", "--yes")  # a second deploy must not add the rule again
+    run(home, "deploy", "--yes")  # a second deploy must not add the rules again
     settings = json.loads((home / "settings.json").read_text())
-    assert settings["permissions"]["allow"] == ["Bash(ls:*)", rule]
+    assert settings["permissions"]["allow"] == ["Bash(ls:*)", *rules]
     settings["permissions"]["allow"].append("Bash(pwd)")  # changed after the deploy, so rollback strips our part
     (home / "settings.json").write_text(json.dumps(settings))
     run(home, "rollback")
@@ -829,21 +832,34 @@ def test_rollback_removes_only_the_memory_rule_it_added(home, tmp_path, monkeypa
 
 
 def test_a_memory_rule_the_user_had_first_survives_rollback(home, tmp_path, monkeypatch):
-    rule = memory_rule(tmp_path, monkeypatch)
+    rules = memory_rules(tmp_path, monkeypatch)
     home.mkdir()
-    (home / "settings.json").write_text(json.dumps({"permissions": {"allow": [rule]}}))
+    (home / "settings.json").write_text(json.dumps({"permissions": {"allow": [rules[0]]}}))
     run(home, "deploy", "--host", "personal", "--yes")
     run(home, "deploy", "--yes")
     settings = json.loads((home / "settings.json").read_text())
-    assert settings["permissions"]["allow"] == [rule]
+    assert settings["permissions"]["allow"] == rules
     settings["theme"] = "dark"
     (home / "settings.json").write_text(json.dumps(settings))
     run(home, "rollback")
-    assert json.loads((home / "settings.json").read_text())["permissions"] == {"allow": [rule]}
+    assert json.loads((home / "settings.json").read_text())["permissions"] == {"allow": [rules[0]]}
+
+
+def test_a_non_list_allow_is_reported_by_deploy_and_rollback(home, tmp_path, monkeypatch, capsys):
+    memory_rules(tmp_path, monkeypatch)
+    home.mkdir()
+    (home / "settings.json").write_text('{"permissions": {"allow": "Bash(ls)"}}\n')
+    assert run(home, "deploy", "--host", "personal", "--yes") == 2
+    assert "'permissions.allow' must be a list" in capsys.readouterr().err
+    (home / "settings.json").write_text("{}\n")
+    run(home, "deploy", "--host", "personal", "--yes")
+    (home / "settings.json").write_text('{"permissions": {"allow": "Bash(ls)"}}\n')
+    assert run(home, "rollback") == 2
+    assert "'permissions.allow' must be a list" in capsys.readouterr().err
 
 
 def test_rollback_drops_permissions_left_empty(home, tmp_path, monkeypatch):
-    memory_rule(tmp_path, monkeypatch)
+    memory_rules(tmp_path, monkeypatch)
     run(home, "deploy", "--host", "personal", "--yes")
     settings = json.loads((home / "settings.json").read_text())
     settings["theme"] = "dark"
