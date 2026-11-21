@@ -1,6 +1,6 @@
 ---
 name: human-prose
-description: Write or revise any text a person will read, so it gives that reader what they need, reads as a person wrote it, and states nothing its sources don't. Covers commit messages, PR descriptions, PR reviews, issues, tickets, ADRs, READMEs, design docs, wiki and Confluence pages, release notes, and Slack or other chat messages, including text the user sends as themselves. Use when writing such text from facts, a diff or a conversation, and when editing someone's draft. Not for text only agents read (SKILL.md files, prompts, CLAUDE.md).
+description: Write or revise any text a person will read, so it gives that reader what they need, reads as a person wrote it, and states nothing its sources don't. Covers commit messages, PR descriptions, PR reviews, issues, tickets and their comments, ADRs, READMEs and other documentation, design docs, wiki and Confluence pages, changelogs and release notes, emails, and Slack or other chat messages, including text the user sends as themselves. Use when writing such text from facts, a diff or a conversation, and when editing someone's draft. Not for text only agents read (SKILL.md files, prompts, CLAUDE.md).
 ---
 
 # Text a person reads
@@ -12,7 +12,7 @@ Writing from sources (facts, a diff, an issue, the conversation, earlier text):
 1. Name the reader and the one thing they need from this text: to approve it, to try it, to understand why, to act. Why: a text that doesn't surface what its reader cares about misses its purpose, however accurate it is.
 2. Write it in the shape for its type ("Shapes by text type"), following every rule below and the section for its kind of text, if there is one: "Text the user sends as themselves", "A review of someone's PR", "ADRs, design docs and wiki pages", or "Issues, tickets and PR descriptions".
 3. Run the check under "Before you deliver".
-4. Deliver the final text. Done when the delivered text holds nothing about how it was made. A note for the user, such as unchecked links or unsettled review items, goes in your reply outside the delivered text.
+4. Deliver the final text. Done when the delivered text holds nothing about how it was made. A note for whoever asked for the text, such as unchecked links, examples you couldn't run or unsettled review items, goes in your reply or report, outside the delivered text.
 
 Revising someone's draft: follow "Revising someone's draft", then steps 3 and 4.
 
@@ -57,7 +57,7 @@ Edit, don't rewrite. Why: readers already trust the author's own words, and ever
 These keep the text reading as a person wrote it. Why: readers who sense machine-written text start skimming and miss what matters.
 
 - Use everyday words and plain verbs: is, has, uses, wrote, moved, tried. Avoid unusual phrasing a reader has to stop and decode ("trades tokens for trust" → "spends extra tokens to make sure every comment can be trusted"; "every finding earns its place" → "the skill only keeps a comment if it was tested").
-- Use the shape people use for this kind of text (below), and the headings the project's own template uses, if it has one. Text under about 200 words gets no headings and no bold labels; don't split a short flat document into sections. Never take a heading's wording from these rules; the one exception is an issue, ticket or PR description with a security item, which keeps `## Security findings` whatever its length.
+- Use the shape people use for this kind of text (below), and the headings the project's own template uses, if it has one. A format the project or your own instructions fix wins over these shapes: a commit style the repo's history shows, a doc template, the structure of the docs around it. These rules then govern the wording inside that format. A general preference for headers, bullets or tables is not a fixed format: follow it in text over about 200 words, where it helps the reader scan. Text under about 200 words gets no headings and no bold labels; don't split a short flat document into sections. Never take a heading's wording from these rules; the one exception is an issue, ticket or PR description with a security item, which keeps `## Security findings` whatever its length.
 - Say what matters to this reader; don't walk through every case or option in turn just to be complete, and don't use every fact you were given.
 - Start with the first real point, not a sentence that previews what follows. Let list items differ in shape as their content does, rather than making them uniformly parallel.
 - Say what a thing is. Add a "not X" contrast only when the reader would otherwise assume X.
@@ -67,7 +67,7 @@ These keep the text reading as a person wrote it. Why: readers who sense machine
 
 ## Shapes by text type
 
-- Commit message: imperative subject under about 60 characters; blank line; a body that says why, wrapped near 72 columns. A small change may have no body.
+- Commit message: the convention the repo's recent commits follow, such as Conventional Commits; otherwise an imperative subject under about 60 characters; blank line; a body that says why, wrapped near 72 columns. A small change may have no body.
 - PR description: what changes and why, then how it was tested or the evidence. Paste benchmark or test output rather than describing it.
 - Issue or ticket: what is wrong or wanted, then reproduction steps or the evidence. Add expected behavior only when it isn't obvious.
 - ADR: the context that forces a decision, the decision, its consequences. Short.
@@ -77,11 +77,11 @@ These keep the text reading as a person wrote it. Why: readers who sense machine
 
 ## Before you deliver
 
-Check the text privately, in your own reasoning, before you deliver it: for each statement of fact, find the source it rests on, and remove or fix any statement with no source or stated more strongly than its source. Check the text against the shape rules. Deliver only the final text: never the draft, the check, or any note about it. Done when every statement has a source and the delivered text holds only the text.
+Check the text privately, in your own reasoning, before you deliver it; this check is part of writing, not a review or sign-off: for each statement of fact, find the source it rests on, and remove or fix any statement with no source or stated more strongly than its source. Check the text against the shape rules. Deliver only the final text: never the draft, the check, or any note about it. Done when every statement has a source and the delivered text holds only the text.
 
 ## Text the user sends as themselves
 
-Use this for a Slack or chat message, or a comment, that goes out under the user's name. Why: a draft in a generic voice doesn't sound like the user. Copying the user's real habits below is not faking informality: it is the one place lowercase starts and dropped apostrophes belong.
+Use this for a Slack or chat message, or a comment, that the user asks you to draft for them to send. Why: a draft in a generic voice doesn't sound like the user. Copying the user's real habits below is not faking informality: it is the one place lowercase starts and dropped apostrophes belong.
 
 ### Pick the register by where it goes
 
@@ -130,7 +130,7 @@ Done when the first ten or so lines say what changes and why it is worth it, wit
 
 ## Issues, tickets and PR descriptions
 
-- Keep only what is pertinent and present in the ticket's own context: no references to local plans, reviews, interview rounds, `.omc/` files, requirement numbers or decision history. Why: a cold reader gains nothing from them, and the full history belongs in the local design record.
+- Keep only what is pertinent and present in the ticket's own context: no references to local plans, reviews, interview rounds, `.omc/` files, requirement numbers, or how the plan evolved. Why: a cold reader gains nothing from them, and the full history belongs in the local design record. A comment that records a decision still says what was decided, why, and what was passed over.
 - Conclusion first, no filler, no restated points, plain lists instead of decorative tables. Why: the reader of a ticket wants what to do and why, fast.
 - Put every security item (accepted risks, reachability, gate behaviour, follow-ups) in one `## Security findings` section of about 10 to 15 lines, never scattered under other headings. Lead with the bottom line ("nothing exploitable is on our path; the gate passes"), then the gate rule, what is accepted and why in one line per group, caveats, and links to follow-ups. Leave out raw scanner totals and per-CVE detail; link the decision record instead. Elsewhere in the text, link to the section rather than repeating it. Why: security staff and reviewers must find everything in one place, and a reviewer who meets hundreds of scanner findings up front may read nothing else.
 - After posting to a tracker, read the issue, ticket or PR back and compare it with what you meant to post. Done when the two match.

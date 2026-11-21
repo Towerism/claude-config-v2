@@ -44,6 +44,8 @@ What the tests showed, on 16 development texts with a Sonnet writer:
 4. **No second checker agent.** On held-out README, wiki and PR texts, a Sonnet verifier's fix round left errors where they were on most texts, added one on four and removed one on two, and texts read more like AI after it. It also cost about 77k extra input tokens and 10 to 25 seconds per text.
 5. **Links are checked only with read-only `gh` commands, and only in auto mode,** so a link check never stops a session for a permission prompt.
 6. **`config/CLAUDE.global.md` names when to load the skill,** because skills rarely load on their own. With it, 24 of 24 sessions loaded the skill without being told to.
+7. **A session that delegates such text tells the subagent to load `human-prose`,** and a format the project or the subagent's own instructions fix (a commit style from the repo's history, a doc template) wins over the skill's shapes, and a general preference for headers or tables applies above about 200 words, so the two never give opposite orders. Why: with the trigger line alone, the OMC writer and executor agents loaded the skill 3 of 3 times each, but git-master, which carries its own commit-style rules, loaded it 0 of 2. With the delegation line, writer, executor and git-master each loaded it 2 of 2.
+8. **Issue and ticket bodies follow `human-prose` only,** not `agent-doc-discipline`, because people read them and they are held to the same standard as a PR.
 
 ## Consequences
 
