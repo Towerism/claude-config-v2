@@ -13,7 +13,7 @@ Writing from sources (facts, a diff, an issue, the conversation, earlier text):
 2. Read the reference file for the text type, if the table under "Reference files" names one.
 3. Write it in the shape for its type ("Shapes by text type"), following every rule below.
 4. Run the check under "Before you deliver".
-5. If the type is a README, a wiki or design page, or a PR description, run "The checker" too.
+5. If the type is a README, a wiki or design page, or a PR description, run the checker in `references/checker.md`.
 6. Deliver only the final text. Done when the reply holds the text and nothing about how it was made.
 
 Revising someone's draft: follow "Revising someone's draft", then steps 4 and 6. Edits get no checker.
@@ -26,6 +26,7 @@ Revising someone's draft: follow "Revising someone's draft", then steps 4 and 6.
 | A review of someone's PR | `references/pr-review.md` |
 | An ADR, design doc or wiki page | `references/design-docs.md` |
 | An issue, ticket or PR description | `references/tickets-and-prs.md` |
+| A README, wiki or design page, or PR description, written from sources (step 5) | `references/checker.md` |
 
 A commit message, and a chat reply not sent as the user, need no reference file.
 
@@ -91,28 +92,3 @@ These keep the text reading as a person wrote it. Why: readers who sense machine
 ## Before you deliver
 
 Check the text privately, in your own reasoning, before you deliver it: for each statement of fact, find the source it rests on, and remove or fix any statement with no source or stated more strongly than its source. Check the text against the shape rules. Deliver only the final text: never the draft, the check, or any note about it. Done when every statement has a source and the reply holds only the text.
-
-## The checker
-
-For a README, a wiki or design page, or a PR description written from sources:
-
-1. Spawn the `oh-my-claudecode:verifier` agent with `model: sonnet` and this prompt, with every source the text draws on pasted verbatim in place of `{src}` (the fact list, or the parts of the diff, issue, conversation and tool output the text states facts from) and your draft in place of `{text}`:
-
-   ```
-   Sources the writer had:
-   <<<
-   {src}
-   >>>
-
-   Text the writer produced:
-   <<<
-   {text}
-   >>>
-
-   List each statement in the text that the sources do not support (a new fact, cause, reason, name, plan or test claim, or a claim stated more strongly than the sources state it), one per line with a short quote. If there are none, output exactly NONE.
-   ```
-
-2. If it lists statements, fix or remove each one that really is unsupported, in one round with no second check. Why: removing every listed statement outright turns a checker's false alarm into a dropped true fact.
-3. If no agent can be spawned, skip the check and say so in your reply to the user, never in the delivered text.
-
-Done when the checker answered NONE or its list has been worked through once.
