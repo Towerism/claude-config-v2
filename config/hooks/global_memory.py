@@ -10,19 +10,21 @@ start with a byte order mark.
 
 When it syncs, by event. The tool events act only when tool_input.file_path, resolved, lies inside
 the store; any other file or shape returns at once (the settings' `if` filter is best effort).
-- SessionStart with source startup, PostToolUse (a Write or Edit of a store file) and SessionEnd
-  (the backstop for what no write event saw: shell edits and deletes, a write just before exit):
-  always. PostToolUse and SessionEnd wait up to WAIT_SECONDS for memory.lock, then skip quietly.
-- PreToolUse (a Read, Write or Edit of a store file): always, so the tool sees the newest text,
-  except while backing off: when the last sync failed less than PULL_SECONDS ago.
+- SessionStart with source startup, and PostToolUse (a Write or Edit of a store file): always.
+- PreToolUse (a Read, Write or Edit of a store file), so the tool sees the newest text, and
+  SessionEnd (the backstop for what no write event saw: shell edits and deletes, a write just
+  before exit): always, except while backing off: when the last sync failed less than
+  PULL_SECONDS ago.
 - SessionStart with another source, and UserPromptSubmit: only when the last sync attempt is
   older than PULL_SECONDS.
 - Any other event: nothing (no git, no output, no files).
 Two stamps in <claude home>/claude-config hold that state: memory.pulled, touched by every attempt
 that gets the lock, and memory.failed, touched by a failed attempt and removed by one that
-completes. A stamp in the future (a clock step back) counts as old. Events that do not wait skip
-quietly while another sync holds memory.lock. Network steps get READ_SECONDS on PreToolUse, which
-blocks the tool call, and FETCH_SECONDS elsewhere; local steps get LOCAL_SECONDS each.
+completes. A stamp in the future (a clock step back) counts as old. While another sync holds
+memory.lock, PostToolUse and SessionEnd wait up to WAIT_SECONDS for it, PreToolUse up to
+READ_SECONDS, and the rest not at all, then skip quietly. Network steps get READ_SECONDS on
+PreToolUse and SessionEnd, which block the tool call or the exit, and FETCH_SECONDS elsewhere; local
+steps get LOCAL_SECONDS each.
 
 A sync clones the store when it is missing, with the hook's fixed git identity in the store's own
 config so hand commits there carry it too. A missing, unreadable or empty
@@ -89,7 +91,7 @@ PULL_SECONDS = 60  # the attempt throttle, and the back-off after a failure befo
 WAIT_SECONDS = 30  # how long a write or a session end waits for a sync under way
 SEEN_DAYS = 30
 EVENTS = ("SessionStart", "PostToolUse", "PreToolUse", "UserPromptSubmit", "SessionEnd")
-NETWORK = ("clone-failed", "fetch-failed", "push-failed", "timeout")  # normal while the remote is away
+NETWORK = ("clone-failed", "fetch-failed", "push-failed", "network-timeout")  # normal while the remote is away
 SESSION = re.compile(r"[A-Za-z0-9-]{1,64}")
 COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 LOG_LINES = 200
@@ -160,7 +162,8 @@ def environment() -> dict:
 def git(cwd: Path, args: list[str], seconds: float, reason: str = "git-failed") -> tuple[int, bytes]:
     """(exit code, stdout) of git `args`; Failure(reason) on a non-zero exit unless reason is "".
 
-    It runs in its own session: past the deadline the whole group (git and its ssh) is killed.
+    It runs in its own session: past the deadline the whole group (git and its ssh) is killed, and
+    the reason is network-timeout for a network step (one whose reason is in NETWORK), else timeout.
     """
     exe = shutil.which("git", path=SAFE_PATH)
     if exe is None:
@@ -175,7 +178,7 @@ def git(cwd: Path, args: list[str], seconds: float, reason: str = "git-failed") 
         with contextlib.suppress(OSError):
             os.killpg(proc.pid, signal.SIGKILL)
         proc.communicate()
-        raise Failure("timeout") from None
+        raise Failure("network-timeout" if reason in NETWORK else "timeout") from None
     if proc.returncode != 0 and reason:
         raise Failure(reason)
     return proc.returncode, out
@@ -220,17 +223,17 @@ def has(store: Path, ref: str) -> bool:
     return git(store, ["rev-parse", "-q", "--verify", ref], LOCAL_SECONDS, "")[0] == 0
 
 
-def sync(home: Path, store: Path, url: str, terms: list[str] | None, wait: bool, network: float) -> None:
+def sync(home: Path, store: Path, url: str, terms: list[str] | None, wait: float, network: float) -> None:
     """One sync of the store with `url`; Failure when it stopped.
 
-    With `wait` it waits up to WAIT_SECONDS for a sync under way, else it skips at once; `network`
-    is the clone, fetch and push deadline. Every attempt that gets the lock stamps memory.pulled; a
+    It waits up to `wait` seconds for a sync under way, then skips; `network` is the clone, fetch
+    and push deadline. Every attempt that gets the lock stamps memory.pulled; a
     failed one also stamps memory.failed, which a completed one removes.
     """
     state = home / "claude-config"
     state.mkdir(parents=True, exist_ok=True)
     with open(state / "memory.lock", "a") as lock:
-        deadline = time.monotonic() + (WAIT_SECONDS if wait else 0)
+        deadline = time.monotonic() + wait
         while True:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -437,16 +440,17 @@ def main() -> None:
                 return
         state = home / "claude-config"
         startup = event == "SessionStart" and source == "startup"
-        waits = event in ("PostToolUse", "SessionEnd")
-        if event == "PreToolUse":
-            due = not recent(state / "memory.failed")  # every store access pulls, unless backing off
+        short = event in ("PreToolUse", "SessionEnd")  # the tool call or the exit waits on it
+        if short:
+            due = not recent(state / "memory.failed")  # every store access and exit syncs, unless backing off
         else:
-            due = startup or waits or not recent(state / "memory.pulled")
+            due = startup or event == "PostToolUse" or not recent(state / "memory.pulled")
         if due:
             with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
                 try:
-                    network = READ_SECONDS if event == "PreToolUse" else FETCH_SECONDS
-                    sync(home, store, url, deny_terms(config_home), waits, network)
+                    wait = {"PostToolUse": WAIT_SECONDS, "SessionEnd": WAIT_SECONDS, "PreToolUse": READ_SECONDS}
+                    network = READ_SECONDS if short else FETCH_SECONDS
+                    sync(home, store, url, deny_terms(config_home), wait.get(event, 0), network)
                 except Failure as failure:
                     reason = failure.args[0]
                     with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code

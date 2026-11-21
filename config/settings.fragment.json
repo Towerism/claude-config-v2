@@ -50,19 +50,19 @@
             "type": "command",
             "command": "python3 -I {claude_home}/hooks/global_memory.py",
             "if": "Read({memory_dir}/**)",
-            "timeout": 15
+            "timeout": 30
           },
           {
             "type": "command",
             "command": "python3 -I {claude_home}/hooks/global_memory.py",
             "if": "Write({memory_dir}/**)",
-            "timeout": 15
+            "timeout": 30
           },
           {
             "type": "command",
             "command": "python3 -I {claude_home}/hooks/global_memory.py",
             "if": "Edit({memory_dir}/**)",
-            "timeout": 15
+            "timeout": 30
           }
         ]
       }

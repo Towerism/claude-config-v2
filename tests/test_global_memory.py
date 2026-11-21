@@ -420,7 +420,8 @@ def test_an_unreachable_remote_warns_and_logs(tmp_path, origin):
 
 @pytest.mark.parametrize("patch,reason", [
     ("hook.SAFE_PATH = '/nonexistent'\n", "no-git"),
-    ("hook.FETCH_SECONDS = 0\n", "timeout"),
+    ("hook.FETCH_SECONDS = 0\n", "network-timeout"),
+    ("hook.LOCAL_SECONDS = 0\n", "timeout"),
 ])
 def test_no_git_or_a_step_past_its_deadline_warns(tmp_path, origin, patch, reason):
     m = machine(tmp_path, origin)
@@ -643,7 +644,7 @@ def test_a_read_prints_nothing_in_any_failure_world(tmp_path, origin, world):
         if world == "held-lock":
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         assert hook(m, READ, patch) == (0, b"", b"")
-    reason = {"unreachable": "clone-failed", "no-git": "no-git", "deadline": "timeout", "no-deny-terms": "no-deny-terms"}
+    reason = {"unreachable": "clone-failed", "no-git": "no-git", "deadline": "network-timeout", "no-deny-terms": "no-deny-terms"}
     if world in reason:
         assert last_log(m).endswith(" " + reason[world])
 
@@ -658,15 +659,15 @@ HANG = (
 )
 
 
-@pytest.mark.parametrize("payload,short", [(READ, True), (STARTUP, False)])
+@pytest.mark.parametrize("payload,short", [(READ, True), (SESSION_END, True), (STARTUP, False)])
 def test_a_hanging_fetch_is_cut_at_the_events_network_deadline(tmp_path, origin, payload, short):
     m = started(tmp_path, origin)
     stamp(m, HOOK.PULL_SECONDS + 5)
     begin = time.monotonic()
     code, _, err = hook(m, payload, HANG)
     assert (code, err) == (0, b"")
-    assert (time.monotonic() - begin < 4) == short  # the read path stops at 1 s, session start waits 4 s
-    assert last_log(m).endswith(" timeout")
+    assert (time.monotonic() - begin < 4) == short  # a read or an exit stops at 1 s, session start waits 4 s
+    assert last_log(m).endswith(" network-timeout")
 
 
 @pytest.mark.parametrize("payload", [PROMPT, {"hook_event_name": "SessionStart", "source": "resume"}])
@@ -880,22 +881,23 @@ def test_every_read_or_edit_of_the_store_pulls_first(tmp_path, origin):
     assert "Old, edited on B." in git(origin, "show", "main:old.md")
 
 
-def test_a_read_backs_off_after_a_failed_sync_until_the_window_passes(tmp_path, origin):
+@pytest.mark.parametrize("payload", [READ, SESSION_END])
+def test_a_read_or_an_exit_backs_off_after_a_failed_sync_until_the_window_passes(tmp_path, origin, payload):
     m = started(tmp_path, origin)
     failed = m.claude / "claude-config" / "memory.failed"
     git(m.store, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
-    assert hook(m, READ) == (0, b"", b"") and failed.exists()
-    assert hook(m, READ, patch=no_git(m)) == (0, b"", b"")
+    assert hook(m, payload) == (0, b"", b"") and failed.exists()
+    assert hook(m, payload, patch=no_git(m)) == (0, b"", b"")
     assert not m.mark.exists()  # inside the back-off: no git at all
     for age in (HOOK.PULL_SECONDS + 5, -HOOK.PULL_SECONDS - 30):  # outside it, and a stamp in the future
         stamp(m, age, "memory.failed")
-        assert hook(m, READ, patch=no_git(m)) == (0, b"", b"")
+        assert hook(m, payload, patch=no_git(m)) == (0, b"", b"")
         assert m.mark.exists()
         m.mark.unlink()
     git(m.store, "remote", "set-url", "origin", str(origin))
     stamp(m, HOOK.PULL_SECONDS + 5, "memory.failed")
     remember(m, "new.md")
-    assert hook(m, READ) == (0, b"", b"")
+    assert hook(m, payload) == (0, b"", b"")
     assert not failed.exists() and remote_files(origin) == {"new.md"}
 
 
@@ -948,8 +950,7 @@ def test_a_symlinked_seen_directory_is_never_cleaned(tmp_path, origin):
 ])
 @pytest.mark.parametrize("base", [SYNC, READ])
 def test_a_tool_event_for_anything_but_a_store_file_runs_no_git(tmp_path, origin, base, tool_input):
-    m = started(tmp_path, origin)
-    remember(m, "new.md")
+    m = machine(tmp_path, origin)
     if isinstance(tool_input, dict) and isinstance(tool_input.get("file_path"), str):
         path = tool_input["file_path"].replace("OUTSIDE", str(tmp_path / "x.md")).replace("<store>", str(m.store))
         tool_input = {"file_path": path}
@@ -973,3 +974,29 @@ def test_which_events_warn_for_which_reasons(tmp_path, origin, payload, network,
     code, out, err = hook(m, payload)
     assert (code, err) == (0, b"") and last_log(m).endswith(" no-deny-terms")
     assert ("systemMessage" in (json.loads(out) if out else {})) == act
+
+
+def test_a_read_waits_briefly_for_a_sync_under_way(tmp_path, origin):
+    m = started(tmp_path, origin)
+    remember(m, "new.md")
+    with open(m.claude / "claude-config" / "memory.lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        proc = subprocess.Popen(
+            [sys.executable, "-I", str(m.claude / "hooks" / "global_memory.py")],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=m.env,
+        )
+        proc.stdin.write(json.dumps({**READ, "tool_input": {"file_path": str(m.store / "x.md")}}).encode())
+        proc.stdin.close()
+        time.sleep(0.5)  # well inside READ_SECONDS
+    out, err = proc.stdout.read(), proc.stderr.read()
+    proc.stdout.close()
+    proc.stderr.close()
+    assert (proc.wait(timeout=60), out, err) == (0, b"", b"")
+    assert remote_files(origin) == {"new.md"}  # it synced once the lock was free
+
+
+def test_a_stuck_local_step_after_a_write_warns(tmp_path, origin):
+    m = started(tmp_path, origin)
+    remember(m, "new.md")
+    out = quiet(m, SYNC, "hook.LOCAL_SECONDS = 0\n")
+    assert "(timeout)" in out["systemMessage"] and last_log(m).endswith(" timeout")

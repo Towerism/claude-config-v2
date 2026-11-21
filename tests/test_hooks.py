@@ -418,7 +418,7 @@ def test_the_hooks_are_registered_and_listed():
         ("Write|Edit", hook("global_memory.py", 120, **{"if": "Write({memory_dir}/**)", "async": True})),
     ]
     assert entries("PreToolUse", "global_memory.py") == [
-        ("Read|Write|Edit", hook("global_memory.py", 15, **{"if": f"{tool}({{memory_dir}}/**)"}))
+        ("Read|Write|Edit", hook("global_memory.py", 30, **{"if": f"{tool}({{memory_dir}}/**)"}))
         for tool in ("Read", "Write", "Edit")
     ]
     assert entries("UserPromptSubmit", "global_memory.py") == [(None, hook("global_memory.py", 120, **{"async": True}))]
@@ -440,9 +440,13 @@ def test_every_hook_entry_outlasts_the_hooks_own_deadline():
                     assert sync.LOCAL_SECONDS == 10
                     assert hook["timeout"] >= sync.FETCH_SECONDS + 3 * sync.LOCAL_SECONDS + 60
                 elif hook["command"].endswith("/global_memory.py"):
-                    if event in ("SessionStart", "PostToolUse", "UserPromptSubmit"):
-                        memory = hook_module("global_memory.py")
-                        assert hook["timeout"] >= 3 * memory.FETCH_SECONDS + memory.LOCAL_SECONDS  # clone, fetch, push, a local step
+                    # The wait for a sync under way, then clone, fetch, push and a local step.
+                    memory = hook_module("global_memory.py")
+                    wait = {"PostToolUse": memory.WAIT_SECONDS, "SessionEnd": memory.WAIT_SECONDS,
+                            "PreToolUse": memory.READ_SECONDS}.get(event, 0)
+                    short = event in ("PreToolUse", "SessionEnd")  # the tool call or the exit waits on it
+                    network = memory.READ_SECONDS if short else memory.FETCH_SECONDS
+                    assert hook["timeout"] >= wait + 3 * network + memory.LOCAL_SECONDS, event
                 else:
                     assert hook["timeout"] == 10, hook["command"]
     assert hook_module("host_default.py").DEADLINE_SECONDS == 5
