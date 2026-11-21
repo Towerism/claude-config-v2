@@ -196,10 +196,15 @@ def desired_files(host: dict) -> dict[str, bytes]:
     return files
 
 
+def memory_rule(rule: str) -> str:
+    """The permission rule with the memory store's path put in; a leading double slash is Claude Code's form for an absolute path."""
+    return rule.replace("{memory_dir}", "/" + str(data_dir() / "claude-memory"))
+
+
 def merge_settings(
-    old: dict, host: dict, home: Path, previous: list[str], previous_env: list[str]
-) -> tuple[dict, list[str], list[str]]:
-    """The settings with our hook entries and env keys replaced, plus the commands and env keys we own now."""
+    old: dict, host: dict, home: Path, previous: list[str], previous_env: list[str], previous_allow: list[str]
+) -> tuple[dict, list[str], list[str], list[str]]:
+    """The settings with our hook entries, env keys and allow rules replaced, plus the ones we own now."""
     fragment = json.loads((ROOT / "config" / "settings.fragment.json").read_text(encoding="utf-8"))
     new = copy.deepcopy(old)
     hooks = new.setdefault("hooks", {})
@@ -215,7 +220,7 @@ def merge_settings(
             for entry in group["hooks"]:
                 if Path(entry["command"].split()[-1]).name in wanted:
                     command = entry["command"].replace("{claude_home}", quoted)
-                    entries.append({**entry, "command": command})
+                    entries.append({**entry, "command": command, **({"if": memory_rule(entry["if"])} if "if" in entry else {})})
                     if command not in commands:
                         commands.append(command)
             if entries:
@@ -246,11 +251,25 @@ def merge_settings(
         env.update(wanted_env)
         if not env:
             del new["env"]
+    wanted_allow = [memory_rule(rule) for rule in fragment.get("permissions", {}).get("allow", [])]
+    added: list[str] = []
+    if wanted_allow or previous_allow:
+        perms = new.setdefault("permissions", {})
+        if not isinstance(perms, dict) or not isinstance(perms.get("allow", []), list):
+            raise CfgError("settings.json: 'permissions.allow' must be a list")
+        allow = [rule for rule in perms.get("allow", []) if rule not in previous_allow or rule in wanted_allow]
+        # own only the rules this deploy adds: one the user had first stays theirs through rollback
+        added = [rule for rule in wanted_allow if rule in previous_allow or rule not in allow]
+        perms["allow"] = allow + [rule for rule in added if rule not in allow]
+        if not perms["allow"]:
+            del perms["allow"]
+        if not perms:
+            del new["permissions"]
     for plugin in host.get("plugins", []):
         new.setdefault("enabledPlugins", {})[plugin] = True
     for name, market in host.get("marketplaces", {}).items():
         new.setdefault("extraKnownMarketplaces", {}).setdefault(name, market)
-    return new, commands, list(wanted_env)
+    return new, commands, list(wanted_env), added
 
 
 def find_block(text: str) -> tuple[int, int] | None:
@@ -313,9 +332,9 @@ class Plan:
                 self.remove.append(rel)
                 if sha((home / rel).read_bytes()) != self.recorded[rel]:
                     self.conflicts.append(rel)
-        settings, self.commands, self.env_keys = merge_settings(
+        settings, self.commands, self.env_keys, self.allow_rules = merge_settings(
             read_json(home / "settings.json"), host, home,
-            self.state.get("hookCommands", []), self.state.get("envKeys", []),
+            self.state.get("hookCommands", []), self.state.get("envKeys", []), self.state.get("allowRules", []),
         )
         self.settings = dump(settings)
         old_md = read_text(home / "CLAUDE.md") if (home / "CLAUDE.md").exists() else ""
@@ -411,6 +430,7 @@ def deploy(plan: Plan) -> None:
         "files": {rel: sha(data) for rel, data in plan.want.items()},
         "hookCommands": plan.commands,
         "envKeys": plan.env_keys,
+        "allowRules": plan.allow_rules,
         "settingsSha": sha(plan.settings),
         "claudeMdSha": sha(plan.claude_md),
         "deployedAt": final.name,
@@ -527,13 +547,22 @@ def unmerge_settings(text: str, state: dict) -> str:
         data = json.loads(text) if text.strip() else {}
     except ValueError as err:
         raise CfgError(f"settings.json is not valid JSON: {err}") from err
-    if not isinstance(data, dict) or not all(isinstance(data.get(k, {}), dict) for k in ("hooks", "env")):
-        raise CfgError("settings.json must hold an object with objects under 'hooks' and 'env'")
+    if not isinstance(data, dict) or not all(isinstance(data.get(k, {}), dict) for k in ("hooks", "env", "permissions")):
+        raise CfgError("settings.json must hold an object with objects under 'hooks', 'env' and 'permissions'")
     env = data.get("env", {})
     for key in state.get("envKeys", []):
         env.pop(key, None)
     if not env:
         data.pop("env", None)
+    perms = data.get("permissions", {})
+    if not isinstance(perms.get("allow", []), list):
+        raise CfgError("settings.json: 'permissions.allow' must be a list")
+    if "allow" in perms:
+        perms["allow"] = [r for r in perms["allow"] if r not in state.get("allowRules", [])]
+        if not perms["allow"]:
+            del perms["allow"]
+    if not perms:
+        data.pop("permissions", None)
     ours = set(state.get("hookCommands", []))
     hooks = data.get("hooks", {})
     for event in list(hooks):
@@ -633,6 +662,11 @@ def repair_clone(clone: Path) -> None:
           else f"warning: could not reset main in the sync clone {clone}")
 
 
+def data_dir() -> Path:
+    data = os.environ.get("XDG_DATA_HOME")
+    return Path(data) if data and os.path.isabs(data) else Path.home() / ".local" / "share"
+
+
 def sync_clone(state: dict) -> str | None:
     """The path of the clone auto sync deploys from: the recorded one, else one made from origin.
 
@@ -641,9 +675,7 @@ def sync_clone(state: dict) -> str | None:
     """
     clone = recorded_clone(state)
     if clone is None:
-        data = os.environ.get("XDG_DATA_HOME")
-        base = Path(data) if data and os.path.isabs(data) else Path.home() / ".local" / "share"
-        clone = base / "claude-config"
+        clone = data_dir() / "claude-config"
     if ROOT.resolve() == clone.resolve():
         return str(clone)  # auto_sync runs this deploy from the clone itself
     if (clone / ".git").is_dir():

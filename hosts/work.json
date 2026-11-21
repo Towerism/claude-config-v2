@@ -1,7 +1,7 @@
 {
   "name": "work",
   "defaultTracker": "jira",
-  "hooks": ["host_default.py", "auto_sync.py"],
+  "hooks": ["host_default.py", "auto_sync.py", "global_memory.py"],
   "skills": [
     "issue-lifecycle",
     "fresh-session-handoff",

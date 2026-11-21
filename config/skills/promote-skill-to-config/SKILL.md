@@ -1,6 +1,6 @@
 ---
 name: promote-skill-to-config
-description: Adds a skill to the claude-config-v2 repo as a standard skill, so it syncs to every machine and can be invoked by name. The source is an OMC learned skill (a file in ~/.claude/skills/omc-learned/) or a skill drafted with OMC's skillify. Use when the user asks to move, port or promote a learned skill into claude-config-v2, to skillify a workflow into that repo, or to make a skill available on every machine. Not for a skill that belongs in one project's .omc/skills, or for editing a skill the repo already ships.
+description: Adds a skill to the claude-config-v2 repo as a standard skill, so it syncs to every machine and can be invoked by name. The source is an OMC learned skill (a file in ~/.claude/skills/omc-learned/ or in the global memory store's skills/ directory) or a skill drafted with OMC's skillify. Use when the user asks to move, port or promote a learned skill into claude-config-v2, to skillify a workflow into that repo, or to make a skill available on every machine. Not for a skill that belongs in one project's .omc/skills, or for editing a skill the repo already ships.
 ---
 
 # Promote a skill to claude-config-v2
@@ -9,7 +9,7 @@ claude-config-v2 deploys each `config/skills/<name>/` that a host profile lists 
 
 ## Inputs
 
-- The source. Either a learned skill at `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/omc-learned/<name>.md`, or a skill drafted in this session. For a skillify run, draft the skill by skillify's own workflow first, then start at step 1 here with the draft in place of a learned file. If skillify saved the draft to a file, note where; step 9 removes it.
+- The source. Either a learned skill at `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/omc-learned/<name>.md` or in the global memory store's `skills/` directory (`$XDG_DATA_HOME/claude-memory/skills/`, reachable as `~/.omc/skills/`; ADR-0015), or a skill drafted in this session. For a skillify run, draft the skill by skillify's own workflow first, then start at step 1 here with the draft in place of a learned file. If skillify saved the draft to a file, note where; step 9 removes it.
 - The user's checkout of claude-config-v2. If its path is not known from the session, ask for it.
 
 ## Steps
@@ -30,7 +30,7 @@ claude-config-v2 deploys each `config/skills/<name>/` that a host profile lists 
 
 8. **Open the PR.** Commit with a Conventional Commits subject (`feat(skills): …`), push the branch, and open a draft PR (`gh pr create --draft`) whose body carries `Closes #<n>`. Done when the draft PR is open. Why: marking a PR ready and merging it are the user's decisions.
 
-9. **After the merge, remove the old copy.** Run `git fetch origin`, then diff the source file's body against `origin/main:config/skills/<name>/SKILL.md`. Go on only if the only differences are the step 1 generalisations and the step 4 front matter; otherwise show the user the diff and stop. Delete the source file wherever it was saved (`omc-learned/` or a project's `.omc/skills/`) with `command rm -f`, and remove the worktree and the local branch. Done when the source file is gone and the user knows when the skill installs: at the start of their next new session (auto sync), or right away with `git switch main && git pull && make deploy YES=1` in the checkout. Why: deleting the source must lose nothing the merged copy lacks, and while both copies exist, both load, one by trigger and one by description. A deploy from a feature branch is replaced at the next session start.
+9. **After the merge, remove the old copy.** Run `git fetch origin`, then diff the source file's body against `origin/main:config/skills/<name>/SKILL.md`. Go on only if the only differences are the step 1 generalisations and the step 4 front matter; otherwise show the user the diff and stop. Delete the source file wherever it was saved (`omc-learned/`, the store's `skills/` or a project's `.omc/skills/`) with `command rm -f`, and remove the worktree and the local branch. Done when the source file is gone and the user knows when the skill installs: at the start of their next new session (auto sync), or right away with `git switch main && git pull && make deploy YES=1` in the checkout. Why: deleting the source must lose nothing the merged copy lacks, and while both copies exist, both load, one by trigger and one by description. A deploy from a feature branch is replaced at the next session start.
 
 ## Pitfalls
 

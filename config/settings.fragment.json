@@ -1,9 +1,13 @@
 {
   "env": { "OMC_GIT_GUARDRAILS": "0" },
+  "permissions": { "allow": ["Edit({memory_dir}/*.md)", "Edit({memory_dir}/skills/**/*.md)"] },
   "hooks": {
     "SessionStart": [
       {
         "hooks": [{ "type": "command", "command": "python3 -I {claude_home}/hooks/host_default.py", "timeout": 10 }]
+      },
+      {
+        "hooks": [{ "type": "command", "command": "python3 -I {claude_home}/hooks/global_memory.py", "timeout": 120 }]
       },
       {
         "matcher": "startup",
@@ -15,6 +19,62 @@
             "statusMessage": "Syncing claude-config…"
           }
         ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I {claude_home}/hooks/global_memory.py",
+            "if": "Edit({memory_dir}/**)",
+            "async": true,
+            "timeout": 120
+          },
+          {
+            "type": "command",
+            "command": "python3 -I {claude_home}/hooks/global_memory.py",
+            "if": "Write({memory_dir}/**)",
+            "async": true,
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Read|Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I {claude_home}/hooks/global_memory.py",
+            "if": "Read({memory_dir}/**)",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "python3 -I {claude_home}/hooks/global_memory.py",
+            "if": "Write({memory_dir}/**)",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "python3 -I {claude_home}/hooks/global_memory.py",
+            "if": "Edit({memory_dir}/**)",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [{ "type": "command", "command": "python3 -I {claude_home}/hooks/global_memory.py", "timeout": 60 }]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [{ "type": "command", "command": "python3 -I {claude_home}/hooks/global_memory.py", "async": true, "timeout": 120 }]
       }
     ],
     "SubagentStart": [

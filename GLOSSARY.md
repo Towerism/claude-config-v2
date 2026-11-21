@@ -16,6 +16,12 @@ One entry per term: definition, boundaries, one resolved ambiguity. Write here t
 - Definition: the issue tracker `host_default.py` names at session start for the current repo, with its source: a `jira.project` key in the repo's git history, then its `origin` remote, then the host profile's `defaultTracker` (ADR-0006).
 - Boundary: the repo's own CLAUDE.md overrides it; a top-level `defaultTracker` in `local.json` is ignored.
 
+## Global memory
+- Definition: the memories and learned skills that `global_memory.py` syncs between machines through a private git repo named by `memory.repo` in `local.json`, kept in the store, a clone at `$XDG_DATA_HOME/claude-memory` where top-level `<name>.md` files are memories and `skills/` holds learned skills (ADR-0015). It syncs during the session: at session start, before and after each read, write or edit of a file in the store, at session end as a backstop and, at most once a minute, on a prompt.
+- Boundary: only a memory that holds in any repo on any machine belongs there; anything naming a project, client or employer stays in project memory, which this never syncs. The hook is off until `memory.repo` is set. The hook never commits a file whose name or text holds a line of `deny-terms`, and nothing that names a term is pushed; without a usable `deny-terms` it commits and pushes nothing.
+- Avoid: "project memory" for it (that is Claude's per-repository memory, left unchanged).
+- Resolved ambiguity: the store lives under `$XDG_DATA_HOME`, outside the Claude home, because Claude Code refuses writes there; the public repo carries the mechanism and never a memory.
+
 ## Guardrails
 - Definition: the marked block in `config/CLAUDE.global.md`, written for Anthropic models only (ADR-0012); each rule states something no OMC text, skill or hook already states (ADR-0006, ADR-0008, ADR-0011, ADR-0012).
 - Boundary: a rule already stated by OMC, a skill or a hook is not repeated there; the guardrails never choose OMC's stages, agents or runner. OMC text counts as coverage only if the skill runs; otherwise the guardrails name when to load it (ADR-0011).

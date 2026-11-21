@@ -387,7 +387,7 @@ def test_hooks_print_only_checked_values(repo, machine):
 # wiring
 
 FRAGMENT = json.loads((ROOT / "config" / "settings.fragment.json").read_text())
-HOOK_NAMES = ["host_default.py", "auto_sync.py"]
+HOOK_NAMES = ["host_default.py", "auto_sync.py", "global_memory.py"]
 
 
 def entries(event, name):
@@ -409,14 +409,29 @@ def test_the_hooks_are_registered_and_listed():
     assert entries("SessionStart", "auto_sync.py") == [
         ("startup", hook("auto_sync.py", 120, statusMessage="Syncing claude-config…"))
     ]
-    assert sorted(FRAGMENT["hooks"]) == ["SessionStart", "SubagentStart"]
-    assert sum(len(groups) for groups in FRAGMENT["hooks"].values()) == 3
+    # Every session source, so the index survives compact and resume; the end is a backstop sync.
+    assert entries("SessionStart", "global_memory.py") == [(None, hook("global_memory.py", 120))]
+    assert entries("SessionEnd", "global_memory.py") == [(None, hook("global_memory.py", 60))]
+    # Writes sync in the background (Edit and Write each need their own condition); a read or write syncs first, briefly.
+    assert entries("PostToolUse", "global_memory.py") == [
+        ("Write|Edit", hook("global_memory.py", 120, **{"if": "Edit({memory_dir}/**)", "async": True})),
+        ("Write|Edit", hook("global_memory.py", 120, **{"if": "Write({memory_dir}/**)", "async": True})),
+    ]
+    assert entries("PreToolUse", "global_memory.py") == [
+        ("Read|Write|Edit", hook("global_memory.py", 30, **{"if": f"{tool}({{memory_dir}}/**)"}))
+        for tool in ("Read", "Write", "Edit")
+    ]
+    assert entries("UserPromptSubmit", "global_memory.py") == [(None, hook("global_memory.py", 120, **{"async": True}))]
+    assert sorted(FRAGMENT["hooks"]) == [
+        "PostToolUse", "PreToolUse", "SessionEnd", "SessionStart", "SubagentStart", "UserPromptSubmit"
+    ]
+    assert sum(len(groups) for groups in FRAGMENT["hooks"].values()) == 8
     for host in ("personal", "work"):
         assert json.loads((ROOT / "hosts" / f"{host}.json").read_text())["hooks"] == HOOK_NAMES
 
 
 def test_every_hook_entry_outlasts_the_hooks_own_deadline():
-    for groups in FRAGMENT["hooks"].values():
+    for event, groups in FRAGMENT["hooks"].items():
         for group in groups:
             for hook in group["hooks"]:
                 if hook["command"].endswith("/auto_sync.py"):
@@ -424,6 +439,14 @@ def test_every_hook_entry_outlasts_the_hooks_own_deadline():
                     sync = hook_module("auto_sync.py")
                     assert sync.LOCAL_SECONDS == 10
                     assert hook["timeout"] >= sync.FETCH_SECONDS + 3 * sync.LOCAL_SECONDS + 60
+                elif hook["command"].endswith("/global_memory.py"):
+                    # The wait for a sync under way, then clone, fetch, push and a local step.
+                    memory = hook_module("global_memory.py")
+                    wait = {"PostToolUse": memory.WAIT_SECONDS, "SessionEnd": memory.WAIT_SECONDS,
+                            "PreToolUse": memory.READ_SECONDS}.get(event, 0)
+                    short = event in ("PreToolUse", "SessionEnd")  # the tool call or the exit waits on it
+                    network = memory.READ_SECONDS if short else memory.FETCH_SECONDS
+                    assert hook["timeout"] >= wait + 3 * network + memory.LOCAL_SECONDS, event
                 else:
                     assert hook["timeout"] == 10, hook["command"]
     assert hook_module("host_default.py").DEADLINE_SECONDS == 5
@@ -533,6 +556,7 @@ def hook_module(name):
 EVENT_ONLY = {
     "host_default.py": {"hook_event_name": "SessionStart"},
     "auto_sync.py": {"hook_event_name": "SessionStart", "source": "startup"},
+    "global_memory.py": {"hook_event_name": "SessionStart", "source": "startup"},
 }
 HOST_CONTEXT = (
     b'{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "Host profile: work. '
