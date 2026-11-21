@@ -17,11 +17,11 @@ The premise behind every rule: **readers drop text that reads like noise.** In t
 
 3. **Run the mechanical checks.** Fix every hit, or confirm it is fine:
    ```bash
-   grep -nE ', not |not just|not only|but (not|never)|instead of|rather than|but (aren|isn)'"'"'t' FILE
+   grep -nE ', not |not just|not only|but (not|never)|instead of|rather than|but (aren|isn)'"'"'t|(never|not|wasn'"'"'t|isn'"'"'t) (simply|just|merely|only)' FILE
    grep -noE '(^|[^/A-Za-z0-9_-])#[0-9]+' FILE
    grep -noE '\]\((\.|[a-z][^:)]*)\)' FILE
    ```
-   The first finds contrast pairs, the second bare `#N` references, and the third relative links (wrong in PR and issue bodies). Then read once for inline lists of exactly three and three-bullet lists, which grep can't find reliably. Done when every hit is fixed or judged fine.
+   The first finds juxtapositions, the second bare `#N` references, and the third relative links (wrong in PR and issue bodies). Grep can't reliably find the rest, so read once for each of these: inline lists of exactly three, three-bullet lists, a juxtaposition split across two sentences, and a short closing line that restates the paragraph as a punchline. Done when every hit is fixed or judged fine.
 
 4. **Get a cold read from a specialist.** Launch `oh-my-claudecode:critic` (opus), or the closest reviewer agent if OMC isn't installed. Give it the reader from step 1, the text, the sources the facts come from, and the rules below pasted word for word. Leave out your own reasoning about the draft. Ask for each violation with the rule, the quoted text and a rewrite that itself follows every rule. Done when the report is in. Why: the writer can't see their own gaps, and a reviewer handed the writer's reasoning tends to agree with it.
 
@@ -48,7 +48,9 @@ Each rule comes with the reason the user gave for it.
 - "trades tokens for trust" became "spends extra tokens to make sure every comment can be trusted"
 - "Looks like waste, isn't" became "Steps that look unnecessary but are needed"
 
-**Avoid inline lists of exactly three, and contrast pairs.** "A, b, and c" and "X, not Y" are common AI patterns. They're subtle, but people are good at spotting patterns, so they read close to noise. Rewrite them as separate plain sentences. Lists of four or more real items are fine, and so are plain negative sentences.
+**Avoid inline lists of exactly three.** "A, b, and c" is a common AI pattern. It's subtle, but people are good at spotting patterns, so it reads close to noise. Rewrite it as separate plain sentences. Lists of four or more real items are fine.
+
+**Avoid juxtaposition and cheesy stingers.** A juxtaposition sets up one idea only to swap in another. It can sit inside a sentence ("X, not Y") or span two: "She was never simply a voice behind the screen. She was part of the sound of growing up." A stinger is a short, quotable line that ends a paragraph or section by restating the point as a punchline, and it is one of the worst offenders. People are good at spotting patterns, and these are among the first they tag as AI. The more a text reads like AI, the more the reader hunts for further signs of it, and they stop following the content. A reader who has stopped paying attention gets no value from the text. Fix it by stating only the claim that is true, once, and ending the paragraph when its content ends. For example, "She hosted the station's afternoon show for twenty years." Plain negative sentences that carry a fact are fine ("The hook doesn't run on Windows").
 
 **Leave out things the reader never saw.** For example, an earlier private version of the work, or what was cut from it. A reference to something only the author has seen is noise.
 
@@ -61,5 +63,6 @@ Each rule comes with the reason the user gave for it.
 ## Pitfalls
 
 - A detector for lists of three flags many ordinary two-part sentences. Treat its hits as candidates and judge each one.
+- Splitting "X, not Y" into two sentences keeps the juxtaposition and often creates a stinger. Drop the rejected half instead.
 - Applying one round of fixes can bring the same pattern back elsewhere. After a rewrite, run step 3 again.
 - curl returns 404 for github.com pages of a private repo even with a token. That doesn't mean the link is broken.
