@@ -1,5 +1,5 @@
-"""Hook on SessionStart, PostToolUse, PreToolUse and UserPromptSubmit: share general memories
-between machines through a private git repo, during the session.
+"""Hook on SessionStart, PreToolUse, PostToolUse, UserPromptSubmit and SessionEnd: share general
+memories between machines through a private git repo, during the session.
 
 It does nothing, and runs no git, unless $XDG_CONFIG_HOME/claude-config/local.json (or
 ~/.config/claude-config/local.json) sets "memory": {"repo": "<git URL>"} (ADR-0015). The store is a
@@ -8,17 +8,21 @@ clone of that repo at $XDG_DATA_HOME/claude-memory (or ~/.local/share/claude-mem
 absolute, so a relative one can never point into the session's project. The deny-terms file may
 start with a byte order mark.
 
-When it syncs, by event (the settings limit the tool events to files in the store):
-- SessionStart with source startup, and PostToolUse (a Write or Edit in the store): always. A
-  PostToolUse sync waits for memory.lock, so two quick writes are both pushed.
-- SessionStart with another source, PreToolUse (a Read in the store) and UserPromptSubmit: only
-  when the last sync attempt is older than PULL_SECONDS. The attempt time is the mtime of
-  <claude home>/claude-config/memory.pulled, touched by every attempt that gets the lock, whether
-  it then succeeds or fails.
-- SessionEnd, and any other event: nothing (no git, no output, no files).
-Every event but PostToolUse skips quietly while another sync holds memory.lock. Network steps get
-READ_SECONDS on PreToolUse, which blocks the session, and FETCH_SECONDS elsewhere; local steps get
-LOCAL_SECONDS each.
+When it syncs, by event. The tool events act only when tool_input.file_path, resolved, lies inside
+the store; any other file or shape returns at once (the settings' `if` filter is best effort).
+- SessionStart with source startup, PostToolUse (a Write or Edit of a store file) and SessionEnd
+  (the backstop for what no write event saw: shell edits and deletes, a write just before exit):
+  always. PostToolUse and SessionEnd wait up to WAIT_SECONDS for memory.lock, then skip quietly.
+- PreToolUse (a Read, Write or Edit of a store file): always, so the tool sees the newest text,
+  except while backing off: when the last sync failed less than PULL_SECONDS ago.
+- SessionStart with another source, and UserPromptSubmit: only when the last sync attempt is
+  older than PULL_SECONDS.
+- Any other event: nothing (no git, no output, no files).
+Two stamps in <claude home>/claude-config hold that state: memory.pulled, touched by every attempt
+that gets the lock, and memory.failed, touched by a failed attempt and removed by one that
+completes. A stamp in the future (a clock step back) counts as old. Events that do not wait skip
+quietly while another sync holds memory.lock. Network steps get READ_SECONDS on PreToolUse, which
+blocks the tool call, and FETCH_SECONDS elsewhere; local steps get LOCAL_SECONDS each.
 
 A sync clones the store when it is missing, with the hook's fixed git identity in the store's own
 config so hand commits there carry it too. A missing, unreadable or empty
@@ -44,18 +48,22 @@ skills/.
 
 What a session has seen is <claude home>/claude-config/memory-seen/<session_id>, the store's main
 commit when the session was last shown the store; the session id is used only when it matches
-SESSION. SessionStart records it after the index. UserPromptSubmit prints, as additionalContext,
-the memories added or changed between that commit and main (deleted ones are not listed), in the
-index's format and caps under a fixed one-line header, then records main; it prints nothing when
-nothing changed. With no usable record (missing, or naming no commit in the store: a session from
-before the hook, or one started while main had no commit) it prints the full index once and records
-main; while main has no commit, or when the record cannot be written, it prints nothing. A startup
-sync removes seen files older than SEEN_DAYS.
+SESSION. main is read once per event and that commit is the one shown and recorded, so a sync
+landing meanwhile is shown later rather than lost. SessionStart records it after the index.
+UserPromptSubmit prints, as additionalContext, the memories added or changed between the recorded
+commit and main (deleted ones are not listed), in the index's format and caps under a fixed
+one-line header, then records main; it prints nothing when nothing changed. With no usable record
+(missing, or naming no commit in the store: a session from before the hook, or one started while
+main had no commit) it prints the full index once and records main; while main has no commit, or
+when the record cannot be written, it prints nothing. A startup removes seen files older than
+SEEN_DAYS, and nothing when memory-seen is a symlink.
 
 On failure a line with the UTC time and a fixed reason goes to <home>/claude-config/memory.log (the
-last LOG_LINES are kept) on every event. SessionStart and PostToolUse also print a fixed one-line
-systemMessage; PreToolUse prints nothing ever, and UserPromptSubmit only the delta. The session
-continues with the local copy. The Claude home is two levels above this file. git runs as
+last LOG_LINES are kept) on every event. A fixed one-line systemMessage is printed only on
+SessionStart (any reason) and on PostToolUse for a reason the user must act on (not one in
+NETWORK: an unreachable remote is a normal state). PreToolUse, UserPromptSubmit and SessionEnd
+never warn; PreToolUse and SessionEnd print nothing at all, UserPromptSubmit only the delta. The
+session continues with the local copy. The Claude home is two levels above this file. git runs as
 auto_sync.py runs it (the plumbing is repeated here, as hooks deploy as single files): by absolute
 path from a fixed PATH, with a fixed argv and environment, ssh in BatchMode, and repo settings that
 run programs overridden. Always exits 0 and writes nothing to stderr.
@@ -75,11 +83,13 @@ import unicodedata
 from pathlib import Path
 
 FETCH_SECONDS = 15
-READ_SECONDS = 3  # the network deadline before a Read of the store, which blocks the session
+READ_SECONDS = 3  # the network deadline before a tool reads or edits the store, which blocks it
 LOCAL_SECONDS = 10
-PULL_SECONDS = 60  # throttled events sync only when the last attempt is older than this
+PULL_SECONDS = 60  # the attempt throttle, and the back-off after a failure before a tool call
+WAIT_SECONDS = 30  # how long a write or a session end waits for a sync under way
 SEEN_DAYS = 30
-EVENTS = ("SessionStart", "PostToolUse", "PreToolUse", "UserPromptSubmit")
+EVENTS = ("SessionStart", "PostToolUse", "PreToolUse", "UserPromptSubmit", "SessionEnd")
+NETWORK = ("clone-failed", "fetch-failed", "push-failed", "timeout")  # normal while the remote is away
 SESSION = re.compile(r"[A-Za-z0-9-]{1,64}")
 COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 LOG_LINES = 200
@@ -213,70 +223,87 @@ def has(store: Path, ref: str) -> bool:
 def sync(home: Path, store: Path, url: str, terms: list[str] | None, wait: bool, network: float) -> None:
     """One sync of the store with `url`; Failure when it stopped.
 
-    With `wait` it waits for a sync under way, else it skips; `network` is the clone, fetch and push
-    deadline. Every attempt that gets the lock stamps memory.pulled, whether it succeeds or not.
+    With `wait` it waits up to WAIT_SECONDS for a sync under way, else it skips at once; `network`
+    is the clone, fetch and push deadline. Every attempt that gets the lock stamps memory.pulled; a
+    failed one also stamps memory.failed, which a completed one removes.
     """
-    (home / "claude-config").mkdir(parents=True, exist_ok=True)
-    with open(home / "claude-config" / "memory.lock", "a") as lock:
+    state = home / "claude-config"
+    state.mkdir(parents=True, exist_ok=True)
+    with open(state / "memory.lock", "a") as lock:
+        deadline = time.monotonic() + (WAIT_SECONDS if wait else 0)
+        while True:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    return  # another session is syncing
+                time.sleep(0.1)
+        (state / "memory.pulled").touch()
         try:
-            fcntl.flock(lock, fcntl.LOCK_EX if wait else fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            return  # another session is syncing
-        (home / "claude-config" / "memory.pulled").touch()
-        if not (store / ".git").is_dir():
-            store.parent.mkdir(parents=True, exist_ok=True)
-            # The store's own config gets the fixed identity, so hand commits there carry it too.
-            identity = ["-c", "user.name=claude-memory", "-c", "user.email=claude-memory@localhost"]
-            git(store.parent, ["clone", "-q", "--no-tags", *identity, "--", url, str(store)], network, "clone-failed")
-        if terms is None:
-            raise Failure("no-deny-terms")  # before any commit: a push sends every commit
-        exclude = store / ".git" / "info" / "exclude"
-        exclude.parent.mkdir(exist_ok=True)
-        known = exclude.read_text(encoding="utf-8").splitlines() if exclude.is_file() else []
-        with open(exclude, "a", encoding="utf-8") as file:
-            file.writelines(f"\n{pattern}\n" for pattern in EXCLUDES if pattern not in known)
-        # A merge or rebase left stopped (HEAD detached) is the user's to finish; touch nothing.
-        git_dir = store / ".git"
-        if (git_dir / "rebase-merge").exists() or (git_dir / "rebase-apply").exists() or (git_dir / "MERGE_HEAD").exists():
-            raise Failure("conflict")
-        if git(store, ["symbolic-ref", "-q", "HEAD"], LOCAL_SECONDS, "")[0] != 0:
-            raise Failure("conflict")
-        if not has(store, "HEAD"):
-            git(store, ["symbolic-ref", "HEAD", "refs/heads/main"], LOCAL_SECONDS)
-        git(store, ["add", "-A"], LOCAL_SECONDS)
-        staged = names(git(store, ["diff", "--cached", "--name-only", "-z", "--no-renames", "--diff-filter=d"], LOCAL_SECONDS)[1])
-        local = [path for path in staged if denied(store, path, terms)]
-        if local:
-            git(store, ["reset", "-q", "--", *local], LOCAL_SECONDS)
-        if git(store, ["diff", "--cached", "--quiet"], LOCAL_SECONDS, "")[0] != 0:
-            git(store, ["commit", "-q", "--no-verify", "-m", "chore: sync memories"], LOCAL_SECONDS)
-        git(store, ["fetch", "-q", "--no-tags", "origin", HEADS], network, "fetch-failed")
-        remote = has(store, "refs/remotes/origin/main")
-        if not has(store, "refs/heads/main"):
-            if remote:
-                git(store, ["checkout", "-q", "-B", "main", "refs/remotes/origin/main"], LOCAL_SECONDS)
-            return
-        # Rebase only when origin/main is not in main yet: a rebase would flatten a hand merge again.
-        behind = remote and git(store, ["merge-base", "--is-ancestor", "refs/remotes/origin/main", "refs/heads/main"], LOCAL_SECONDS, "")[0] != 0
-        if behind and git(store, ["rebase", "-q", "--autostash", "refs/remotes/origin/main"], LOCAL_SECONDS, "")[0] != 0:
-            git(store, ["rebase", "--abort"], LOCAL_SECONDS, "")
-            raise Failure("conflict")
-        # What the push adds: each commit's identity and message, and the names and added lines of
-        # each change, merges included. Removed lines and deleted files are not scanned, so taking a
-        # term out goes through. The push names the checked commit, so a later move of main cannot
-        # slip past the check.
-        head = git(store, ["rev-parse", "refs/heads/main"], LOCAL_SECONDS)[1].decode().strip()
-        if remote and head == git(store, ["rev-parse", "refs/remotes/origin/main"], LOCAL_SECONDS)[1].decode().strip():
-            return
-        outgoing = f"refs/remotes/origin/main..{head}" if remote else head
-        messages = git(store, ["log", "--format=%an%n%ae%n%cn%n%ce%n%B", outgoing], LOCAL_SECONDS)[1]
-        diff = [
-            "-c", "core.quotePath=false", "log", "-p", "--cc", "--unified=0", "--text", "--no-renames",
-            "--no-ext-diff", "--no-textconv", "--diff-filter=d", "--format=", outgoing,
-        ]
-        if holds(messages + added(git(store, diff, LOCAL_SECONDS)[1]), terms):
-            raise Failure("blocked-files")
-        git(store, ["push", "-q", "origin", f"{head}:refs/heads/main"], network, "push-failed")
+            steps(store, url, terms, network)
+        except Failure:
+            (state / "memory.failed").touch()
+            raise
+        (state / "memory.failed").unlink(missing_ok=True)
+
+
+def steps(store: Path, url: str, terms: list[str] | None, network: float) -> None:
+    """The steps of one sync, under the lock."""
+    if not (store / ".git").is_dir():
+        store.parent.mkdir(parents=True, exist_ok=True)
+        # The store's own config gets the fixed identity, so hand commits there carry it too.
+        identity = ["-c", "user.name=claude-memory", "-c", "user.email=claude-memory@localhost"]
+        git(store.parent, ["clone", "-q", "--no-tags", *identity, "--", url, str(store)], network, "clone-failed")
+    if terms is None:
+        raise Failure("no-deny-terms")  # before any commit: a push sends every commit
+    exclude = store / ".git" / "info" / "exclude"
+    exclude.parent.mkdir(exist_ok=True)
+    known = exclude.read_text(encoding="utf-8").splitlines() if exclude.is_file() else []
+    with open(exclude, "a", encoding="utf-8") as file:
+        file.writelines(f"\n{pattern}\n" for pattern in EXCLUDES if pattern not in known)
+    # A merge or rebase left stopped (HEAD detached) is the user's to finish; touch nothing.
+    git_dir = store / ".git"
+    if (git_dir / "rebase-merge").exists() or (git_dir / "rebase-apply").exists() or (git_dir / "MERGE_HEAD").exists():
+        raise Failure("conflict")
+    if git(store, ["symbolic-ref", "-q", "HEAD"], LOCAL_SECONDS, "")[0] != 0:
+        raise Failure("conflict")
+    if not has(store, "HEAD"):
+        git(store, ["symbolic-ref", "HEAD", "refs/heads/main"], LOCAL_SECONDS)
+    git(store, ["add", "-A"], LOCAL_SECONDS)
+    staged = names(git(store, ["diff", "--cached", "--name-only", "-z", "--no-renames", "--diff-filter=d"], LOCAL_SECONDS)[1])
+    local = [path for path in staged if denied(store, path, terms)]
+    if local:
+        git(store, ["reset", "-q", "--", *local], LOCAL_SECONDS)
+    if git(store, ["diff", "--cached", "--quiet"], LOCAL_SECONDS, "")[0] != 0:
+        git(store, ["commit", "-q", "--no-verify", "-m", "chore: sync memories"], LOCAL_SECONDS)
+    git(store, ["fetch", "-q", "--no-tags", "origin", HEADS], network, "fetch-failed")
+    remote = has(store, "refs/remotes/origin/main")
+    if not has(store, "refs/heads/main"):
+        if remote:
+            git(store, ["checkout", "-q", "-B", "main", "refs/remotes/origin/main"], LOCAL_SECONDS)
+        return
+    # Rebase only when origin/main is not in main yet: a rebase would flatten a hand merge again.
+    behind = remote and git(store, ["merge-base", "--is-ancestor", "refs/remotes/origin/main", "refs/heads/main"], LOCAL_SECONDS, "")[0] != 0
+    if behind and git(store, ["rebase", "-q", "--autostash", "refs/remotes/origin/main"], LOCAL_SECONDS, "")[0] != 0:
+        git(store, ["rebase", "--abort"], LOCAL_SECONDS, "")
+        raise Failure("conflict")
+    # What the push adds: each commit's identity and message, and the names and added lines of
+    # each change, merges included. Removed lines and deleted files are not scanned, so taking a
+    # term out goes through. The push names the checked commit, so a later move of main cannot
+    # slip past the check.
+    head = git(store, ["rev-parse", "refs/heads/main"], LOCAL_SECONDS)[1].decode().strip()
+    if remote and head == git(store, ["rev-parse", "refs/remotes/origin/main"], LOCAL_SECONDS)[1].decode().strip():
+        return
+    outgoing = f"refs/remotes/origin/main..{head}" if remote else head
+    messages = git(store, ["log", "--format=%an%n%ae%n%cn%n%ce%n%B", outgoing], LOCAL_SECONDS)[1]
+    diff = [
+        "-c", "core.quotePath=false", "log", "-p", "--cc", "--unified=0", "--text", "--no-renames",
+        "--no-ext-diff", "--no-textconv", "--diff-filter=d", "--format=", outgoing,
+    ]
+    if holds(messages + added(git(store, diff, LOCAL_SECONDS)[1]), terms):
+        raise Failure("blocked-files")
+    git(store, ["push", "-q", "origin", f"{head}:refs/heads/main"], network, "push-failed")
 
 
 def description(path: Path) -> str:
@@ -325,10 +352,9 @@ def main_commit(store: Path) -> str | None:
     return out.decode().strip() if code == 0 else None
 
 
-def changes(store: Path, seen: Path) -> str | None:
-    """The entries for memories added or changed since the commit in `seen`; "" when there are
-    none, None when `seen` is missing or names no commit in the store (no usable record)."""
-    current = main_commit(store)
+def changes(store: Path, seen: Path, current: str | None) -> str | None:
+    """The entries for memories added or changed from the commit in `seen` to `current`; "" when
+    there are none, None when `seen` is missing or names no commit in the store (no usable record)."""
     try:
         old = seen.read_text(encoding="utf-8", errors="replace").strip()
     except OSError:
@@ -342,9 +368,8 @@ def changes(store: Path, seen: Path) -> str | None:
     return listing(DELTA_HEADER, files, store) if files else ""
 
 
-def see(store: Path, seen: Path) -> bool:
-    """Records the store's main commit as what this session has seen; False while main has none."""
-    current = main_commit(store)
+def see(seen: Path, current: str | None) -> bool:
+    """Records `current` as what this session has seen; False when there is none (main has no commit)."""
     if current:
         seen.parent.mkdir(exist_ok=True)
         seen.write_text(current + "\n", encoding="utf-8")
@@ -352,7 +377,9 @@ def see(store: Path, seen: Path) -> bool:
 
 
 def forget(seen_dir: Path) -> None:
-    """Removes seen files older than SEEN_DAYS."""
+    """Removes seen files older than SEEN_DAYS; nothing when the directory is a symlink."""
+    if seen_dir.is_symlink():
+        return
     limit = time.time() - SEEN_DAYS * 24 * 3600
     for path in seen_dir.iterdir():
         if not path.is_symlink() and path.is_file() and path.stat().st_mtime < limit:
@@ -360,8 +387,9 @@ def forget(seen_dir: Path) -> None:
 
 
 def recent(stamp: Path) -> bool:
+    """Whether `stamp` is younger than PULL_SECONDS; one in the future (a clock step back) is not."""
     try:
-        return time.time() - stamp.stat().st_mtime < PULL_SECONDS
+        return 0 <= time.time() - stamp.stat().st_mtime < PULL_SECONDS
     except OSError:
         return False
 
@@ -401,19 +429,31 @@ def main() -> None:
             return
         data = os.environ.get("XDG_DATA_HOME")
         store = (Path(data) if data and os.path.isabs(data) else Path.home() / ".local" / "share") / "claude-memory"
+        if event in ("PreToolUse", "PostToolUse"):
+            # The settings' `if` filter is best effort: act only for a file inside the store.
+            tool_input = payload.get("tool_input")
+            path = tool_input.get("file_path") if isinstance(tool_input, dict) else None
+            if not isinstance(path, str) or not Path(path).resolve().is_relative_to(store.resolve()):
+                return
         state = home / "claude-config"
         startup = event == "SessionStart" and source == "startup"
-        # A write is pushed at once and waits for a sync under way; a read gets the short deadline.
-        if startup or event == "PostToolUse" or not recent(state / "memory.pulled"):
+        waits = event in ("PostToolUse", "SessionEnd")
+        if event == "PreToolUse":
+            due = not recent(state / "memory.failed")  # every store access pulls, unless backing off
+        else:
+            due = startup or waits or not recent(state / "memory.pulled")
+        if due:
             with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
                 try:
                     network = READ_SECONDS if event == "PreToolUse" else FETCH_SECONDS
-                    sync(home, store, url, deny_terms(config_home), event == "PostToolUse", network)
+                    sync(home, store, url, deny_terms(config_home), waits, network)
                 except Failure as failure:
                     reason = failure.args[0]
                     with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
                         log(home, reason)
-                    if event in ("SessionStart", "PostToolUse"):
+                    # An unreachable remote is normal: only session start says so; a write warns
+                    # only when the user must act.
+                    if event == "SessionStart" or (event == "PostToolUse" and reason not in NETWORK):
                         output["systemMessage"] = MESSAGES.get(reason, STAYS).format(reason=reason)
         if startup:
             with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
@@ -423,20 +463,21 @@ def main() -> None:
                 link_skills(store)
             valid = isinstance(session, str) and SESSION.fullmatch(session)
             seen = state / "memory-seen" / session if valid else None
+            # main is read once: the record is the commit shown, even if a sync lands meanwhile.
+            current = main_commit(store) if seen and event in ("SessionStart", "UserPromptSubmit") else None
             if event == "SessionStart":
                 output["hookSpecificOutput"] = {"hookEventName": "SessionStart", "additionalContext": index(store)}
-            elif event == "UserPromptSubmit" and seen:
-                text = changes(store, seen)
-                if text is None:
-                    # No usable record (a session from before the hook, or one started on an empty
-                    # store): show the whole index once, and only if the record can be written.
-                    with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
-                        text = index(store) if see(store, seen) else ""
-                if text:
-                    output["hookSpecificOutput"] = {"hookEventName": "UserPromptSubmit", "additionalContext": text}
+            text = changes(store, seen, current) if event == "UserPromptSubmit" and seen else ""
+            recorded = False
             if seen and event in ("SessionStart", "UserPromptSubmit"):
                 with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
-                    see(store, seen)
+                    recorded = see(seen, current)
+            if text is None:
+                # No usable record (a session from before the hook, or one started on an empty
+                # store): show the whole index once, and only if the record was written.
+                text = index(store) if recorded else ""
+            if text:
+                output["hookSpecificOutput"] = {"hookEventName": "UserPromptSubmit", "additionalContext": text}
     if output:
         print(json.dumps(output))
 

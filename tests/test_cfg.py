@@ -69,7 +69,7 @@ def test_deploy_installs_everything_the_host_selects(home):
     commands = [h["command"] for g in settings["hooks"]["SubagentStart"] for h in g["hooks"]]
     assert commands == [f"python3 -I {home}/hooks/host_default.py"]
     assert "bash_guard.py" not in json.dumps(settings)
-    state =json.loads((home / "claude-config" / "state.json").read_text())
+    state = json.loads((home / "claude-config" / "state.json").read_text())
     assert state["host"] == "work" and state["defaultTracker"] == "jira"
     assert "{claude_home}" not in (home / "settings.json").read_text()
 
@@ -156,10 +156,10 @@ def test_deploy_removes_a_hook_the_profile_no_longer_lists(home, tmp_path, monke
     settings = json.loads((home / "settings.json").read_text())
     assert "bash_guard.py" not in json.dumps(settings)
     assert all(g.get("matcher") != "Bash" for g in settings["hooks"]["PreToolUse"])
-    commands =[h["command"] for groups in settings["hooks"].values() for g in groups for h in g["hooks"]]
+    commands = [h["command"] for groups in settings["hooks"].values() for g in groups for h in g["hooks"]]
     assert sorted(c.split("/")[-1] for c in commands) == [
-        "auto_sync.py", *["global_memory.py"] * 5, "host_default.py", "host_default.py"
-    ]  # global_memory: session start, two post-tool-use (Edit, Write), pre-tool-use, prompt
+        "auto_sync.py", *["global_memory.py"] * 8, "host_default.py", "host_default.py"
+    ]  # global_memory: session start and end, prompt, two after a write, three before a read or write
 
 
 def test_locally_edited_file_is_a_conflict(home, capsys):
@@ -881,8 +881,9 @@ def test_memory_hook_conditions_get_the_store_path_and_roll_back_cleanly(home, t
     assert {key: [h.get("if") for h in hooks] for key, hooks in ours.items()} == {
         ("SessionStart", None): [None],
         ("PostToolUse", "Write|Edit"): [f"Edit({store}/**)", f"Write({store}/**)"],
-        ("PreToolUse", "Read"): [f"Read({store}/**)"],
+        ("PreToolUse", "Read|Write|Edit"): [f"Read({store}/**)", f"Write({store}/**)", f"Edit({store}/**)"],
         ("UserPromptSubmit", None): [None],
+        ("SessionEnd", None): [None],
     }
     before = (home / "settings.json").read_text()
     run(home, "deploy", "--yes")  # nothing duplicates
@@ -893,7 +894,7 @@ def test_memory_hook_conditions_get_the_store_path_and_roll_back_cleanly(home, t
     run(home, "rollback")
     after = json.loads((home / "settings.json").read_text())
     assert memory_hooks(after) == {}
-    for event in ("PostToolUse", "PreToolUse", "UserPromptSubmit"):
+    for event in ("PostToolUse", "PreToolUse", "UserPromptSubmit"):  # the user's own hooks stay
         assert after["hooks"][event] == [{"matcher": "Write|Edit", "hooks": [mine]}]
 
 

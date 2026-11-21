@@ -44,15 +44,32 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Read",
+        "matcher": "Read|Write|Edit",
         "hooks": [
           {
             "type": "command",
             "command": "python3 -I {claude_home}/hooks/global_memory.py",
             "if": "Read({memory_dir}/**)",
             "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "python3 -I {claude_home}/hooks/global_memory.py",
+            "if": "Write({memory_dir}/**)",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "python3 -I {claude_home}/hooks/global_memory.py",
+            "if": "Edit({memory_dir}/**)",
+            "timeout": 15
           }
         ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [{ "type": "command", "command": "python3 -I {claude_home}/hooks/global_memory.py", "timeout": 60 }]
       }
     ],
     "UserPromptSubmit": [

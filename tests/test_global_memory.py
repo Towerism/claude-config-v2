@@ -22,8 +22,10 @@ from tests.conftest import ROOT, load
 from tests.test_auto_sync import DRIVER, GIT_ENV, git, no_git, warned
 
 # A write into the store: the event that always syncs, so the default for the sync tests.
-SYNC = {"hook_event_name": "PostToolUse", "session_id": "s1", "tool_name": "Write", "tool_input": {"file_path": "/store/x.md"}}
-READ = {"hook_event_name": "PreToolUse", "session_id": "s1", "tool_name": "Read", "tool_input": {"file_path": "/store/x.md"}}
+IN_STORE = "<store>/x.md"  # hook() replaces it with a file in the machine's own store
+SYNC = {"hook_event_name": "PostToolUse", "session_id": "s1", "tool_name": "Write", "tool_input": {"file_path": IN_STORE}}
+READ = {"hook_event_name": "PreToolUse", "session_id": "s1", "tool_name": "Read", "tool_input": {"file_path": IN_STORE}}
+EDIT = {**READ, "tool_name": "Edit"}
 PROMPT = {"hook_event_name": "UserPromptSubmit", "session_id": "s1", "prompt": "hi"}
 SESSION_END = {"hook_event_name": "SessionEnd", "session_id": "s1"}
 STARTUP = {"hook_event_name": "SessionStart", "source": "startup"}
@@ -65,6 +67,8 @@ def hook(m, payload=SYNC, patch=None, stdin=None):
     """(exit code, stdout, stderr) of the deployed hook; `patch` runs first, in its module."""
     script = str(m.claude / "hooks" / "global_memory.py")
     argv = [sys.executable, "-I", script] if patch is None else [sys.executable, "-I", "-B", "-c", DRIVER, script, patch]
+    if isinstance(payload, dict) and payload.get("tool_input") == {"file_path": IN_STORE}:
+        payload = {**payload, "tool_input": {"file_path": str(m.store / "x.md")}}
     data = json.dumps(payload).encode() if stdin is None else stdin
     done = subprocess.run(argv, input=data, capture_output=True, env=m.env, timeout=60, check=False)
     return done.returncode, done.stdout, done.stderr
@@ -90,9 +94,9 @@ def remote_files(origin):
     return set(done.stdout.splitlines())
 
 
-def stamp(m, age):
-    """Sets the last sync attempt `age` seconds in the past."""
-    path = m.claude / "claude-config" / "memory.pulled"
+def stamp(m, age, name="memory.pulled"):
+    """Sets the last sync attempt (or, with memory.failed, the last failure) `age` seconds in the past."""
+    path = m.claude / "claude-config" / name
     path.parent.mkdir(parents=True, exist_ok=True)
     path.touch()
     then = time.time() - age
@@ -371,12 +375,12 @@ def test_a_failed_fetch_or_push_keeps_the_new_memory(tmp_path, origin):
     m = started(tmp_path, origin)
     remember(m, "new.md")
     git(m.store, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
-    warned(hook(m)[1], "fetch-failed")
+    assert hook(m) == (0, b"", b"") and last_log(m).endswith(" fetch-failed")
     assert (m.store / "new.md").is_file() and git(m.store, "ls-tree", "--name-only", "main") == "new.md"
     git(m.store, "remote", "set-url", "origin", str(origin))
     git(m.store, "remote", "set-url", "--push", "origin", str(tmp_path / "gone.git"))
     remember(m, "newer.md")
-    warned(hook(m)[1], "push-failed")
+    assert hook(m) == (0, b"", b"") and last_log(m).endswith(" push-failed")
     assert (m.store / "newer.md").is_file()
     assert set(git(m.store, "ls-tree", "--name-only", "main").splitlines()) == {"new.md", "newer.md"}
     assert remote_files(origin) == set()
@@ -409,9 +413,9 @@ def test_an_unreachable_remote_warns_and_logs(tmp_path, origin):
     assert (m.claude / "claude-config" / "memory.log").read_text().splitlines()[-1].endswith(" clone-failed")
     s = started(tmp_path, origin, "b")
     git(s.store, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
-    code, out, err = hook(s)
+    code, out, err = hook(s, STARTUP)
     assert (code, err) == (0, b"")
-    warned(out, "fetch-failed")
+    assert "fetch-failed" in json.loads(out)["systemMessage"]
 
 
 @pytest.mark.parametrize("patch,reason", [
@@ -420,9 +424,9 @@ def test_an_unreachable_remote_warns_and_logs(tmp_path, origin):
 ])
 def test_no_git_or_a_step_past_its_deadline_warns(tmp_path, origin, patch, reason):
     m = machine(tmp_path, origin)
-    code, out, err = hook(m, SYNC, patch)
+    code, out, err = hook(m, STARTUP, patch)
     assert (code, err) == (0, b"")
-    warned(out, reason)
+    assert reason in json.loads(out)["systemMessage"]
 
 
 def test_a_held_lock_makes_it_skip_the_sync_quietly(tmp_path, origin):
@@ -506,15 +510,19 @@ def test_every_session_start_prints_the_index_and_only_startup_syncs(tmp_path, o
     assert m.mark.exists() == (source == "startup")
 
 
-def test_session_end_does_nothing(tmp_path, origin):
-    m = started(tmp_path, origin)
+def test_session_end_pushes_what_no_write_event_saw_and_prints_nothing(tmp_path, origin):
+    m = started(tmp_path, origin)  # the attempt stamp is fresh: session end syncs regardless
     remember(m, "kept.md")
-    stamp(m, HOOK.PULL_SECONDS + 5)
-    before = os.stat(m.claude / "claude-config" / "memory.pulled").st_mtime
-    assert hook(m, SESSION_END, patch=no_git(m)) == (0, b"", b"")
-    assert not m.mark.exists()
-    assert os.stat(m.claude / "claude-config" / "memory.pulled").st_mtime == before
-    assert remote_files(origin) == set()
+    remember(m, "gone.md")
+    assert hook(m, SESSION_END) == (0, b"", b"")
+    assert remote_files(origin) == {"kept.md", "gone.md"}
+    (m.store / "gone.md").unlink()  # deleted through the shell: no write event
+    assert hook(m, SESSION_END) == (0, b"", b"")
+    assert remote_files(origin) == {"kept.md"}
+    git(m.store, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+    remember(m, "later.md")
+    assert hook(m, SESSION_END) == (0, b"", b"")
+    assert last_log(m).endswith(" fetch-failed")
 
 
 # --- the skills link ---------------------------------------------------------------------
@@ -614,7 +622,7 @@ def test_a_write_waits_for_a_held_lock_and_a_prompt_skips(tmp_path, origin):
             [sys.executable, "-I", str(m.claude / "hooks" / "global_memory.py")],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=m.env,
         )
-        proc.stdin.write(json.dumps(SYNC).encode())
+        proc.stdin.write(json.dumps({**SYNC, "tool_input": {"file_path": str(m.store / "x.md")}}).encode())
         proc.stdin.close()
         time.sleep(1)
         assert proc.poll() is None  # still waiting for the lock
@@ -661,8 +669,8 @@ def test_a_hanging_fetch_is_cut_at_the_events_network_deadline(tmp_path, origin,
     assert last_log(m).endswith(" timeout")
 
 
-@pytest.mark.parametrize("payload", [READ, PROMPT, {"hook_event_name": "SessionStart", "source": "resume"}])
-@pytest.mark.parametrize("age,syncs", [(-5, False), (5, True)])
+@pytest.mark.parametrize("payload", [PROMPT, {"hook_event_name": "SessionStart", "source": "resume"}])
+@pytest.mark.parametrize("age,syncs", [(-5, False), (5, True), (-HOOK.PULL_SECONDS - 30, True)])  # last: in the future
 def test_throttled_events_sync_only_when_the_last_attempt_is_old_enough(tmp_path, origin, payload, age, syncs):
     m = started(tmp_path, origin)
     remember(m, "new.md")
@@ -684,10 +692,10 @@ def test_a_failed_attempt_counts_as_an_attempt(tmp_path, origin):
     m = started(tmp_path, origin)
     git(m.store, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
     stamp(m, HOOK.PULL_SECONDS + 5)
-    assert hook(m, READ) == (0, b"", b"")
+    assert hook(m, PROMPT) == (0, b"", b"")
     lines = (m.claude / "claude-config" / "memory.log").read_text().splitlines()
     assert lines[-1].endswith(" fetch-failed")
-    assert hook(m, READ) == (0, b"", b"")
+    assert hook(m, PROMPT) == (0, b"", b"")
     assert (m.claude / "claude-config" / "memory.log").read_text().splitlines() == lines
 
 
@@ -749,6 +757,17 @@ def test_the_delta_is_sanitised_and_capped_like_the_index(tmp_path, origin):
     assert "escapes — red [31mtextnextend" in entries
     assert "Upper" not in text and "under_score" not in text
     assert lines[-1].startswith(f"{203 - len(entries)} ")
+
+
+def test_a_resumed_session_behind_main_gets_the_whole_index_not_a_delta(tmp_path, origin):
+    a, b = seen_by_b(tmp_path, origin)
+    remember(a, "new.md", description="New.")
+    quiet(a)
+    stamp(b, HOOK.PULL_SECONDS + 5)
+    out = quiet(b, {"hook_event_name": "SessionStart", "source": "resume", "session_id": "s1"})
+    assert out["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+    assert {"old — Old.", "kept — Kept.", "new — New."} <= set(out["hookSpecificOutput"]["additionalContext"].splitlines())
+    assert delta(b) is None  # the resume recorded the commit it showed
 
 
 @pytest.mark.parametrize("state", ["missing", "garbled", "unknown", "no-dir", "dir-is-file"])
@@ -840,3 +859,117 @@ def test_no_event_commits_without_deny_terms(tmp_path, origin, payload):
     assert (code, err) == (0, b"")
     assert remote_files(origin) == set()
     assert git(m.store, "status", "--porcelain") == "?? clean.md"
+
+
+# --- review round: pull before each store access, backstop, bounds -----------------------
+
+
+def test_every_read_or_edit_of_the_store_pulls_first(tmp_path, origin):
+    a, b = seen_by_b(tmp_path, origin)
+    assert delta(b) is None  # B's prompt synced: its attempt stamp is fresh from here on
+    remember(a, "old.md", description="Old, edited on A.")
+    quiet(a)
+    assert hook(b, READ) == (0, b"", b"")  # inside the attempt window, still pulls
+    assert (b.store / "old.md").read_text() == (a.store / "old.md").read_text()
+    remember(a, "old.md", description="Old, edited on A again.")
+    quiet(a)
+    assert hook(b, EDIT) == (0, b"", b"")  # an edit with no read before it pulls too
+    assert (b.store / "old.md").read_text() == (a.store / "old.md").read_text()
+    remember(b, "old.md", description="Old, edited on B.")
+    assert quiet(b) == {}  # B's write pushes without a conflict
+    assert "Old, edited on B." in git(origin, "show", "main:old.md")
+
+
+def test_a_read_backs_off_after_a_failed_sync_until_the_window_passes(tmp_path, origin):
+    m = started(tmp_path, origin)
+    failed = m.claude / "claude-config" / "memory.failed"
+    git(m.store, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+    assert hook(m, READ) == (0, b"", b"") and failed.exists()
+    assert hook(m, READ, patch=no_git(m)) == (0, b"", b"")
+    assert not m.mark.exists()  # inside the back-off: no git at all
+    for age in (HOOK.PULL_SECONDS + 5, -HOOK.PULL_SECONDS - 30):  # outside it, and a stamp in the future
+        stamp(m, age, "memory.failed")
+        assert hook(m, READ, patch=no_git(m)) == (0, b"", b"")
+        assert m.mark.exists()
+        m.mark.unlink()
+    git(m.store, "remote", "set-url", "origin", str(origin))
+    stamp(m, HOOK.PULL_SECONDS + 5, "memory.failed")
+    remember(m, "new.md")
+    assert hook(m, READ) == (0, b"", b"")
+    assert not failed.exists() and remote_files(origin) == {"new.md"}
+
+
+def test_a_waiting_event_gives_up_on_a_lock_held_too_long(tmp_path, origin):
+    m = started(tmp_path, origin)
+    remember(m, "new.md")
+    with open(m.claude / "claude-config" / "memory.lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        for payload in (SYNC, SESSION_END):
+            begin = time.monotonic()
+            assert hook(m, payload, "hook.WAIT_SECONDS = 1\n") == (0, b"", b"")
+            assert 1 <= time.monotonic() - begin < 10
+    assert remote_files(origin) == set()
+
+
+def test_the_seen_record_is_the_commit_the_prompt_compared_against(tmp_path, origin):
+    a, b = seen_by_b(tmp_path, origin)
+    remember(a, "new.md", description="New.")
+    quiet(a)
+    # Another session's sync lands between the comparison and the record.
+    race = (
+        "real = hook.changes\n"
+        "def changes(*args):\n"
+        "    text = real(*args)\n"
+        f"    hook.subprocess.run(['git', '-C', {str(b.store)!r}, 'commit', '-q', '--allow-empty', '-m', 'race'], check=True)\n"
+        "    return text\n"
+        "hook.changes = changes\n"
+    )
+    stamp(b, HOOK.PULL_SECONDS + 5)
+    shown = git(origin, "rev-parse", "main")
+    code, out, err = hook(b, PROMPT, race)
+    assert (code, err) == (0, b"") and "new — New." in json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert (b.claude / "claude-config" / "memory-seen" / "s1").read_text().strip() == shown
+
+
+def test_a_symlinked_seen_directory_is_never_cleaned(tmp_path, origin):
+    m = started(tmp_path, origin)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "old").write_text("keep")
+    then = time.time() - (HOOK.SEEN_DAYS + 1) * 24 * 3600
+    os.utime(elsewhere / "old", (then, then))
+    (m.claude / "claude-config" / "memory-seen").symlink_to(elsewhere)
+    quiet(m, STARTUP)
+    assert (elsewhere / "old").read_text() == "keep"
+
+
+@pytest.mark.parametrize("tool_input", [
+    {"file_path": "OUTSIDE"}, {"file_path": "<store>/../x.md"}, None, "text", [], {}, {"file_path": 5}, {"path": IN_STORE},
+])
+@pytest.mark.parametrize("base", [SYNC, READ])
+def test_a_tool_event_for_anything_but_a_store_file_runs_no_git(tmp_path, origin, base, tool_input):
+    m = started(tmp_path, origin)
+    remember(m, "new.md")
+    if isinstance(tool_input, dict) and isinstance(tool_input.get("file_path"), str):
+        path = tool_input["file_path"].replace("OUTSIDE", str(tmp_path / "x.md")).replace("<store>", str(m.store))
+        tool_input = {"file_path": path}
+    assert hook(m, {**base, "tool_input": tool_input}, patch=no_git(m)) == (0, b"", b"")
+    assert not m.mark.exists()
+
+
+@pytest.mark.parametrize("payload,network,act", [
+    (STARTUP, True, True), (SYNC, False, True), (READ, False, False), (PROMPT, False, False), (SESSION_END, False, False),
+])
+def test_which_events_warn_for_which_reasons(tmp_path, origin, payload, network, act):
+    m = started(tmp_path, origin)
+    git(m.store, "remote", "set-url", "origin", str(tmp_path / "gone.git"))  # a network reason
+    stamp(m, HOOK.PULL_SECONDS + 5)
+    code, out, err = hook(m, payload)
+    assert (code, err) == (0, b"") and last_log(m).endswith(" fetch-failed")
+    assert ("systemMessage" in (json.loads(out) if out else {})) == network
+    (m.xdg / "claude-config" / "deny-terms").unlink()  # a reason the user must act on
+    stamp(m, HOOK.PULL_SECONDS + 5)
+    stamp(m, HOOK.PULL_SECONDS + 5, "memory.failed")
+    code, out, err = hook(m, payload)
+    assert (code, err) == (0, b"") and last_log(m).endswith(" no-deny-terms")
+    assert ("systemMessage" in (json.loads(out) if out else {})) == act
