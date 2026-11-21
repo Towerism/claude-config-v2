@@ -24,7 +24,7 @@ What the tests showed, on 16 development texts with a Sonnet writer:
 ## Drivers
 
 - No invented facts, and no fact, name or stated reason lost in an edit.
-- A cost low enough to run on every commit message and chat reply.
+- A cost low enough to run on every commit message and chat message.
 - Text that does not read as AI-written, without faking typos or quirks.
 - No step that stops a session for a person.
 

@@ -57,7 +57,7 @@ Edit, don't rewrite. Why: readers already trust the author's own words, and ever
 These keep the text reading as a person wrote it. Why: readers who sense machine-written text start skimming and miss what matters.
 
 - Use everyday words and plain verbs: is, has, uses, wrote, moved, tried. Avoid unusual phrasing a reader has to stop and decode ("trades tokens for trust" → "spends extra tokens to make sure every comment can be trusted"; "every finding earns its place" → "the skill only keeps a comment if it was tested").
-- Use the shape people use for this kind of text (below), and the headings the project's own template uses, if it has one. Text under about 200 words gets no headings and no bold labels; don't split a short flat document into sections. Never take a heading's wording from these rules; the one exception is `## Security findings`, which any text with a security item keeps, whatever its length.
+- Use the shape people use for this kind of text (below), and the headings the project's own template uses, if it has one. Text under about 200 words gets no headings and no bold labels; don't split a short flat document into sections. Never take a heading's wording from these rules; the one exception is an issue, ticket or PR description with a security item, which keeps `## Security findings` whatever its length.
 - Say what matters to this reader; don't walk through every case or option in turn just to be complete, and don't use every fact you were given.
 - Start with the first real point, not a sentence that previews what follows. Let list items differ in shape as their content does, rather than making them uniformly parallel.
 - Say what a thing is. Add a "not X" contrast only when the reader would otherwise assume X.

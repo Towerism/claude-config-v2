@@ -360,7 +360,8 @@ def test_skill_routes_to_every_reference_file(skill):
 
 def test_readme_names_every_skill():
     """A skill that ships and syncs but has no entry in the README's skills row is one readers can't find."""
-    row = next(line for line in (ROOT / "README.md").read_text().splitlines() if line.startswith("| `config/skills/` |"))
+    row = next((line for line in (ROOT / "README.md").read_text().splitlines() if line.startswith("| `config/skills/` |")), "")
+    assert row, "README.md has no `config/skills/` row"
     for skill in SKILLS:
         assert f"`{skill.name}`" in row, skill.name
 
