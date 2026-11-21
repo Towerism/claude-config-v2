@@ -1,9 +1,13 @@
 {
   "env": { "OMC_GIT_GUARDRAILS": "0" },
+  "permissions": { "allow": ["Edit({memory_dir}/**)"] },
   "hooks": {
     "SessionStart": [
       {
         "hooks": [{ "type": "command", "command": "python3 -I {claude_home}/hooks/host_default.py", "timeout": 10 }]
+      },
+      {
+        "hooks": [{ "type": "command", "command": "python3 -I {claude_home}/hooks/global_memory.py", "timeout": 120 }]
       },
       {
         "matcher": "startup",
@@ -15,6 +19,11 @@
             "statusMessage": "Syncing claude-config…"
           }
         ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [{ "type": "command", "command": "python3 -I {claude_home}/hooks/global_memory.py", "timeout": 120 }]
       }
     ],
     "SubagentStart": [

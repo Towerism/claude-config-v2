@@ -157,7 +157,9 @@ def test_deploy_removes_a_hook_the_profile_no_longer_lists(home, tmp_path, monke
     assert "bash_guard.py" not in json.dumps(settings)
     assert "PreToolUse" not in settings["hooks"]
     commands = [h["command"] for groups in settings["hooks"].values() for g in groups for h in g["hooks"]]
-    assert sorted(c.split("/")[-1] for c in commands) == ["auto_sync.py", "host_default.py", "host_default.py"]
+    assert sorted(c.split("/")[-1] for c in commands) == [
+        "auto_sync.py", "global_memory.py", "global_memory.py", "host_default.py", "host_default.py"
+    ]
 
 
 def test_locally_edited_file_is_a_conflict(home, capsys):
@@ -431,7 +433,7 @@ def test_retrying_after_a_failed_deploy_does_not_duplicate_hooks(home, monkeypat
     settings = json.loads((home / "settings.json").read_text())
     assert [len(g["hooks"]) for g in settings["hooks"]["SubagentStart"]] == [1]
     assert "UserPromptExpansion" not in settings["hooks"]
-    assert len(settings["hooks"]["SessionStart"]) == 2  # host_default, and auto_sync on startup
+    assert len(settings["hooks"]["SessionStart"]) == 3  # host_default, global_memory, and auto_sync on startup
 
 
 def test_host_switch_leaves_one_entry_per_hook_and_rolls_back(home, monkeypatch):
@@ -440,7 +442,7 @@ def test_host_switch_leaves_one_entry_per_hook_and_rolls_back(home, monkeypatch)
     state = json.loads((home / "claude-config" / "state.json").read_text())
     assert state["host"] == "work" and state["defaultTracker"] == "jira"
     settings = json.loads((home / "settings.json").read_text())
-    assert sum(len(g["hooks"]) for g in settings["hooks"]["SessionStart"]) == 2
+    assert sum(len(g["hooks"]) for g in settings["hooks"]["SessionStart"]) == 3
     run(home, "rollback")
     assert json.loads((home / "claude-config" / "state.json").read_text())["host"] == "personal"
 
@@ -802,3 +804,49 @@ def test_status_names_an_unreadable_gate_config_on_a_state_from_before_the_gates
     capsys.readouterr()
     assert run(home, "status") == 0
     assert f"unreadable {gate_config(home)}" in capsys.readouterr().out
+
+
+def memory_rule(tmp_path, monkeypatch):
+    """The rule a deploy should add for a memory store under a fresh XDG_DATA_HOME, in Claude Code's absolute-path form."""
+    xdg = tmp_path / "xdg"
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg))
+    return f"Edit(/{xdg}/claude-memory/**)"  # the leading double slash marks an absolute path
+
+
+def test_rollback_removes_only_the_memory_rule_it_added(home, tmp_path, monkeypatch):
+    rule = memory_rule(tmp_path, monkeypatch)
+    home.mkdir()
+    (home / "settings.json").write_text('{"permissions": {"allow": ["Bash(ls:*)"], "deny": ["Read(.env)"]}}\n')
+    run(home, "deploy", "--host", "personal", "--yes")
+    run(home, "deploy", "--yes")  # a second deploy must not add the rule again
+    settings = json.loads((home / "settings.json").read_text())
+    assert settings["permissions"]["allow"] == ["Bash(ls:*)", rule]
+    settings["permissions"]["allow"].append("Bash(pwd)")  # changed after the deploy, so rollback strips our part
+    (home / "settings.json").write_text(json.dumps(settings))
+    run(home, "rollback")
+    after = json.loads((home / "settings.json").read_text())
+    assert after["permissions"] == {"allow": ["Bash(ls:*)", "Bash(pwd)"], "deny": ["Read(.env)"]}
+
+
+def test_a_memory_rule_the_user_had_first_survives_rollback(home, tmp_path, monkeypatch):
+    rule = memory_rule(tmp_path, monkeypatch)
+    home.mkdir()
+    (home / "settings.json").write_text(json.dumps({"permissions": {"allow": [rule]}}))
+    run(home, "deploy", "--host", "personal", "--yes")
+    run(home, "deploy", "--yes")
+    settings = json.loads((home / "settings.json").read_text())
+    assert settings["permissions"]["allow"] == [rule]
+    settings["theme"] = "dark"
+    (home / "settings.json").write_text(json.dumps(settings))
+    run(home, "rollback")
+    assert json.loads((home / "settings.json").read_text())["permissions"] == {"allow": [rule]}
+
+
+def test_rollback_drops_permissions_left_empty(home, tmp_path, monkeypatch):
+    memory_rule(tmp_path, monkeypatch)
+    run(home, "deploy", "--host", "personal", "--yes")
+    settings = json.loads((home / "settings.json").read_text())
+    settings["theme"] = "dark"
+    (home / "settings.json").write_text(json.dumps(settings))
+    run(home, "rollback")
+    assert "permissions" not in json.loads((home / "settings.json").read_text())

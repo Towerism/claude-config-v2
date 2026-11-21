@@ -387,7 +387,7 @@ def test_hooks_print_only_checked_values(repo, machine):
 # wiring
 
 FRAGMENT = json.loads((ROOT / "config" / "settings.fragment.json").read_text())
-HOOK_NAMES = ["host_default.py", "auto_sync.py"]
+HOOK_NAMES = ["host_default.py", "auto_sync.py", "global_memory.py"]
 
 
 def entries(event, name):
@@ -409,8 +409,11 @@ def test_the_hooks_are_registered_and_listed():
     assert entries("SessionStart", "auto_sync.py") == [
         ("startup", hook("auto_sync.py", 120, statusMessage="Syncing claude-config…"))
     ]
-    assert sorted(FRAGMENT["hooks"]) == ["SessionStart", "SubagentStart"]
-    assert sum(len(groups) for groups in FRAGMENT["hooks"].values()) == 3
+    # Every session source and its end, so the index survives compact and resume; long enough for clone, fetch and push.
+    assert entries("SessionStart", "global_memory.py") == [(None, hook("global_memory.py", 120))]
+    assert entries("SessionEnd", "global_memory.py") == [(None, hook("global_memory.py", 120))]
+    assert sorted(FRAGMENT["hooks"]) == ["SessionEnd", "SessionStart", "SubagentStart"]
+    assert sum(len(groups) for groups in FRAGMENT["hooks"].values()) == 5
     for host in ("personal", "work"):
         assert json.loads((ROOT / "hosts" / f"{host}.json").read_text())["hooks"] == HOOK_NAMES
 
@@ -424,6 +427,9 @@ def test_every_hook_entry_outlasts_the_hooks_own_deadline():
                     sync = hook_module("auto_sync.py")
                     assert sync.LOCAL_SECONDS == 10
                     assert hook["timeout"] >= sync.FETCH_SECONDS + 3 * sync.LOCAL_SECONDS + 60
+                elif hook["command"].endswith("/global_memory.py"):
+                    memory = hook_module("global_memory.py")
+                    assert hook["timeout"] >= memory.FETCH_SECONDS + 3 * memory.LOCAL_SECONDS + 60
                 else:
                     assert hook["timeout"] == 10, hook["command"]
     assert hook_module("host_default.py").DEADLINE_SECONDS == 5
@@ -533,6 +539,7 @@ def hook_module(name):
 EVENT_ONLY = {
     "host_default.py": {"hook_event_name": "SessionStart"},
     "auto_sync.py": {"hook_event_name": "SessionStart", "source": "startup"},
+    "global_memory.py": {"hook_event_name": "SessionStart", "source": "startup"},
 }
 HOST_CONTEXT = (
     b'{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "Host profile: work. '

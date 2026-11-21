@@ -15,7 +15,7 @@ V1 (`claude-config`) built its own pipeline from 24 skills, overlays and three h
 |---|---|
 | `config/CLAUDE.global.md` | The guardrails, written for Anthropic models only ([ADR-0012](docs/adr/0012-guardrails-for-anthropic-models-only.md)), deployed into `~/.claude/CLAUDE.md` as a marked block, normally after OMC's own. They state only what OMC, the skills and the hooks don't: the user approves every spec and every merge ([ADR-0006](docs/adr/0006-omc-leads-the-pipeline.md); no hook enforces the merge rule since [ADR-0010](docs/adr/0010-no-merge-hook.md)) and decides when a PR is marked ready ([ADR-0008](docs/adr/0008-omc-pushes-feature-branches.md)), and OMC may push its feature branch and open a draft PR in any mode ([ADR-0008](docs/adr/0008-omc-pushes-feature-branches.md)) |
 | `config/skills/` | `issue-lifecycle` (markdown only: pairs the work to a GitHub, Gitea or Jira issue, keeps its description current and closes it, [ADR-0014](docs/adr/0014-one-issue-lifecycle-skill.md)), `fresh-session-handoff`, `linux-troubleshooting`, `architecture-backfill` (docs a repo's architecture and past decisions from code and history, each claim labeled verified or inferred), `human-prose` (rules and a review loop for prose people read, such as PR descriptions, tickets and design docs), `promote-skill-to-config` (moves an OMC learned skill or a skillify draft into this repo), and the OMC quality-gate skills `spec-test-plan` and `spec-scope` ([ADR-0011](docs/adr/0011-scope-dependencies-and-spec-time-test-plans.md)). The rules for replies and agent-read docs come from OMC's `minimal-prose-discipline` and `agent-doc-discipline` |
-| `config/hooks/` | `host_default.py` (states the repo's tracker at session start, from its history, its `origin` and the host profile) and `auto_sync.py` (deploys `main` from `origin` at the start of each new session, [ADR-0007](docs/adr/0007-auto-sync-at-session-start.md)) |
+| `config/hooks/` | `host_default.py` (states the repo's tracker at session start, from its history, its `origin` and the host profile), `auto_sync.py` (deploys `main` from `origin` at the start of each new session, [ADR-0007](docs/adr/0007-auto-sync-at-session-start.md)) and `global_memory.py` (syncs general memories and learned skills through a private git repo; off until `memory.repo` is set, [ADR-0015](docs/adr/0015-global-memory-in-a-private-repo.md)) |
 | `config/omc.fragment.json` | The `qualityGates` that `cfg.py` merges into OMC's user config: `spec-test-plan` blocks at `deep-interview` and `ralplan`, `spec-scope` advises at `omc-review` |
 | `hosts/` | `personal.json`, `work.json` |
 | `tools/cfg.py` | plan, deploy, status and rollback |
@@ -43,7 +43,22 @@ V1 (`claude-config`) built its own pipeline from 24 skills, overlays and three h
    - Anyone who can push to `main` changes every synced machine at its next session start, so protect `main` with branch protection.
 4. `make status` lists files edited since the last deploy, changes still pending and the last failed sync. A deploy stops on an edited file until you pass `FORCE=1` (`--force`; the old copy is backed up). `make rollback` undoes the last deploy. A `HOST` or `TARGET` holding `'` or `$` needs the raw command. Only values typed after `make` count; exported variables are ignored.
 
-Per-machine values that never enter the repo live in `~/.config/claude-config/local.json`: `autoSync` (above), and the `jira` settings that tailor `issue-lifecycle` to your Jira project (see its `references/jira.md`). A top-level `defaultTracker` there is ignored; the host profile holds the default.
+Per-machine values that never enter the repo live in `~/.config/claude-config/local.json`: `autoSync` (above), `memory.repo` (see "Share memories between machines"), and the `jira` settings that tailor `issue-lifecycle` to your Jira project (see its `references/jira.md`). A top-level `defaultTracker` there is ignored; the host profile holds the default.
+
+### Share memories between machines (optional)
+
+[ADR-0015](docs/adr/0015-global-memory-in-a-private-repo.md) syncs memories that hold in any repo, and learned skills, through a private git repo. Per-project memory stays on its machine.
+
+1. Create an empty private git repo that every machine can reach over ssh without a prompt (the hook runs git with `ssh -o BatchMode=yes`).
+2. On each machine, put the repo's URL in `~/.config/claude-config/local.json`; the URL may differ per machine:
+
+   ```json
+   { "memory": { "repo": "<git URL>" } }
+   ```
+3. Create `~/.config/claude-config/deny-terms` with one term per line, at least one. A file whose name or text holds a term (case-insensitive) is never committed, and with no term list nothing is pushed. The file stays outside the repo.
+4. Start a new session. The hook clones the repo to `~/.local/share/claude-memory` (`$XDG_DATA_HOME/claude-memory`), syncs at every new session and at session end, and lists the memories at every session start. It links `~/.omc/skills` to the store's `skills/` when nothing is at that path.
+
+Failures go to `~/.claude/claude-config/memory.log`, each with a one-line warning in the session. `no-deny-terms` and `blocked-files` mean the leak guard stopped the push. `conflict` means two machines edited the same file: merge it by hand in the store.
 
 ## Add a second machine, a skill or a hook
 
@@ -51,7 +66,7 @@ Per-machine values that never enter the repo live in `~/.config/claude-config/lo
 - **Skill:** add `config/skills/<name>/SKILL.md` (markdown, plus stdlib-only Python under `scripts/` if it needs one), list it in the host profiles, run the tests.
 - **Hook:** add it to `config/hooks/`, wire it in `config/settings.fragment.json`, list it in the host profiles, and test it.
 
-The fragment's `env` keys are set in the deployed `settings.json` on every host; today that is `OMC_GIT_GUARDRAILS=0`, which turns off OMC's `git-guardrails` hook in every mode ([ADR-0008](docs/adr/0008-omc-pushes-feature-branches.md)). Rollback removes only those keys.
+The fragment's `env` keys are set in the deployed `settings.json` on every host; today that is `OMC_GIT_GUARDRAILS=0`, which turns off OMC's `git-guardrails` hook in every mode ([ADR-0008](docs/adr/0008-omc-pushes-feature-branches.md)). The fragment also adds one `permissions.allow` entry, an `Edit` rule for the global-memory store, so saving a memory there needs no prompt. Rollback removes only those keys and that entry.
 
 ## Develop
 
