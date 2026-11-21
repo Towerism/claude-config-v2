@@ -57,7 +57,7 @@ Report contradictions (code does X, README says Y) instead of choosing the tidie
 
 ## 4. Write `docs/architecture.md`
 
-Use the skeleton in `references/templates.md`, written for a cold reader: the point first, then the evidence. Load `human-prose` and follow it when the host has it. Keep to what a reader needs to change the code safely:
+Use the skeleton in `references/templates.md`, written for a cold reader: the point first, then the evidence. Keep to what a reader needs to change the code safely:
 
 - **Purpose and boundary**: what the system does, and what it does not do. A "does not" is Verified only when a README, issue or doc says it is out of scope; otherwise label it Inferred or Unknown.
 - **Components**: one line each, with its single responsibility and the file that defines its contract.
@@ -81,7 +81,7 @@ git blame -w -C -C <file>                                         # who last sha
 
 If that commit is the root commit, a bulk import or squash (over about 100 files), the date and author are **Unknown**, not that commit.
 
-One record per decision, in the repo's ADR format (`references/templates.md` has a default), written with `human-prose` when the host has it. The labels below (`Reason not recorded`, **Inferred rationale**) are this format and stay:
+One record per decision, in the repo's ADR format (`references/templates.md` has a default):
 
 - **Status**: the repo's accepted word plus `(reconstructed <today>)`. The record documents a past decision; it does not make a new one.
 - **Introduced by**: hash, `<commit date>`, author name only (`%an`, never an email).
