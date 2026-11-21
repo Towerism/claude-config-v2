@@ -404,7 +404,8 @@ def test_the_hooks_are_registered_and_listed():
         return {"type": "command", "command": f"python3 -I {{claude_home}}/hooks/{name}", "timeout": timeout, **extra}
 
     assert entries("SessionStart", "host_default.py") == [(None, hook("host_default.py"))]
-    assert entries("SubagentStart", "host_default.py") == [(None, hook("host_default.py"))]
+    # Every subagent but the editor, whose context holds only its skill and the batch (ADR-0016).
+    assert entries("SubagentStart", "host_default.py") == [("^(?!human-prose-editor$).*", hook("host_default.py"))]
     # A new session only, with a spinner, blocking until the sync is done.
     assert entries("SessionStart", "auto_sync.py") == [
         ("startup", hook("auto_sync.py", 120, statusMessage="Syncing claude-config…"))

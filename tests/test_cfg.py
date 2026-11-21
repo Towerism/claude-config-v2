@@ -263,6 +263,7 @@ def test_rollback_restores_the_previous_state(home):
     run(home, "rollback")
     assert (home / "settings.json").read_text() == '{"theme": "dark"}\n'
     assert not (home / "skills").exists() and not (home / "hooks").exists()
+    assert not (home / "agents").exists()
     assert not (home / "CLAUDE.md").exists()
     assert not (home / "claude-config" / "state.json").exists()
 
@@ -498,6 +499,24 @@ def test_malformed_hooks_in_settings_are_reported(home, capsys):
     assert "hooks" in capsys.readouterr().err
 
 
+def test_agents_deploy_show_in_status_and_leave_with_the_host(home, tmp_path, monkeypatch, capsys):
+    """A recorded agents/ file is reported and removed by a host without an agents key: the back-out path."""
+    host = json.loads((ROOT / "hosts" / "personal.json").read_text())
+    assert host["agents"]
+    run(home, "deploy", "--host", "personal", "--yes")
+    agents = [home / "agents" / f"{a}.md" for a in host["agents"]]
+    assert all(a.is_file() for a in agents)
+    agents[0].unlink()
+    capsys.readouterr()
+    run(home, "status")
+    assert f"missing   agents/{agents[0].name}" in capsys.readouterr().out
+    bare = {k: v for k, v in host.items() if k != "agents"} | {"name": "bare"}
+    real = cfg.load_host
+    monkeypatch.setattr(cfg, "load_host", lambda name: bare if name == "bare" else real(name))
+    assert run(home, "deploy", "--host", "bare", "--yes") == 0
+    assert not (home / "agents").exists() or not any((home / "agents").iterdir())
+
+
 # --- security regressions ------------------------------------------------------------------
 
 
@@ -513,10 +532,14 @@ def test_state_paths_cannot_delete_outside_the_home(home, tmp_path):
     assert victim.read_text() == "keep"
 
 
-@pytest.mark.parametrize("rel", ["/etc/hostname", "../x", "settings.json/../../x", "notes/x.md", ""])
+@pytest.mark.parametrize("rel", ["/etc/hostname", "../x", "settings.json/../../x", "notes/x.md", "", "agents", "agents/../x"])
 def test_safe_rel_refuses(home, rel):
     with pytest.raises(cfg.CfgError):
         cfg.safe_rel(home, rel)
+
+
+def test_safe_rel_accepts_an_agent_file(home):
+    assert cfg.safe_rel(home, "agents/x.md") == "agents/x.md"
 
 
 def test_rollback_will_not_delete_outside_the_home(home, tmp_path):
@@ -529,6 +552,15 @@ def test_rollback_will_not_delete_outside_the_home(home, tmp_path):
     assert victim.read_text() == "keep"
 
 
+def test_a_linked_agents_directory_is_refused(home, tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    home.mkdir()
+    (home / "agents").symlink_to(outside)
+    run(home, "deploy", "--host", "personal", "--yes")
+    assert list(outside.iterdir()) == []
+
+
 def test_a_linked_skills_directory_is_refused(home, tmp_path):
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -538,7 +570,7 @@ def test_a_linked_skills_directory_is_refused(home, tmp_path):
     assert list(outside.iterdir()) == []
 
 
-@pytest.mark.parametrize("field,value", [("skills", ["../../tools"]), ("hooks", ["../../tools/cfg.py"]), ("skills", ["/etc"])])
+@pytest.mark.parametrize("field,value", [("skills", ["../../tools"]), ("hooks", ["../../tools/cfg.py"]), ("skills", ["/etc"]), ("agents", ["../../tools"])])
 def test_host_names_cannot_climb(tmp_path, monkeypatch, field, value):
     root = tmp_path / "repo"
     (root / "hosts").mkdir(parents=True)
@@ -546,8 +578,19 @@ def test_host_names_cannot_climb(tmp_path, monkeypatch, field, value):
     host.update(name="evil", **{field: value})
     (root / "hosts" / "evil.json").write_text(json.dumps(host))
     monkeypatch.setattr(cfg, "ROOT", root)
-    with pytest.raises(cfg.CfgError, match="invalid skill or hook name"):
+    with pytest.raises(cfg.CfgError, match="invalid skill, hook or agent name"):
         cfg.load_host("evil")
+
+
+def test_a_host_agent_needs_its_file(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    (root / "hosts").mkdir(parents=True)
+    host = json.loads((ROOT / "hosts" / "personal.json").read_text())
+    host.update(name="ghost", skills=[], hooks=[], agents=["no-such-agent"])
+    (root / "hosts" / "ghost.json").write_text(json.dumps(host))
+    monkeypatch.setattr(cfg, "ROOT", root)
+    with pytest.raises(cfg.CfgError, match="config/agents/no-such-agent.md"):
+        cfg.load_host("ghost")
 
 
 def test_deploy_skips_omc_state_folders_inside_a_skill(tmp_path, monkeypatch):
