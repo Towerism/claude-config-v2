@@ -8,7 +8,8 @@
     "linux-troubleshooting",
     "architecture-backfill",
     "spec-test-plan",
-    "spec-scope"
+    "spec-scope",
+    "human-prose"
   ],
   "marketplaces": {
     "omc": {
