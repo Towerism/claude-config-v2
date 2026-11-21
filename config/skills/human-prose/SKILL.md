@@ -10,25 +10,11 @@ description: Write or revise any text a person will read, so it gives that reade
 Writing from sources (facts, a diff, an issue, the conversation, earlier text):
 
 1. Name the reader and the one thing they need from this text: to approve it, to try it, to understand why, to act. Why: a text that doesn't surface what its reader cares about misses its purpose, however accurate it is.
-2. Read the reference file for the text type, if the table under "Reference files" names one.
-3. Write it in the shape for its type ("Shapes by text type"), following every rule below.
-4. Run the check under "Before you deliver".
-5. If the type is a README, a wiki or design page, or a PR description, run the checker in `references/checker.md`.
-6. Deliver only the final text. Done when the reply holds the text and nothing about how it was made.
+2. Write it in the shape for its type ("Shapes by text type"), following every rule below and the section for its kind of text, if there is one: "Text the user sends as themselves", "A review of someone's PR", "ADRs, design docs and wiki pages", or "Issues, tickets and PR descriptions".
+3. Run the check under "Before you deliver".
+4. Deliver only the final text. Done when the reply holds the text and nothing about how it was made.
 
-Revising someone's draft: follow "Revising someone's draft", then steps 4 and 6. Edits get no checker.
-
-## Reference files
-
-| Text | Read |
-|---|---|
-| Text the user will send as themselves (Slack, chat, a comment in their name) | `references/sent-as-the-user.md` |
-| A review of someone's PR | `references/pr-review.md` |
-| An ADR, design doc or wiki page | `references/design-docs.md` |
-| An issue, ticket or PR description | `references/tickets-and-prs.md` |
-| A README, wiki or design page, or PR description, written from sources (step 5) | `references/checker.md` |
-
-A commit message, and a chat reply not sent as the user, need no reference file.
+Revising someone's draft: follow "Revising someone's draft", then steps 3 and 4.
 
 ## What goes in
 
@@ -92,3 +78,59 @@ These keep the text reading as a person wrote it. Why: readers who sense machine
 ## Before you deliver
 
 Check the text privately, in your own reasoning, before you deliver it: for each statement of fact, find the source it rests on, and remove or fix any statement with no source or stated more strongly than its source. Check the text against the shape rules. Deliver only the final text: never the draft, the check, or any note about it. Done when every statement has a source and the reply holds only the text.
+
+## Text the user sends as themselves
+
+Use this for a Slack or chat message, or a comment, that goes out under the user's name. Why: a draft in a generic voice doesn't sound like the user.
+
+### Pick the register by where it goes
+
+| Where | Voice |
+|---|---|
+| Direct message | Direct, warm, loose, low ceremony. Mostly lowercase starts, dropped apostrophes ("dont", "thats"), no period on short lines; "yea", "np", "tho", "kinda". Quick acknowledgments of one to four words ("got it", "makes sense"). One thought may run across several short messages. Opens with "ah", "yes", "ok" or straight into the fact; no sign-off. |
+| Channel | Direct and confident, friendly and explanatory. Capitalized full sentences with periods. One to three sentences per message, one claim per message. Concedes a point before adding their own ("That's a good point. … But …"). Links on their own line or with one line of context. No bullets. |
+| Public (PR reviews, issue comments, anything outside the team chat) | Formal: full capitalized sentences, no slang ("lmk", "tho", "yea", "lol"), no casual opener or closer. Start from the channel voice and lean more formal. |
+
+Pick by the destination, never by the recipient's own style. Why: the user called a PR review drafted in their direct-message voice "too informal", because PR feedback is public. Keep the text direct in every register.
+
+### Draft it; never send it
+
+Create a Slack message the user authored as a draft in the target DM or channel (`slack_send_message_draft`) and let the user send it. Never send it with `slack_send_message`. Why: that tool appends a "Sent using Claude" trailer the user can't turn off, which reads as noise on a message they wrote.
+
+If the user wants to see it first, put the draft in their own self-DM, then a draft in the recipient's DM after they approve. Never send a self-DM preview: the tool can't delete a sent message.
+
+Done when the draft sits in the right conversation, unsent.
+
+## A review of someone's PR
+
+Why these rules: every sentence the author reads costs their attention, and a review full of noise teaches them to skip the next one.
+
+1. Back every sentence with a check you ran: each finding, the mechanism and consequence it states, any claim about the suggested fix, and every note or "checked and fine" line. Run each check against the base branch, the PR head, and the head with your suggested fix. Reading the code, or other reviewers agreeing, is not a check. When the check would cost more than the sentence is worth, drop the sentence. Why: one unchecked note in an earlier review was wrong, and it cost the whole review the author's trust.
+2. Lead each finding with its consequence: what breaks, for whom (a user, a tester, a future maintainer), tied to the PR's goal where you can. Then say which reading applies, the mechanism, and the fix. Drop a finding with no consequence you can state. Why: a finding without a "why" reads as noise, and it leaves the author unsure whether the behaviour you describe is fine or a flaw.
+3. Turn a claim about what a person would do ("a tester will log it as failed") into the symptom you reproduced, or drop it.
+4. An approval lists the checks behind it, each line opening with what you did, under a lead-in that frames them as verification. Leave out what the author can see for themselves: the PR's tests, its description, CI, mergeability. Why: a bare approval feels empty, and a list of things the author already sees is noise.
+5. Settle every open item before writing: check it until it is a finding or ruled out. The review has no "Open questions" section and no closing offer to walk through or discuss anything. Anything still unsettled goes in your reply to the user, never in the review. Why: an open-questions section only signals a check nobody ran.
+
+Done when every sentence in the review names or follows from a check you ran, and the review ends on its last finding or check.
+
+## ADRs, design docs and wiki pages
+
+A design doc, ADR or wiki page for people is a short, high-level pitch to a cold reader. It answers "why should I care?" first. Why: a page that reads like an execution manual loses the people it is meant to convince, and anything that doesn't help a person understand the proposal only confuses them. A detailed manual for agents belongs in a separate document.
+
+1. Order the page: a short summary of where things are now and where they are going; a short list of what is wrong today; a short list of what the change gains; then everything else.
+2. Introduce each concept at a high level first, then break it down. A deep concept takes several steps.
+3. Keep sections short, so readers don't tire.
+4. Use a diagram whenever the reader would otherwise hold more than two or three things in mind, or scroll back to recall an earlier section.
+5. Name things in words, never in keys the reader must hold in their head.
+6. Where readers already know of a related effort, mention it wherever the page touches that effort's area. Why: otherwise they conclude the page is unaware of it.
+
+For an ADR, keep its shape from "Shapes by text type" (context, decision, consequences) and apply steps 2, 5 and 6.
+
+Done when a reader who knows nothing of the work can say, from the first screen, what changes and why it is worth it.
+
+## Issues, tickets and PR descriptions
+
+- Keep only what is pertinent and present in the ticket's own context: no references to local plans, reviews, interview rounds, `.omc/` files, requirement numbers or decision history. Why: a cold reader gains nothing from them, and the full history belongs in the local design record.
+- Conclusion first, no filler, no restated points, plain lists instead of decorative tables. Why: the reader of a ticket wants what to do and why, fast.
+- Put every security item (accepted risks, reachability, gate behaviour, follow-ups) in one `## Security findings` section of about 10 to 15 lines, never scattered under other headings. Lead with the bottom line ("nothing exploitable is on our path; the gate passes"), then the gate rule, what is accepted and why in one line per group, caveats, and links to follow-ups. Leave out raw scanner totals and per-CVE detail; link the decision record instead. Elsewhere in the text, link to the section rather than repeating it. Why: security staff and reviewers must find everything in one place, and a reviewer who meets hundreds of scanner findings up front may read nothing else.
+- After posting to a tracker, read the issue, ticket or PR back and compare it with what you meant to post. Done when the two match.

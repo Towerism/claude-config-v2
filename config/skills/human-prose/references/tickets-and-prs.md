@@ -1,6 +1,0 @@
-# Issues, tickets and PR descriptions
-
-- Keep only what is pertinent and present in the ticket's own context: no references to local plans, reviews, interview rounds, `.omc/` files, requirement numbers or decision history. Why: a cold reader gains nothing from them, and the full history belongs in the local design record.
-- Conclusion first, no filler, no restated points, plain lists instead of decorative tables. Why: the reader of a ticket wants what to do and why, fast.
-- Put every security item (accepted risks, reachability, gate behaviour, follow-ups) in one `## Security findings` section of about 10 to 15 lines, never scattered under other headings. Lead with the bottom line ("nothing exploitable is on our path; the gate passes"), then the gate rule, what is accepted and why in one line per group, caveats, and links to follow-ups. Leave out raw scanner totals and per-CVE detail; link the decision record instead. Elsewhere in the text, link to the section rather than repeating it. Why: security staff and reviewers must find everything in one place, and a reviewer who meets hundreds of scanner findings up front may read nothing else.
-- After posting to a tracker, read the issue, ticket or PR back and compare it with what you meant to post. Done when the two match.
