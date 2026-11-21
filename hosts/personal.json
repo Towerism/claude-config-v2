@@ -9,7 +9,8 @@
     "architecture-backfill",
     "spec-test-plan",
     "spec-scope",
-    "human-prose"
+    "human-prose",
+    "promote-skill-to-config"
   ],
   "marketplaces": {
     "omc": {
