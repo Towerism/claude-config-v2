@@ -67,6 +67,7 @@ GIT_FLAGS = [
     "-c", "core.askPass=", "-c", "core.attributesFile=/dev/null", "-c", "protocol.ext.allow=never",
     "-c", "remote.origin.uploadpack=git-upload-pack", "-c", "submodule.recurse=false",
     "-c", "fetch.recurseSubmodules=false", "-c", "gc.auto=0", "-c", "maintenance.auto=false",
+    "-c", "log.showRoot=true", "-c", "i18n.logOutputEncoding=UTF-8", "-c", "color.ui=never",
     "-c", "commit.gpgSign=false", "-c", "user.name=claude-memory", "-c", "user.email=claude-memory@localhost",
     "-c", "core.symlinks=false",  # a symlink from the remote is checked out as a plain file
 ]
