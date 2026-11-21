@@ -813,7 +813,7 @@ def memory_rules(tmp_path, monkeypatch):
     """
     xdg = tmp_path / "xdg"
     monkeypatch.setenv("XDG_DATA_HOME", str(xdg))
-    return [f"Edit(/{xdg}/claude-memory/*.md)", f"Edit(/{xdg}/claude-memory/skills/**)"]
+    return [f"Edit(/{xdg}/claude-memory/*.md)", f"Edit(/{xdg}/claude-memory/skills/**/*.md)"]
 
 
 def test_rollback_removes_only_the_memory_rules_it_added(home, tmp_path, monkeypatch):

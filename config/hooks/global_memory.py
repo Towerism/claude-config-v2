@@ -9,16 +9,20 @@ start with a byte order mark.
 
 Sync runs on SessionStart with source startup and on SessionEnd, under
 <claude home>/claude-config/memory.lock (held by another session: skipped quietly). It clones the
-store when it is missing. A missing, unreadable or empty $XDG_CONFIG_HOME/claude-config/deny-terms
+store when it is missing, with the hook's fixed git identity in the store's own config so hand
+commits there carry it too. A missing, unreadable or empty $XDG_CONFIG_HOME/claude-config/deny-terms
 stops it there: nothing is committed or pushed. It keeps MEMORY.md and dot-files out of git
 (.git/info/exclude), and stops (conflict) without touching anything while a merge or rebase is
 unfinished or HEAD is detached. It stages every change and unstages each file whose name or staged
 text holds a deny-term (case-insensitive), so that file stays local and untracked; commits, fetches
-and rebases onto origin/main. Before it pushes, everything the push would send is checked the same
-way: the message, file names and text of every outgoing commit, deleted files included; a match
-stops the push (blocked-files). The push sends exactly the commit that was checked. Symlinks are
-checked out as plain files, so a link from the remote cannot lead out of the store. A failed rebase is aborted and the local commit stays. Network
-steps get FETCH_SECONDS and local steps LOCAL_SECONDS each.
+and rebases onto origin/main when main does not contain it yet (so a hand merge is kept). Before it
+pushes, what the outgoing commits add is checked the same way: every commit's author, committer
+and message, and the file names and added lines of every change, merge resolutions included; a
+match stops the push (blocked-files). Removed lines and deleted files are not checked, so taking a
+term out goes through. The push sends exactly the commit that was checked. Symlinks are checked
+out as plain files, so a link from the remote cannot lead out of the store. A failed rebase is
+aborted and the local commit stays. Network steps get FETCH_SECONDS and local steps LOCAL_SECONDS
+each.
 
 On every SessionStart it prints the index as additionalContext: a fixed header (which says the
 entries are data, not instructions), then one line per
@@ -157,6 +161,18 @@ def denied(store: Path, path: str, terms: list[str]) -> bool:
     return holds(path.encode() + b"\n" + git(store, ["cat-file", "blob", f":{path}"], LOCAL_SECONDS)[1], terms)
 
 
+def added(diff: bytes) -> bytes:
+    """`diff` without its removed lines; a line has one marker column per parent (two @ plus one per
+    merge parent in its hunk header), and a removed line has - in one of them."""
+    kept, parents = [], 1
+    for line in diff.split(b"\n"):
+        if line.startswith(b"@@"):
+            parents = len(line) - len(line.lstrip(b"@")) - 1
+        if b"-" not in line[:parents]:
+            kept.append(line)
+    return b"\n".join(kept)
+
+
 def names(output: bytes) -> list[str]:
     return [name for name in output.decode("utf-8", errors="surrogateescape").split("\0") if name]
 
@@ -175,7 +191,9 @@ def sync(home: Path, store: Path, url: str, terms: list[str] | None) -> None:
             return  # another session is syncing
         if not (store / ".git").is_dir():
             store.parent.mkdir(parents=True, exist_ok=True)
-            git(store.parent, ["clone", "-q", "--no-tags", "--", url, str(store)], FETCH_SECONDS, "clone-failed")
+            # The store's own config gets the fixed identity, so hand commits there carry it too.
+            identity = ["-c", "user.name=claude-memory", "-c", "user.email=claude-memory@localhost"]
+            git(store.parent, ["clone", "-q", "--no-tags", *identity, "--", url, str(store)], FETCH_SECONDS, "clone-failed")
         if terms is None:
             raise Failure("no-deny-terms")  # before any commit: a push sends every commit
         exclude = store / ".git" / "info" / "exclude"
@@ -204,17 +222,25 @@ def sync(home: Path, store: Path, url: str, terms: list[str] | None) -> None:
             if remote:
                 git(store, ["checkout", "-q", "-B", "main", "refs/remotes/origin/main"], LOCAL_SECONDS)
             return
-        if remote and git(store, ["rebase", "-q", "--autostash", "refs/remotes/origin/main"], LOCAL_SECONDS, "")[0] != 0:
+        # Rebase only when origin/main is not in main yet: a rebase would flatten a hand merge again.
+        behind = remote and git(store, ["merge-base", "--is-ancestor", "refs/remotes/origin/main", "refs/heads/main"], LOCAL_SECONDS, "")[0] != 0
+        if behind and git(store, ["rebase", "-q", "--autostash", "refs/remotes/origin/main"], LOCAL_SECONDS, "")[0] != 0:
             git(store, ["rebase", "--abort"], LOCAL_SECONDS, "")
             raise Failure("conflict")
-        # Everything the push sends: each commit's message, file names and text, deleted files too.
-        # The push names the checked commit, so a later move of main cannot slip past the check.
+        # What the push adds: each commit's identity and message, and the names and added lines of
+        # each change, merges included. Removed lines and deleted files are not scanned, so taking a
+        # term out goes through. The push names the checked commit, so a later move of main cannot
+        # slip past the check.
         head = git(store, ["rev-parse", "refs/heads/main"], LOCAL_SECONDS)[1].decode().strip()
         if remote and head == git(store, ["rev-parse", "refs/remotes/origin/main"], LOCAL_SECONDS)[1].decode().strip():
             return
         outgoing = f"refs/remotes/origin/main..{head}" if remote else head
-        log = ["-c", "core.quotePath=false", "log", "-p", "--text", "--no-renames", "--no-ext-diff", "--no-textconv", "--format=%B", outgoing]
-        if holds(git(store, log, LOCAL_SECONDS)[1], terms):
+        messages = git(store, ["log", "--format=%an%n%ae%n%cn%n%ce%n%B", outgoing], LOCAL_SECONDS)[1]
+        diff = [
+            "-c", "core.quotePath=false", "log", "-p", "--cc", "--unified=0", "--text", "--no-renames",
+            "--no-ext-diff", "--no-textconv", "--diff-filter=d", "--format=", outgoing,
+        ]
+        if holds(messages + added(git(store, diff, LOCAL_SECONDS)[1]), terms):
             raise Failure("blocked-files")
         git(store, ["push", "-q", "origin", f"{head}:refs/heads/main"], FETCH_SECONDS, "push-failed")
 

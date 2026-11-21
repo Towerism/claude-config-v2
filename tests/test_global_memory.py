@@ -157,7 +157,7 @@ def test_a_term_in_an_earlier_commit_blocks_the_push_even_once_the_file_is_gone(
     m = started(tmp_path, origin)
     remember(m, "clean.md")
     quiet(m)
-    remember(m, "denied.md", body="Notes from the ACMECORP engagement.\n")
+    remember(m, "denied.md", body="- Notes from the ACMECORP engagement.\n")
     git(m.store, "add", "denied.md")
     git(m.store, "commit", "-q", "-m", "by hand")
     git(m.store, "rm", "-q", "denied.md")
@@ -168,6 +168,32 @@ def test_a_term_in_an_earlier_commit_blocks_the_push_even_once_the_file_is_gone(
     warned(out, "blocked-files")
     assert remote_files(origin) == {"clean.md"}
     assert TERM.casefold() not in git(origin, "log", "-p", "--all").casefold()
+
+
+def test_a_term_in_a_commit_identity_blocks_the_push(tmp_path, origin):
+    m = started(tmp_path, origin)
+    remember(m, "clean.md")
+    work = {**GIT_ENV, "GIT_AUTHOR_EMAIL": "me@acmecorp.example", "GIT_COMMITTER_EMAIL": "me@acmecorp.example"}
+    subprocess.run(["git", "-C", str(m.store), "add", "clean.md"], check=True, env=work)
+    subprocess.run(["git", "-C", str(m.store), "commit", "-q", "-m", "by hand"], check=True, env=work)
+    code, out, err = hook(m)
+    assert (code, err) == (0, b"")
+    warned(out, "blocked-files")
+    assert TERM.casefold() not in git(origin, "log", "--all", "--format=%ae%n%ce").casefold()
+
+
+def test_a_hand_commit_in_a_cloned_store_carries_the_store_identity(tmp_path, origin):
+    m = started(tmp_path, origin)
+    home = tmp_path / "work-home"
+    home.mkdir()
+    (home / ".gitconfig").write_text("[user]\n\tname = Work Name\n\temail = me@employer.example\n")
+    remember(m, "clean.md")
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(home)}
+    subprocess.run(["git", "-C", str(m.store), "add", "clean.md"], check=True, env=env)
+    subprocess.run(["git", "-C", str(m.store), "commit", "-q", "-m", "by hand"], check=True, env=env)
+    assert git(m.store, "log", "-1", "--format=%an %ae %cn %ce") == (
+        "claude-memory claude-memory@localhost claude-memory claude-memory@localhost"
+    )
 
 
 def test_a_term_in_a_binary_file_blocks_the_push(tmp_path, origin):
@@ -181,11 +207,53 @@ def test_a_term_in_a_binary_file_blocks_the_push(tmp_path, origin):
     assert remote_files(origin) == set()
 
 
-def test_a_term_in_a_commit_message_blocks_the_push(tmp_path, origin):
+@pytest.mark.parametrize("name,change", [
+    ("old.md", "delete"), ("old.md", "edit"), ("globex-notes.md", "delete"),
+])
+def test_removing_a_newly_denied_term_goes_through(tmp_path, origin, name, change):
+    m = started(tmp_path, origin)
+    remember(m, name, body="Worked with Globex.\n")
+    quiet(m)
+    (m.xdg / "claude-config" / "deny-terms").write_text(TERM + "\nGlobex\n")
+    if change == "delete":
+        (m.store / name).unlink()
+    else:
+        remember(m, name, body="Worked with a client.\n")
+    assert quiet(m) == {}
+    if change == "delete":
+        assert name not in remote_files(origin)
+    else:
+        assert git(origin, "show", f"main:{name}").endswith("Worked with a client.")
+
+
+def test_a_term_typed_into_a_merge_resolution_blocks_the_push(tmp_path, origin):
     m = started(tmp_path, origin)
     remember(m, "clean.md")
-    git(m.store, "add", "clean.md")
-    git(m.store, "commit", "-q", "-m", "learned at acmecorp")
+    quiet(m)
+    git(m.store, "checkout", "-q", "-b", "side")
+    remember(m, "x.md", body="Side.\n")
+    git(m.store, "add", "x.md")
+    git(m.store, "commit", "-q", "-m", "side")
+    git(m.store, "checkout", "-q", "main")
+    remember(m, "x.md", body="Main.\n")
+    git(m.store, "add", "x.md")
+    git(m.store, "commit", "-q", "-m", "main")
+    subprocess.run(["git", "-C", str(m.store), "merge", "side"], capture_output=True, env=GIT_ENV, check=False)
+    remember(m, "x.md", body="- Resolved for acmecorp.\n")
+    git(m.store, "add", "x.md")
+    git(m.store, "commit", "-q", "--no-edit")
+    code, out, err = hook(m)
+    assert (code, err) == (0, b"")
+    warned(out, "blocked-files")
+    assert remote_files(origin) == {"clean.md"}
+
+
+@pytest.mark.parametrize("name,message", [("clean.md", "learned at acmecorp"), ("acmecorp-notes.md", "by hand")])
+def test_a_term_in_a_commit_message_or_a_file_name_blocks_the_push(tmp_path, origin, name, message):
+    m = started(tmp_path, origin)
+    (m.store / name).write_text("Plain text.\n")  # the term only in the name or the message
+    git(m.store, "add", name)
+    git(m.store, "commit", "-q", "-m", message)
     code, out, err = hook(m)
     assert (code, err) == (0, b"")
     warned(out, "blocked-files")
@@ -226,7 +294,8 @@ def test_two_machines_share_memories_both_ways(tmp_path, origin):
     assert remote_files(origin) == {"from-a.md", "from-b.md"}
 
 
-def test_edits_to_the_same_memory_on_two_machines_keep_the_local_text_and_warn(tmp_path, origin):
+@pytest.mark.parametrize("resolve", ["merge", "rebase"])
+def test_edits_to_the_same_memory_on_two_machines_keep_the_local_text_and_warn(tmp_path, origin, resolve):
     a = started(tmp_path, origin, "a")
     remember(a, "shared.md", body="Base.\n")
     quiet(a)
@@ -243,6 +312,18 @@ def test_edits_to_the_same_memory_on_two_machines_keep_the_local_text_and_warn(t
     assert "B's version." in git(b.store, "show", "main:shared.md")
     assert git(b.store, "status", "--porcelain") == ""
     assert not (b.store / ".git" / "rebase-merge").exists() and not (b.store / ".git" / "rebase-apply").exists()
+    # Either hand resolution, then the next sync pushes it and both machines converge.
+    editor = {**GIT_ENV, "GIT_EDITOR": "true"}
+    subprocess.run(["git", "-C", str(b.store), resolve, "origin/main"], capture_output=True, env=editor, check=False)
+    remember(b, "shared.md", body="Both versions.\n")
+    git(b.store, "add", "shared.md")
+    finish = ["commit", "-q", "--no-edit"] if resolve == "merge" else ["rebase", "--continue"]
+    subprocess.run(["git", "-C", str(b.store), *finish], capture_output=True, env=editor, check=True)
+    assert quiet(b) == {}
+    assert git(origin, "rev-parse", "main") == git(b.store, "rev-parse", "main")
+    assert git(origin, "show", "main:shared.md").endswith("Both versions.")
+    quiet(a, STARTUP)
+    assert (a.store / "shared.md").read_text() == (b.store / "shared.md").read_text()
 
 
 @pytest.mark.parametrize("command,state", [("rebase", "rebase-merge"), ("merge", "MERGE_HEAD")])

@@ -1,6 +1,6 @@
 {
   "env": { "OMC_GIT_GUARDRAILS": "0" },
-  "permissions": { "allow": ["Edit({memory_dir}/*.md)", "Edit({memory_dir}/skills/**)"] },
+  "permissions": { "allow": ["Edit({memory_dir}/*.md)", "Edit({memory_dir}/skills/**/*.md)"] },
   "hooks": {
     "SessionStart": [
       {
