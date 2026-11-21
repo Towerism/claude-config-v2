@@ -4,6 +4,7 @@
 - Do not rely on your memory or context alone to judge the correctness or feasibility a technical decision. Rely on cheap spikes, experiments, and external research to resolve.
 - Before adding or proposing a dependency, discover candidates through research and determine fit and feasibility with cheap spikes instead of relying on memory, and compare what each replaces, its upkeep and, for code that ships to a browser, its bundle size.
 - Before writing or updating a document agents consume (CLAUDE.md, AGENTS.md, GLOSSARY.md, a skill, a plan, an issue or ticket body), load `/oh-my-claudecode:agent-doc-discipline` and follow it.
+- Before writing or editing a commit message, PR or issue description, PR review, ticket, ADR, README, chat message or wiki page, load `human-prose` and follow it. Why: it keeps text for people accurate, short and readable.
 - `plan` and `spec` are interchangeable unless a workflow specifically requires both. That goes for every instance of the word plan in this block.
 
 ## Rules

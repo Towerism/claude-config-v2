@@ -346,3 +346,26 @@ def test_readme_lists_the_gate_skills_and_their_config():
     rows = (ROOT / "README.md").read_text()
     for needle in ("`spec-test-plan`", "`spec-scope`", "`config/omc.fragment.json`"):
         assert needle in rows, needle
+
+
+@pytest.mark.parametrize("skill", SKILLS, ids=lambda p: p.name)
+def test_skill_routes_to_every_reference_file(skill):
+    """A reference file SKILL.md never names is one no agent is ever told to read."""
+    text = (skill / "SKILL.md").read_text()
+    for ref in (skill / "references").glob("*.md"):
+        assert f"references/{ref.name}" in text, ref.name
+
+
+def test_readme_names_every_skill():
+    """A skill that ships and syncs but has no README entry is one readers can't find."""
+    readme = (ROOT / "README.md").read_text()
+    for skill in SKILLS:
+        assert f"`{skill.name}`" in readme, skill.name
+
+
+def test_skills_the_global_rules_load_exist():
+    """A misspelled name in a load line silently stops that skill from loading."""
+    for name in re.findall(r"\bload `/?([a-z][a-z:-]*)`", global_text()):
+        if not name.startswith("oh-my-claudecode:"):
+            assert (ROOT / "config" / "skills" / name).is_dir(), name
+    assert "load `human-prose`" in global_text()

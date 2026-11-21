@@ -1,68 +1,118 @@
 ---
 name: human-prose
-description: Write and review prose that people will read (PR and issue descriptions, tickets, READMEs, design docs, Confluence pages, commit messages, release notes) so it keeps the reader's attention and every claim holds up. Covers the writing rules with their reasons, and a draft, cold-read, verify and fix loop. Use when asked to write or review such text, to make text more readable, or when a reader would lose the thread. Not for text only agents read (SKILL.md, agent prompts, CLAUDE.md).
+description: Write or revise any text a person will read, so it gives that reader what they need, reads as a person wrote it, and states nothing its sources don't. Covers commit messages, PR descriptions, PR reviews, issues, tickets, ADRs, READMEs, design docs, wiki and Confluence pages, release notes, and Slack or other chat messages, including text the user sends as themselves. Use when writing such text from facts, a diff or a conversation, and when editing someone's draft. Not for text only agents read (SKILL.md files, prompts, CLAUDE.md).
 ---
 
-# Prose for human readers
-
-Use this for any text a person reads to understand or decide something. Skip it for text only agents read (SKILL.md, agent prompts, CLAUDE.md), which follows agent-doc-discipline instead.
-
-The premise behind every rule: **readers drop text that reads like noise.** In the AI era they are quick to spot it. Once a reader decides a text is noise, they skim the rest, including the parts that matter.
+# Text a person reads
 
 ## Steps
 
-1. **Name the reader and what they care about.** Write down who reads this, what they already know, and the one thing they need from it (to approve, to try it, to understand why). Done when you can say it in one sentence. Why: a text that doesn't surface what the reader cares about won't get its purpose across, however accurate it is.
+Writing from sources (facts, a diff, an issue, the conversation, earlier text):
 
-2. **Draft by the rules below.** Lead with what the reader cares about. When the reader can't yet picture what the thing can do, show one or two real, verified examples. Done when a first draft exists.
+1. Name the reader and the one thing they need from this text: to approve it, to try it, to understand why, to act. Why: a text that doesn't surface what its reader cares about misses its purpose, however accurate it is.
+2. Read the reference file for the text type, if the table under "Reference files" names one.
+3. Write it in the shape for its type ("Shapes by text type"), following every rule below.
+4. Run the check under "Before you deliver".
+5. If the type is a README, a wiki or design page, or a PR description, run "The checker" too.
+6. Deliver only the final text. Done when the reply holds the text and nothing about how it was made.
 
-3. **Run the mechanical checks.** Fix every hit, or confirm it is fine:
-   ```bash
-   grep -nE ', not |not just|not only|but (not|never)|instead of|rather than|but (aren|isn)'"'"'t|(never|not|wasn'"'"'t|isn'"'"'t) (simply|just|merely|only)' FILE
-   grep -noE '(^|[^/A-Za-z0-9_-])#[0-9]+' FILE
-   grep -noE '\]\((\.|[a-z][^:)]*)\)' FILE
+Revising someone's draft: follow "Revising someone's draft", then steps 4 and 6. Edits get no checker.
+
+## Reference files
+
+| Text | Read |
+|---|---|
+| Text the user will send as themselves (Slack, chat, a comment in their name) | `references/sent-as-the-user.md` |
+| A review of someone's PR | `references/pr-review.md` |
+| An ADR, design doc or wiki page | `references/design-docs.md` |
+| An issue, ticket or PR description | `references/tickets-and-prs.md` |
+
+A commit message, and a chat reply not sent as the user, need no reference file.
+
+## What goes in
+
+- Lead with what the reader needs, and keep it short. Cut every sentence this reader would not miss; don't explain their own system back to them. Why: readers are sensitive to noise, and a buried point leaves them unsure what the text is for.
+- Keep a fact only if a cold reader gains something from it. A local IP address or a path on someone's machine does not pass.
+- Make each piece of evidence say how it supports the point ("the PR added back an auth check the team had removed in 2025 to fix a bug", not "the history turned this into a regression"). Why: evidence the reader can't connect to the point reads as noise.
+- Paste evidence that already exists (benchmark output, an error, a command, a log line) as a block, and don't retell the block in prose.
+- When the reader can't yet picture what something does, show one or two real examples rather than a list of instructions. Use only results already public to the people involved, checked against the published source. Why: a list of instructions doesn't show much.
+- Explain a new idea through something the reader already knows, and say what an unfamiliar term means the first time it appears. Why: readers take in a new idea best through ideas and sentence shapes they've seen many times.
+- Leave out what the reader never saw: an earlier private version, what was cut, plan or spec keys such as D1, R4 or AC-3, local file paths, interview rounds. Why: a reference to something only the author has seen is noise.
+- Keep each idea in one place. Link to where details already live instead of repeating them. Why: repeated content adds upkeep and doesn't help the reader.
+- Call cleanup work a refactor; never write "slop" or words built on it.
+
+## Links
+
+Write every PR, issue, ticket and CI run as a clickable link or full reference, never a bare ID. Why: no one can find a run from its number alone.
+
+- A PR in another repo is `owner/repo#n` or a full URL, never "repo #n". Why: GitHub turns a bare `#n` into a link to the current repo's item with that number.
+- Write a full reference only when the sources give the repo or URL; otherwise keep the ID exactly as the sources wrote it.
+- Check links only when the session's context says auto mode is active, and only with `gh pr view`, `gh issue view` or `gh run view`. In any other mode, or for a link `gh` can't check, leave the link as given and name the unchecked links in your reply to the user, never in the delivered text. Why: other link checks can stop the session for a permission prompt.
+
+## Accuracy
+
+- Add no fact, number, name, cause, reason, plan or claim of testing that the sources don't state. If the sources don't give a reason, don't supply one. Don't link two facts with a cause ("so", "because", "which now") unless the sources link them.
+- Where the sources are vague, stay vague. Don't name what "the problem" was, explain how something works, say why it matters, or fill a table cell or a section unless the sources say it. Leave out a table column or a section you can't fill from the sources, rather than writing placeholders.
+- Keep every hedge at its strength: "might", "should", "seems", "roughly", "presumably", "is meant to", "in general", "often". A hope, plan or expectation stays one; never turn it into a result. Plain wording means plain words, not stronger claims.
+- Why: an overclaim in a confident tone costs more trust than leaving the claim out.
+
+## Revising someone's draft
+
+Edit, don't rewrite. Why: readers already trust the author's own words, and every rewritten sentence is a chance to lose a fact, a name or a qualifier.
+
+1. Read the draft as its reader. Note only the sentences that get in that reader's way: the point is buried, a term is unexplained, a link is a bare ID, a sentence repeats another, wording the reader would have to decode, or something the reader never saw.
+2. Change only those sentences, and only as much as fixing them needs. Keep every other sentence exactly as written, including the author's voice, formatting and harmless quirks.
+3. Keep every fact, name, identifier, link, number, hedge and stated reason. Fix a fact only when the sources show it is wrong.
+4. If nothing gets in the reader's way, return the draft unchanged.
+
+## Wording and shape
+
+These keep the text reading as a person wrote it. Why: readers who sense machine-written text start skimming and miss what matters.
+
+- Use everyday words and plain verbs: is, has, uses, wrote, moved, tried. Avoid unusual phrasing a reader has to stop and decode ("trades tokens for trust" → "spends extra tokens to make sure every comment can be trusted"; "every finding earns its place" → "the skill only keeps a comment if it was tested").
+- Use the shape people use for this kind of text (below), and the headings the project's own template uses, if it has one. Text under about 200 words gets no headings and no bold labels; don't split a short flat document into sections. Never take a heading's wording from these rules.
+- Say what matters to this reader; don't walk through every case or option in turn just to be complete, and don't use every fact you were given.
+- Start with the first real point, not a sentence that previews what follows. Let list items differ in shape as their content does, rather than making them uniformly parallel.
+- Say what a thing is. Add a "not X" contrast only when the reader would otherwise assume X.
+- Write only the sections the sources can fill; skip Impact, Expected behavior, Next steps or Summary when they can't. Each sentence carries something new: no sentence that only bridges or sums up what the reader just read.
+- End on the last real point: no summary line, no closing question, no offer to help or discuss.
+- Write as the author would: contractions are fine, first person where the author did the work, sentence lengths as they come. Don't fake informality or errors.
+
+## Shapes by text type
+
+- Commit message: imperative subject under about 60 characters; blank line; a body that says why, wrapped near 72 columns. A small change may have no body.
+- PR description: what changes and why, then how it was tested or the evidence. Paste benchmark or test output rather than describing it.
+- Issue or ticket: what is wrong or wanted, then reproduction steps or the evidence. Add expected behavior only when it isn't obvious.
+- ADR: the context that forces a decision, the decision, its consequences. Short.
+- README: what the thing is and who it's for in the first lines, one real example of using it, then how to install and run it.
+- Chat message: one to three sentences in one paragraph, no headings or bullets; lead with the point or the ask. From thin sources, say only what they say; if they don't name the problem, neither does the message.
+- Wiki or design page: a short pitch to a cold reader. Open with a few sentences on the current state and the change proposed, then the problems with today, then what the change gains; details after.
+
+## Before you deliver
+
+Check the text privately, in your own reasoning, before you deliver it: for each statement of fact, find the source it rests on, and remove or fix any statement with no source or stated more strongly than its source. Check the text against the shape rules. Deliver only the final text: never the draft, the check, or any note about it. Done when every statement has a source and the reply holds only the text.
+
+## The checker
+
+For a README, a wiki or design page, or a PR description written from sources:
+
+1. Spawn the `oh-my-claudecode:verifier` agent with `model: sonnet` and this prompt, with every source the text draws on pasted verbatim in place of `{src}` (the fact list, or the parts of the diff, issue, conversation and tool output the text states facts from) and your draft in place of `{text}`:
+
    ```
-   The first finds juxtapositions, the second bare `#N` references, and the third relative links (wrong in PR and issue bodies). Grep can't reliably find the rest, so read once for each of these: inline lists of exactly three, three-bullet lists, a juxtaposition split across two sentences, and a short closing line that restates the paragraph as a punchline. Done when every hit is fixed or judged fine.
+   Sources the writer had:
+   <<<
+   {src}
+   >>>
 
-4. **Get a cold read from a specialist.** Launch `oh-my-claudecode:critic` (opus), or the closest reviewer agent if OMC isn't installed. Give it the reader from step 1, the text, the sources the facts come from, and the rules below pasted word for word. Leave out your own reasoning about the draft. Ask for each violation with the rule, the quoted text and a rewrite that itself follows every rule. Done when the report is in. Why: the writer can't see their own gaps, and a reviewer handed the writer's reasoning tends to agree with it.
+   Text the writer produced:
+   <<<
+   {text}
+   >>>
 
-5. **Check each finding before acting on it.** A reviewer can be wrong too. In one case a reviewer called a built-in command missing, suggested a wrong meaning for a term, and flagged a quote as unsourced when it was the user's own. Keep what holds up. Where you reject a finding, say why. Done when every finding is either applied or rejected with a reason.
+   List each statement in the text that the sources do not support (a new fact, cause, reason, name, plan or test claim, or a claim stated more strongly than the sources state it), one per line with a short quote. If there are none, output exactly NONE.
+   ```
 
-6. **Re-read until nothing new turns up.** Send the revised text back to the same reviewer and ask only for problems that remain or that the rewrite introduced. Done when a re-read reports nothing new. Why: rewrites bring in new problems, such as a term that was explained in one file but not in another.
+2. If it lists statements, fix or remove each one that really is unsupported, in one round with no second check. Why: removing every listed statement outright turns a checker's false alarm into a dropped true fact.
+3. If no agent can be spawned, skip the check and say so in your reply to the user, never in the delivered text.
 
-7. **Check how it renders.** For GitHub text, look at what the published page does. A PR body should link to the files on the branch. File links on a private repo can be checked with `gh api repos/<o>/<r>/contents/<path>?ref=<branch> -q .html_url`. Done when every link goes where it should.
-
-## The rules
-
-Each rule comes with the reason the user gave for it.
-
-**Lead with what the reader cares about, and keep it short.** Readers are sensitive to noise, and an explanation that doesn't surface what they care about leaves them unsure what the text is for.
-
-**Show what the thing can do with real examples.** People don't know what AI can do until they see it, and a list of instructions doesn't show much. Use one or two real results. Use only results that are already public to the people involved, and check each fact against the published source. For example, don't cite a review nobody has posted yet.
-
-**Make every piece of evidence say how it supports the claim.** A fact given as evidence, where the reader can't work out how it supports the point, reads as noise. Every step should visibly follow from the one before. For example, "the history turned a disputed finding into a regression" doesn't say what the history was. "The PR added back an auth check the team had removed in 2025 to fix a bug" does.
-
-**Explain new ideas through things the reader already knows.** Readers understand a new idea when it's described with ideas and sentence shapes they've seen thousands of times. Explain each unfamiliar term the first time it appears in each text, not just once across all of them.
-
-**Write in everyday language.** Unusual wording makes readers stop and work out exactly what the words mean, and that loses their attention. Rewrite compressed or clever phrasing as plain cause and effect. Avoid idioms used as arguments, slogan headings, headings without a verb, stacked nouns and rare words. Examples the user flagged:
-- "every finding earns its place" became "the skill only keeps a comment if it was tested"
-- "trades tokens for trust" became "spends extra tokens to make sure every comment can be trusted"
-- "Looks like waste, isn't" became "Steps that look unnecessary but are needed"
-
-**Avoid inline lists of exactly three.** "A, b, and c" is a common AI pattern. It's subtle, but people are good at spotting patterns, so it reads close to noise. Rewrite it as separate plain sentences. Lists of four or more real items are fine.
-
-**Avoid juxtaposition and cheesy stingers.** A juxtaposition sets up one idea only to swap in another. It can sit inside a sentence ("X, not Y") or span two: "She was never simply a voice behind the screen. She was part of the sound of growing up." A stinger is a short, quotable line that ends a paragraph or section by restating the point as a punchline, and it is one of the worst offenders. People are good at spotting patterns, and these are among the first they tag as AI. The more a text reads like AI, the more the reader hunts for further signs of it, and they stop following the content. A reader who has stopped paying attention gets no value from the text. Fix it by stating only the claim that is true, once, and ending the paragraph when its content ends. For example, "She hosted the station's afternoon show for twenty years." Plain negative sentences that carry a fact are fine ("The hook doesn't run on Windows").
-
-**Leave out things the reader never saw.** For example, an earlier private version of the work, or what was cut from it. A reference to something only the author has seen is noise.
-
-**Keep each idea in one place.** Repeating the same content across documents adds upkeep and doesn't help the reader. A design doc that walks through steps makes the reader wonder why they shouldn't just read the steps. So a design doc explains the thinking, and it points to where the steps and the incidents are written down. A one-clause reason repeated for a different audience is fine.
-
-**Claim only what the source says.** Match the strength of the source ("tends to", "may"). A claim the source doesn't make, even a reasonable one, gets weakened or cut. An overclaim under a confident tone costs more trust than leaving it out.
-
-**Write GitHub references so they can't point at the wrong repo.** Write cross-repo PRs as `owner/repo#n` or as full URLs. GitHub turns a bare `#n` in PR bodies and comments into a link to the current repo's PR with that number, if it exists. Rendered repo files never autolink.
-
-## Pitfalls
-
-- A detector for lists of three flags many ordinary two-part sentences. Treat its hits as candidates and judge each one.
-- Splitting "X, not Y" into two sentences keeps the juxtaposition and often creates a stinger. Drop the rejected half instead.
-- Applying one round of fixes can bring the same pattern back elsewhere. After a rewrite, run step 3 again.
-- curl returns 404 for github.com pages of a private repo even with a token. That doesn't mean the link is broken.
+Done when the checker answered NONE or its list has been worked through once.
