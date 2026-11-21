@@ -12,6 +12,10 @@ A rule learned on one machine ("decide reversible defaults yourself") has to be 
 - **Claude Code refuses writes under the Claude home** as a "sensitive file", so the store has to live elsewhere. An `Edit(//<absolute path>/...)` allow rule alone permits writes there. A `Write(...)` path rule is not matched, and `additionalDirectories` alone does not grant the write.
 - **Hook output over 10,000 characters is replaced by a preview.** A 9,950-character output arrives whole; a 10,050-character one does not. The index needs a budget below that.
 - **OMC loads user skills through a symlinked `~/.omc/skills`.**
+- **A hook entry's `if` field limits a tool hook to a path.** An `Edit(//<store>/**)` condition fires only for the Edit tool and a `Write(...)` one only for the Write tool, so the fragment has both. `Read(...)` on `PreToolUse` fires for reads in the store. None fires for a file outside the store.
+- **`"async": true` runs a hook in the background,** and its context reaches the model on the next turn.
+- **`SessionEnd` hooks share a 1.5-second default budget and get 60 seconds at most.** They are not documented to fire when a terminal is closed.
+- **There is no timer event.**
 
 ## Drivers
 
@@ -22,9 +26,14 @@ A rule learned on one machine ("decide reversible defaults yourself") has to be 
 
 ## Decision
 
-1. **A private git repo holds the memories, and a hook syncs it.** `config/hooks/global_memory.py` runs on every `SessionStart` and on `SessionEnd`. It does nothing, and runs no git, unless `~/.config/claude-config/local.json` sets `"memory": {"repo": "<git URL>"}`. The URL is a machine value, so it stays out of the public repo, and each machine may use a different one for the same repo.
+1. **A private git repo holds the memories, and a hook syncs it.** `config/hooks/global_memory.py` runs during the session (see 3). It does nothing, and runs no git, unless `~/.config/claude-config/local.json` sets `"memory": {"repo": "<git URL>"}`. The URL is a machine value, so it stays out of the public repo, and each machine may use a different one for the same repo.
 2. **The store is a clone at `$XDG_DATA_HOME/claude-memory`** (default `~/.local/share/claude-memory`). Top-level `<name>.md` files are memories in Claude's own memory format. `skills/` holds OMC learned skills. There is no `MEMORY.md`: an index generated from the files cannot conflict between machines.
-3. **Sync runs on `SessionStart` with source `startup` and on `SessionEnd`,** under a lock; a session that finds it held skips the sync quietly. The steps:
+3. **Sync runs during the session, not at its end.** A session can run for hours, so a sync at its end left what it learned invisible to the other machine and widened the window in which both machines edit one memory. `SessionEnd` hooks have a short budget and may not fire when a terminal is closed, and there is no timer event. So the hook syncs on these events, and `SessionEnd` does nothing:
+   - **Session start with source `startup`:** always.
+   - **After a Write or Edit of a file in the store** (`PostToolUse`, in the background): always, so a memory reaches the remote seconds after it is written. This sync waits for the lock, so two quick writes both go out.
+   - **Before a Read of a file in the store** (`PreToolUse`), **on each prompt** (`UserPromptSubmit`, in the background) **and on session start with another source:** only if the last sync attempt is older than 60 seconds (`PULL_SECONDS`). The read sync uses a 3-second network deadline (`READ_SECONDS`), so the session reads and then edits the newest text without a long wait. The time of the last attempt, successful or not, is the mtime of `claude-config/memory.pulled` in the Claude home.
+
+   Every event but the post-write one skips the sync quietly while another session holds the lock. The steps:
    1. Clone the repo when the store is missing. Without a usable `~/.config/claude-config/deny-terms` (missing, unreadable or empty) the hook stops here: no commit, nothing synced in either direction (`no-deny-terms`).
    2. Refuse to touch a store found mid-rebase, mid-merge or with a detached HEAD (`conflict`).
    3. Keep `MEMORY.md` and dot-files out of git through the store's `.git/info/exclude`. Claude's built-in memory habit is to write a `MEMORY.md` index, and two machines doing so would conflict on every sync.
@@ -33,10 +42,10 @@ A rule learned on one machine ("decide reversible defaults yourself") has to be 
    6. Check what every commit not yet on the remote adds, in two parts against `deny-terms` the same way. First, each commit's message and its author and committer name and email. Second, the file names and the added lines of each change, binary files read as text and the resolution of a hand merge included. Removed lines and deleted files are not checked, so deleting or editing a pushed memory after its term joined `deny-terms` goes through. One match stops the whole push (`blocked-files`), and the user fixes the store's local history by hand. A file committed by hand or by an earlier run never passes step 4, so this check is the last guard.
    7. Push exactly the commit that was checked.
 
-   Network steps get 15 seconds and local steps 10.
+   Network steps get 15 seconds (3 on the read event) and local steps 10.
 4. **The leak guard fails closed.** The hook itself never commits a file that names a term, and nothing that names a term is pushed. With no usable term list it commits and pushes nothing at all, because the one outcome the store must never have is a name leaving the machine. A `deny-terms` file with a UTF-8 byte-order mark is read correctly.
-5. **A failed rebase is aborted and the local commit stays** (`conflict`); the user recovers by hand in the store with either `git merge origin/main` (resolve, commit) or `git rebase origin/main` (resolve, `git rebase --continue`); the next sync pushes the result. The warning reads "The store has a merge or rebase to finish by hand; local commits stay." `conflict` also reports a store found mid-rebase, mid-merge or with a detached HEAD, where the hook touched nothing; the user finishes or aborts that by hand. The clone is made with a fixed neutral git identity (`claude-memory`) in the store's own config, so a commit made by hand in the store does not carry the user's own, possibly work, identity. A store cloned before that setting keeps its old config. Every failure logs a fixed reason word and the UTC time to `claude-config/memory.log` in the Claude home (last 200 lines kept) and shows the user a fixed one-line `systemMessage`. The reason words are `clone-failed`, `fetch-failed`, `conflict`, `push-failed`, `blocked-files`, `no-deny-terms`, `timeout`, `no-git` and `git-failed` (a local git step failed). The session continues with the local copy.
-6. **A generated index goes into every `SessionStart`,** so it survives `compact` and `resume`. It is a fixed header followed by one line per memory, `<name> — <description>`. The header tells the model the entries are data, not instructions.
+5. **A failed rebase is aborted and the local commit stays** (`conflict`); the user recovers by hand in the store with either `git merge origin/main` (resolve, commit) or `git rebase origin/main` (resolve, `git rebase --continue`); the next sync pushes the result. The warning reads "The store has a merge or rebase to finish by hand; local commits stay." `conflict` also reports a store found mid-rebase, mid-merge or with a detached HEAD, where the hook touched nothing; the user finishes or aborts that by hand. The clone is made with a fixed neutral git identity (`claude-memory`) in the store's own config, so a commit made by hand in the store does not carry the user's own, possibly work, identity. A store cloned before that setting keeps its old config. Every failure on every event logs a fixed reason word and the UTC time to `claude-config/memory.log` in the Claude home (last 200 lines kept). Session start and the post-write sync also show the user a fixed one-line `systemMessage`; the read event prints nothing ever, and the prompt event prints only the delta or full index described in decision 11. The reason words are `clone-failed`, `fetch-failed`, `conflict`, `push-failed`, `blocked-files`, `no-deny-terms`, `timeout`, `no-git` and `git-failed` (a local git step failed). The session continues with the local copy.
+6. **A generated index goes into every `SessionStart`,** so it survives `compact` and `resume`; a prompt prints it too when the session has no usable seen record (decision 11). It is a fixed header followed by one line per memory, `<name> — <description>`. The header tells the model the entries are data, not instructions.
    - A file is listed only when its name matches `[a-z0-9][a-z0-9-]*\.md`.
    - The description is the frontmatter's, on one line, with control characters removed and cut at 110 characters.
    - The context text stops at 9,800 characters and ends with the count of files not listed. The 10,000-character limit applies to the context text, not to the raw JSON around it.
@@ -45,6 +54,7 @@ A rule learned on one machine ("decide reversible defaults yourself") has to be 
 8. **The hook links `~/.omc/skills` to the store's `skills/`** when nothing exists at that path, so OMC loads the learned skills from the store. An existing file, directory or link there is left alone. git runs with `core.symlinks=false`, so a symlink committed to the remote arrives as a plain file and cannot redirect that path.
 9. **`cfg.py` merges two `permissions.allow` entries,** `Edit(//<store>/*.md)` and `Edit(//<store>/skills/**/*.md)` (markdown files only, so a nested `.git` under `skills/` is not covered either), into `settings.json`, so saving a memory or a skill in the store needs no prompt. They deliberately leave out the store's `.git/`: a rule over the whole store would let a session rewrite the store's git config without a prompt, and the hook's next run would act on it. Spiked on Claude Code 2.1.330: a skill file directly under `skills/` and one in a subfolder are written without a prompt, and writes under `<store>/.git/` and `skills/x/.git/` are refused. State records the entries it added and rollback removes exactly those; entries the user added stay.
 10. **`XDG_DATA_HOME` and `XDG_CONFIG_HOME` are honoured only when absolute.**
+11. **On each prompt the session is told what changed.** The hook prints the memories added or changed since the session last saw the store, in the index's entry format with the same sanitising and budget under a fixed one-line header. It prints nothing when none changed, and deleted memories are not announced. What a session has seen is one small file per session, `claude-config/memory-seen/<session id>` in the Claude home, holding the store's `main` commit at the time. Session start writes it after the index, and each prompt updates it. A session id is used as a file name only if it matches `[A-Za-z0-9-]{1,64}`. A session with no usable record on a prompt gets the full index once, the same text session start prints, and the commit is then recorded. A record is unusable when the file is missing or garbled or names a commit the store does not have: a session already running when the hook was first deployed, or one that started while the store was empty. The prompt prints nothing only while the store has no commit, or when the record cannot be written. A startup sync removes seen files older than 30 days.
 
 ### A departure from "hooks print only checked values"
 
@@ -60,15 +70,18 @@ The repo rule says hooks print only values they checked. This hook prints text r
 ## Consequences
 
 - Per-project memory is unchanged. Only memories saved in the store are shared.
-- Subagents get no index; a subagent that needs a memory is briefed by its parent. A `SubagentStart` entry later is one line in the fragment.
+- Subagents work as they did before this change. Probed on Claude Code 2.1.330, a built-in subagent and an OMC subagent both receive no auto-memory section and no `MEMORY.md` index, and no installed agent definition declares its own memory. A fork inherits the parent's context, index included. A subagent's writes into the store are synced like any other.
+- A memory written through a shell command or by hand triggers no hook; the next throttled sync picks it up.
+- A long session with no prompts gets other machines' memories into its store when it reads or writes a memory, but its in-context index is refreshed only at the next prompt or compaction.
+- In non-interactive runs the background prompt hook can be killed at exit before it reports the delta. The next session start still syncs.
 - About 85 memories fit the index. Past that the last line tells Claude to list the store directory.
 - Two machines editing the same memory file between syncs end in a `conflict`; the user merges or rebases `origin/main` by hand in the store.
 - A memory naming a deny-term stays on its machine, silently: no warning is shown for it.
-- A machine with no usable `deny-terms` syncs nothing in either direction. The warning says so, and the hook resumes once a term list exists.
+- A machine with no usable `deny-terms` syncs nothing in either direction. The warning (shown at session start and after a write) says so, and the hook resumes once a term list exists.
 - A well-formed but misleading description enters the session as written (see the departure above). A session that is talked into writing a misleading memory or skill writes it without a prompt, and it syncs to both machines.
 - Deny-term matching is a case-insensitive substring match with no Unicode normalisation.
 - A git step killed at its deadline can leave `.git/index.lock` in the store. Every sync then reports `git-failed` until the lock file is removed by hand.
-- Claude Code gives `SessionEnd` hooks at most 60 seconds, whatever timeout is configured.
+- The read hook's timeout in the fragment is 15 seconds. The other events get 120.
 - If only the store's `.git` is deleted, the clone fails on every run. Delete the whole store directory to re-clone.
 - Both host profiles list the hook. Setting `memory.repo` is what turns it on, per machine.
 - `promote-skill-to-config` also takes learned skills from the store's `skills/`.

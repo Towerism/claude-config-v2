@@ -17,7 +17,7 @@ One entry per term: definition, boundaries, one resolved ambiguity. Write here t
 - Boundary: the repo's own CLAUDE.md overrides it; a top-level `defaultTracker` in `local.json` is ignored.
 
 ## Global memory
-- Definition: the memories and learned skills that `global_memory.py` syncs between machines through a private git repo named by `memory.repo` in `local.json`, kept in the store, a clone at `$XDG_DATA_HOME/claude-memory` where top-level `<name>.md` files are memories and `skills/` holds learned skills (ADR-0015).
+- Definition: the memories and learned skills that `global_memory.py` syncs between machines through a private git repo named by `memory.repo` in `local.json`, kept in the store, a clone at `$XDG_DATA_HOME/claude-memory` where top-level `<name>.md` files are memories and `skills/` holds learned skills (ADR-0015). It syncs during the session: at session start, after each write or edit in the store, and, at most once a minute, before a read in the store and on a prompt; nothing runs at session end.
 - Boundary: only a memory that holds in any repo on any machine belongs there; anything naming a project, client or employer stays in project memory, which this never syncs. The hook is off until `memory.repo` is set. The hook never commits a file whose name or text holds a line of `deny-terms`, and nothing that names a term is pushed; without a usable `deny-terms` it commits and pushes nothing.
 - Avoid: "project memory" for it (that is Claude's per-repository memory, left unchanged).
 - Resolved ambiguity: the store lives under `$XDG_DATA_HOME`, outside the Claude home, because Claude Code refuses writes there; the public repo carries the mechanism and never a memory.

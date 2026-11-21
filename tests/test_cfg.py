@@ -68,8 +68,8 @@ def test_deploy_installs_everything_the_host_selects(home):
     assert settings["enabledPlugins"] == {"oh-my-claudecode@omc": True}
     commands = [h["command"] for g in settings["hooks"]["SubagentStart"] for h in g["hooks"]]
     assert commands == [f"python3 -I {home}/hooks/host_default.py"]
-    assert "PreToolUse" not in settings["hooks"]
-    state = json.loads((home / "claude-config" / "state.json").read_text())
+    assert "bash_guard.py" not in json.dumps(settings)
+    state =json.loads((home / "claude-config" / "state.json").read_text())
     assert state["host"] == "work" and state["defaultTracker"] == "jira"
     assert "{claude_home}" not in (home / "settings.json").read_text()
 
@@ -155,11 +155,11 @@ def test_deploy_removes_a_hook_the_profile_no_longer_lists(home, tmp_path, monke
     assert not (home / "hooks" / "bash_guard.py").exists()
     settings = json.loads((home / "settings.json").read_text())
     assert "bash_guard.py" not in json.dumps(settings)
-    assert "PreToolUse" not in settings["hooks"]
-    commands = [h["command"] for groups in settings["hooks"].values() for g in groups for h in g["hooks"]]
+    assert all(g.get("matcher") != "Bash" for g in settings["hooks"]["PreToolUse"])
+    commands =[h["command"] for groups in settings["hooks"].values() for g in groups for h in g["hooks"]]
     assert sorted(c.split("/")[-1] for c in commands) == [
-        "auto_sync.py", "global_memory.py", "global_memory.py", "host_default.py", "host_default.py"
-    ]
+        "auto_sync.py", *["global_memory.py"] * 5, "host_default.py", "host_default.py"
+    ]  # global_memory: session start, two post-tool-use (Edit, Write), pre-tool-use, prompt
 
 
 def test_locally_edited_file_is_a_conflict(home, capsys):
@@ -856,6 +856,45 @@ def test_a_non_list_allow_is_reported_by_deploy_and_rollback(home, tmp_path, mon
     (home / "settings.json").write_text('{"permissions": {"allow": "Bash(ls)"}}\n')
     assert run(home, "rollback") == 2
     assert "'permissions.allow' must be a list" in capsys.readouterr().err
+
+
+def memory_hooks(settings):
+    """Each deployed global_memory hook object, by event and matcher."""
+    return {
+        (event, group.get("matcher")): [h for h in group["hooks"] if h["command"].endswith("/global_memory.py")]
+        for event, groups in settings["hooks"].items()
+        for group in groups
+        if any(h["command"].endswith("/global_memory.py") for h in group["hooks"])
+    }
+
+
+def test_memory_hook_conditions_get_the_store_path_and_roll_back_cleanly(home, tmp_path, monkeypatch):
+    store = f"/{tmp_path / 'xdg'}/claude-memory"  # absolute path rules start with a double slash
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    mine = {"type": "command", "command": "echo mine"}
+    home.mkdir()
+    (home / "settings.json").write_text(json.dumps({"hooks": {
+        event: [{"matcher": "Write|Edit", "hooks": [mine]}] for event in ("PostToolUse", "PreToolUse", "UserPromptSubmit")
+    }}))
+    run(home, "deploy", "--host", "personal", "--yes")
+    ours = memory_hooks(json.loads((home / "settings.json").read_text()))
+    assert {key: [h.get("if") for h in hooks] for key, hooks in ours.items()} == {
+        ("SessionStart", None): [None],
+        ("PostToolUse", "Write|Edit"): [f"Edit({store}/**)", f"Write({store}/**)"],
+        ("PreToolUse", "Read"): [f"Read({store}/**)"],
+        ("UserPromptSubmit", None): [None],
+    }
+    before = (home / "settings.json").read_text()
+    run(home, "deploy", "--yes")  # nothing duplicates
+    assert (home / "settings.json").read_text() == before
+    settings = json.loads(before)
+    settings["theme"] = "dark"  # changed after the deploy, so rollback strips our part
+    (home / "settings.json").write_text(json.dumps(settings))
+    run(home, "rollback")
+    after = json.loads((home / "settings.json").read_text())
+    assert memory_hooks(after) == {}
+    for event in ("PostToolUse", "PreToolUse", "UserPromptSubmit"):
+        assert after["hooks"][event] == [{"matcher": "Write|Edit", "hooks": [mine]}]
 
 
 def test_rollback_drops_permissions_left_empty(home, tmp_path, monkeypatch):

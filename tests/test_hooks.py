@@ -409,11 +409,20 @@ def test_the_hooks_are_registered_and_listed():
     assert entries("SessionStart", "auto_sync.py") == [
         ("startup", hook("auto_sync.py", 120, statusMessage="Syncing claude-config…"))
     ]
-    # Every session source and its end, so the index survives compact and resume; long enough for clone, fetch and push.
+    # Every session source, so the index survives compact and resume; no session end, each write syncs itself.
     assert entries("SessionStart", "global_memory.py") == [(None, hook("global_memory.py", 120))]
-    assert entries("SessionEnd", "global_memory.py") == [(None, hook("global_memory.py", 120))]
-    assert sorted(FRAGMENT["hooks"]) == ["SessionEnd", "SessionStart", "SubagentStart"]
-    assert sum(len(groups) for groups in FRAGMENT["hooks"].values()) == 5
+    assert entries("SessionEnd", "global_memory.py") == []
+    # Writes sync in the background (Edit and Write each need their own condition); a read syncs first, briefly.
+    assert entries("PostToolUse", "global_memory.py") == [
+        ("Write|Edit", hook("global_memory.py", 120, **{"if": "Edit({memory_dir}/**)", "async": True})),
+        ("Write|Edit", hook("global_memory.py", 120, **{"if": "Write({memory_dir}/**)", "async": True})),
+    ]
+    assert entries("PreToolUse", "global_memory.py") == [
+        ("Read", hook("global_memory.py", 15, **{"if": "Read({memory_dir}/**)"}))
+    ]
+    assert entries("UserPromptSubmit", "global_memory.py") == [(None, hook("global_memory.py", 120, **{"async": True}))]
+    assert sorted(FRAGMENT["hooks"]) == ["PostToolUse", "PreToolUse", "SessionStart", "SubagentStart", "UserPromptSubmit"]
+    assert sum(len(groups) for groups in FRAGMENT["hooks"].values()) == 7
     for host in ("personal", "work"):
         assert json.loads((ROOT / "hosts" / f"{host}.json").read_text())["hooks"] == HOOK_NAMES
 
@@ -429,7 +438,11 @@ def test_every_hook_entry_outlasts_the_hooks_own_deadline():
                     assert hook["timeout"] >= sync.FETCH_SECONDS + 3 * sync.LOCAL_SECONDS + 60
                 elif hook["command"].endswith("/global_memory.py"):
                     memory = hook_module("global_memory.py")
-                    assert hook["timeout"] >= 3 * memory.FETCH_SECONDS + memory.LOCAL_SECONDS  # clone, fetch, push, and a local step
+                    if hook.get("if", "").startswith("Read("):
+                        # A blocking read: the short network deadline plus a local step.
+                        assert hook["timeout"] >= memory.READ_SECONDS + memory.LOCAL_SECONDS
+                    else:
+                        assert hook["timeout"] >= 3 * memory.FETCH_SECONDS + memory.LOCAL_SECONDS  # clone, fetch, push, a local step
                 else:
                     assert hook["timeout"] == 10, hook["command"]
     assert hook_module("host_default.py").DEADLINE_SECONDS == 5

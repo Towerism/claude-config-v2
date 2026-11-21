@@ -196,6 +196,11 @@ def desired_files(host: dict) -> dict[str, bytes]:
     return files
 
 
+def memory_rule(rule: str) -> str:
+    """The permission rule with the memory store's path put in; a leading double slash is Claude Code's form for an absolute path."""
+    return rule.replace("{memory_dir}", "/" + str(data_dir() / "claude-memory"))
+
+
 def merge_settings(
     old: dict, host: dict, home: Path, previous: list[str], previous_env: list[str], previous_allow: list[str]
 ) -> tuple[dict, list[str], list[str], list[str]]:
@@ -215,7 +220,7 @@ def merge_settings(
             for entry in group["hooks"]:
                 if Path(entry["command"].split()[-1]).name in wanted:
                     command = entry["command"].replace("{claude_home}", quoted)
-                    entries.append({**entry, "command": command})
+                    entries.append({**entry, "command": command, **({"if": memory_rule(entry["if"])} if "if" in entry else {})})
                     if command not in commands:
                         commands.append(command)
             if entries:
@@ -246,10 +251,7 @@ def merge_settings(
         env.update(wanted_env)
         if not env:
             del new["env"]
-    wanted_allow = [  # a leading double slash is Claude Code's form for an absolute path in a rule
-        rule.replace("{memory_dir}", "/" + str(data_dir() / "claude-memory"))
-        for rule in fragment.get("permissions", {}).get("allow", [])
-    ]
+    wanted_allow = [memory_rule(rule) for rule in fragment.get("permissions", {}).get("allow", [])]
     added: list[str] = []
     if wanted_allow or previous_allow:
         perms = new.setdefault("permissions", {})

@@ -7,21 +7,29 @@ Nothing touches the network or the real home.
 
 import fcntl
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
+import time
 import types
+import unicodedata
 
 import pytest
 
 from tests.conftest import ROOT, load
 from tests.test_auto_sync import DRIVER, GIT_ENV, git, no_git, warned
 
-END = {"hook_event_name": "SessionEnd"}
+# A write into the store: the event that always syncs, so the default for the sync tests.
+SYNC = {"hook_event_name": "PostToolUse", "session_id": "s1", "tool_name": "Write", "tool_input": {"file_path": "/store/x.md"}}
+READ = {"hook_event_name": "PreToolUse", "session_id": "s1", "tool_name": "Read", "tool_input": {"file_path": "/store/x.md"}}
+PROMPT = {"hook_event_name": "UserPromptSubmit", "session_id": "s1", "prompt": "hi"}
+SESSION_END = {"hook_event_name": "SessionEnd", "session_id": "s1"}
 STARTUP = {"hook_event_name": "SessionStart", "source": "startup"}
 TERM = "AcmeCorp"
-BUDGET = load(ROOT / "config" / "hooks" / "global_memory.py", "global_memory_budget").BUDGET
+HOOK = load(ROOT / "config" / "hooks" / "global_memory.py", "global_memory_constants")
+BUDGET = HOOK.BUDGET
 
 
 @pytest.fixture
@@ -53,7 +61,7 @@ def machine(tmp_path, origin, name="a", terms=TERM + "\n"):
     return m
 
 
-def hook(m, payload=END, patch=None, stdin=None):
+def hook(m, payload=SYNC, patch=None, stdin=None):
     """(exit code, stdout, stderr) of the deployed hook; `patch` runs first, in its module."""
     script = str(m.claude / "hooks" / "global_memory.py")
     argv = [sys.executable, "-I", script] if patch is None else [sys.executable, "-I", "-B", "-c", DRIVER, script, patch]
@@ -62,7 +70,7 @@ def hook(m, payload=END, patch=None, stdin=None):
     return done.returncode, done.stdout, done.stderr
 
 
-def quiet(m, payload=END, patch=None):
+def quiet(m, payload=SYNC, patch=None):
     """Runs the hook, asserts the contract, and returns its parsed output ({} when it printed nothing)."""
     code, out, err = hook(m, payload, patch)
     assert (code, err) == (0, b"")
@@ -80,6 +88,15 @@ def remote_files(origin):
         capture_output=True, text=True, env=GIT_ENV, check=False,
     )
     return set(done.stdout.splitlines())
+
+
+def stamp(m, age):
+    """Sets the last sync attempt `age` seconds in the past."""
+    path = m.claude / "claude-config" / "memory.pulled"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch()
+    then = time.time() - age
+    os.utime(path, (then, then))
 
 
 def started(tmp_path, origin, name="a", **kwargs):
@@ -369,7 +386,7 @@ def test_a_failed_fetch_or_push_keeps_the_new_memory(tmp_path, origin):
 
 
 @pytest.mark.parametrize("local", [None, {}, {"memory": {}}, {"memory": {"repo": ""}}, {"memory": "x"}, {"memory": {"repo": 1}}])
-@pytest.mark.parametrize("payload", [STARTUP, END])
+@pytest.mark.parametrize("payload", [STARTUP, SYNC, READ, PROMPT])
 def test_without_a_memory_repo_it_runs_no_git_and_prints_nothing(tmp_path, origin, local, payload):
     m = machine(tmp_path, None)
     if local is not None:
@@ -403,7 +420,7 @@ def test_an_unreachable_remote_warns_and_logs(tmp_path, origin):
 ])
 def test_no_git_or_a_step_past_its_deadline_warns(tmp_path, origin, patch, reason):
     m = machine(tmp_path, origin)
-    code, out, err = hook(m, END, patch)
+    code, out, err = hook(m, SYNC, patch)
     assert (code, err) == (0, b"")
     warned(out, reason)
 
@@ -413,7 +430,8 @@ def test_a_held_lock_makes_it_skip_the_sync_quietly(tmp_path, origin):
     remember(m, "clean.md")
     with open(m.claude / "claude-config" / "memory.lock", "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        assert hook(m, END, patch=no_git(m)) == (0, b"", b"")
+        stamp(m, HOOK.PULL_SECONDS + 5)
+        assert hook(m, READ, patch=no_git(m)) == (0, b"", b"")
         out = quiet(m, STARTUP, patch=no_git(m))
     assert list(out) == ["hookSpecificOutput"]
     assert "clean — A rule." in out["hookSpecificOutput"]["additionalContext"].splitlines()
@@ -488,11 +506,15 @@ def test_every_session_start_prints_the_index_and_only_startup_syncs(tmp_path, o
     assert m.mark.exists() == (source == "startup")
 
 
-def test_session_end_syncs_and_prints_no_index(tmp_path, origin):
+def test_session_end_does_nothing(tmp_path, origin):
     m = started(tmp_path, origin)
     remember(m, "kept.md")
-    assert quiet(m, END) == {}
-    assert remote_files(origin) == {"kept.md"}
+    stamp(m, HOOK.PULL_SECONDS + 5)
+    before = os.stat(m.claude / "claude-config" / "memory.pulled").st_mtime
+    assert hook(m, SESSION_END, patch=no_git(m)) == (0, b"", b"")
+    assert not m.mark.exists()
+    assert os.stat(m.claude / "claude-config" / "memory.pulled").st_mtime == before
+    assert remote_files(origin) == set()
 
 
 # --- the skills link ---------------------------------------------------------------------
@@ -564,3 +586,257 @@ def test_a_relative_xdg_config_home_is_ignored(tmp_path, origin):
     m.env["XDG_CONFIG_HOME"] = "no-such-relative-dir"
     quiet(m, STARTUP)
     assert (m.store / ".git").is_dir()
+
+
+# --- sync during the session -------------------------------------------------------------
+
+
+def last_log(m):
+    return (m.claude / "claude-config" / "memory.log").read_text().splitlines()[-1]
+
+
+def test_a_write_syncs_at_once_and_prints_nothing(tmp_path, origin):
+    m = started(tmp_path, origin)  # the attempt stamp is fresh
+    remember(m, "new.md")
+    assert hook(m, SYNC) == (0, b"", b"")
+    assert remote_files(origin) == {"new.md"}
+
+
+def test_a_write_waits_for_a_held_lock_and_a_prompt_skips(tmp_path, origin):
+    m = started(tmp_path, origin)
+    remember(m, "new.md")
+    with open(m.claude / "claude-config" / "memory.lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        stamp(m, HOOK.PULL_SECONDS + 5)
+        assert hook(m, PROMPT) == (0, b"", b"")
+        assert remote_files(origin) == set()
+        proc = subprocess.Popen(
+            [sys.executable, "-I", str(m.claude / "hooks" / "global_memory.py")],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=m.env,
+        )
+        proc.stdin.write(json.dumps(SYNC).encode())
+        proc.stdin.close()
+        time.sleep(1)
+        assert proc.poll() is None  # still waiting for the lock
+    out, err = proc.stdout.read(), proc.stderr.read()
+    proc.stdout.close()
+    proc.stderr.close()
+    assert (proc.wait(timeout=60), out, err) == (0, b"", b"")
+    assert remote_files(origin) == {"new.md"}
+
+
+@pytest.mark.parametrize("world", ["unreachable", "no-git", "deadline", "held-lock", "no-deny-terms", "no-repo"])
+def test_a_read_prints_nothing_in_any_failure_world(tmp_path, origin, world):
+    remote = {"unreachable": tmp_path / "gone.git", "no-repo": None}.get(world, origin)
+    m = machine(tmp_path, remote, terms=None if world == "no-deny-terms" else TERM + "\n")
+    patch = {"no-git": "hook.SAFE_PATH = '/nonexistent'\n", "deadline": "hook.READ_SECONDS = 0\n"}.get(world)
+    (m.claude / "claude-config").mkdir()
+    with open(m.claude / "claude-config" / "memory.lock", "a") as lock:
+        if world == "held-lock":
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert hook(m, READ, patch) == (0, b"", b"")
+    reason = {"unreachable": "clone-failed", "no-git": "no-git", "deadline": "timeout", "no-deny-terms": "no-deny-terms"}
+    if world in reason:
+        assert last_log(m).endswith(" " + reason[world])
+
+
+HANG = (
+    "real = hook.subprocess.Popen\n"
+    "def popen(argv, **kwargs):\n"
+    "    return real(['/bin/sleep', '30'] if 'fetch' in argv else argv, **kwargs)\n"
+    "hook.subprocess.Popen = popen\n"
+    "hook.READ_SECONDS = 1\n"
+    "hook.FETCH_SECONDS = 4\n"
+)
+
+
+@pytest.mark.parametrize("payload,short", [(READ, True), (STARTUP, False)])
+def test_a_hanging_fetch_is_cut_at_the_events_network_deadline(tmp_path, origin, payload, short):
+    m = started(tmp_path, origin)
+    stamp(m, HOOK.PULL_SECONDS + 5)
+    begin = time.monotonic()
+    code, _, err = hook(m, payload, HANG)
+    assert (code, err) == (0, b"")
+    assert (time.monotonic() - begin < 4) == short  # the read path stops at 1 s, session start waits 4 s
+    assert last_log(m).endswith(" timeout")
+
+
+@pytest.mark.parametrize("payload", [READ, PROMPT, {"hook_event_name": "SessionStart", "source": "resume"}])
+@pytest.mark.parametrize("age,syncs", [(-5, False), (5, True)])
+def test_throttled_events_sync_only_when_the_last_attempt_is_old_enough(tmp_path, origin, payload, age, syncs):
+    m = started(tmp_path, origin)
+    remember(m, "new.md")
+    stamp(m, HOOK.PULL_SECONDS + age)
+    code, _, err = hook(m, payload)
+    assert (code, err) == (0, b"")
+    assert (remote_files(origin) == {"new.md"}) == syncs
+
+
+def test_startup_syncs_even_with_a_fresh_stamp(tmp_path, origin):
+    m = started(tmp_path, origin)
+    remember(m, "new.md")
+    stamp(m, 0)
+    quiet(m, STARTUP)
+    assert remote_files(origin) == {"new.md"}
+
+
+def test_a_failed_attempt_counts_as_an_attempt(tmp_path, origin):
+    m = started(tmp_path, origin)
+    git(m.store, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+    stamp(m, HOOK.PULL_SECONDS + 5)
+    assert hook(m, READ) == (0, b"", b"")
+    lines = (m.claude / "claude-config" / "memory.log").read_text().splitlines()
+    assert lines[-1].endswith(" fetch-failed")
+    assert hook(m, READ) == (0, b"", b"")
+    assert (m.claude / "claude-config" / "memory.log").read_text().splitlines() == lines
+
+
+# --- what a session has seen -------------------------------------------------------------
+
+
+def delta(m, payload=PROMPT):
+    """The delta a prompt prints after a sync (the stamp is made stale first); None when it prints nothing."""
+    stamp(m, HOOK.PULL_SECONDS + 5)
+    code, out, err = hook(m, payload)
+    assert (code, err) == (0, b"")
+    if not out:
+        return None
+    data = json.loads(out)
+    assert list(data) == ["hookSpecificOutput"] and data["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+    return data["hookSpecificOutput"]["additionalContext"]
+
+
+def seen_by_b(tmp_path, origin):
+    """Machine A, and machine B whose session s1 has seen the store."""
+    a = started(tmp_path, origin, "a")
+    remember(a, "old.md", description="Old.")
+    remember(a, "kept.md", description="Kept.")
+    quiet(a)
+    b = started(tmp_path, origin, "b")
+    quiet(b, {**STARTUP, "session_id": "s1"})
+    return a, b
+
+
+def test_a_prompt_shows_what_other_machines_added_or_changed_once(tmp_path, origin):
+    a, b = seen_by_b(tmp_path, origin)
+    remember(a, "old.md", description="Old, edited.")
+    remember(a, "new.md", description="New.")
+    (a.store / "kept.md").unlink()
+    quiet(a)
+    for payload in (READ, SYNC):  # only a prompt prints the delta
+        stamp(b, HOOK.PULL_SECONDS + 5)
+        assert hook(b, payload) == (0, b"", b"")
+    text = delta(b)
+    assert text != context(b, {"hook_event_name": "SessionStart", "source": "resume"})  # a delta, not the index
+    assert text.splitlines()[1:] == ["new — New.", "old — Old, edited."]
+    assert delta(b) is None
+
+
+def test_the_delta_is_sanitised_and_capped_like_the_index(tmp_path, origin):
+    a, b = seen_by_b(tmp_path, origin)
+    remember(a, "Upper.md")
+    remember(a, "under_score.md")
+    remember(a, "escapes.md", description=f"red {chr(27)}[31mtext{chr(0x2028)}next{chr(0x202e)}end")
+    for i in range(200):
+        remember(a, f"m{i:03d}.md", description="d" * 100)
+    quiet(a)
+    text = delta(b)
+    assert len(text) <= BUDGET
+    assert not [c for c in text.replace("\n", "") if unicodedata.category(c)[0] == "C" or c in (chr(0x2028), chr(0x2029))]
+    lines = text.splitlines()
+    entries = lines[1:-1]
+    assert all(re.fullmatch(r"[a-z0-9][a-z0-9-]*( — .{1,110})?", line) for line in entries), entries
+    assert "escapes — red [31mtextnextend" in entries
+    assert "Upper" not in text and "under_score" not in text
+    assert lines[-1].startswith(f"{203 - len(entries)} ")
+
+
+@pytest.mark.parametrize("state", ["missing", "garbled", "unknown", "no-dir", "dir-is-file"])
+def test_without_a_usable_seen_record_a_prompt_shows_the_full_index_once(tmp_path, origin, state):
+    a = started(tmp_path, origin, "a")
+    b = started(tmp_path, origin, "b")
+    seen = b.claude / "claude-config" / "memory-seen"
+    if state == "dir-is-file":
+        seen.write_text("x")
+    elif state != "no-dir":
+        seen.mkdir()
+        if state != "missing":
+            # A ref name resolves in git, but is no commit id: not a usable record.
+            (seen / "s1").write_text("main\n" if state == "garbled" else "0" * 40 + "\n")
+    remember(a, "new.md", description="New.")
+    quiet(a)
+    shown = delta(b)
+    if state == "dir-is-file":  # no record can be written: printing the index on every prompt would be noise
+        assert shown is None and delta(b) is None
+        return
+    assert shown == context(b, {"hook_event_name": "SessionStart", "source": "resume"})  # the stamp is fresh: no sync
+    assert "new — New." in shown.splitlines()
+    assert delta(b) is None
+    remember(a, "newer.md", description="Newer.")
+    quiet(a)
+    assert delta(b).splitlines()[1:] == ["newer — Newer."]
+
+
+def test_a_session_started_on_an_empty_store_hears_of_the_first_memory(tmp_path, origin):
+    a = started(tmp_path, origin, "a")
+    quiet(a, {**STARTUP, "session_id": "s1"})  # main has no commit yet: nothing is recorded
+    assert delta(a) is None
+    assert not (a.claude / "claude-config" / "memory-seen" / "s1").exists()
+    b = started(tmp_path, origin, "b")
+    remember(b, "new.md", description="New.")
+    quiet(b)
+    assert "new — New." in delta(a).splitlines()
+    assert delta(a) is None
+
+
+@pytest.mark.parametrize("sid", ["../x", "a/b", "", "x" * 65, 5, None, ["s"]])
+def test_an_unsafe_session_id_is_never_a_file_name(tmp_path, origin, sid):
+    m = started(tmp_path, origin)
+    remember(m, "kept.md")
+    quiet(m)  # main has a commit, so there is something to record
+    quiet(m, {**STARTUP, "session_id": sid})
+    stamp(m, HOOK.PULL_SECONDS + 5)
+    assert hook(m, {**PROMPT, "session_id": sid}) == (0, b"", b"")
+    seen = m.claude / "claude-config" / "memory-seen"
+    assert not (m.claude / "claude-config" / "x").exists()
+    assert not seen.exists() or list(seen.iterdir()) == []
+
+
+def test_seen_files_past_their_age_are_removed_only_at_startup(tmp_path, origin):
+    m = started(tmp_path, origin)
+    seen = m.claude / "claude-config" / "memory-seen"
+    seen.mkdir()
+    day = 24 * 3600
+    for name, age in (("old", HOOK.SEEN_DAYS * day + day), ("young", HOOK.SEEN_DAYS * day - day)):
+        (seen / name).write_text("0" * 40)
+        then = time.time() - age
+        os.utime(seen / name, (then, then))
+    for payload in (PROMPT, READ, SYNC):
+        stamp(m, HOOK.PULL_SECONDS + 5)
+        hook(m, payload)
+    assert (seen / "old").exists()
+    quiet(m, STARTUP)
+    assert not (seen / "old").exists() and (seen / "young").exists()
+
+
+@pytest.mark.parametrize("payload", [READ, PROMPT, {"hook_event_name": "SessionStart", "source": "resume"}])
+def test_the_leak_guard_holds_on_every_syncing_event(tmp_path, origin, payload):
+    m = started(tmp_path, origin)
+    remember(m, "clean.md")
+    remember(m, "denied.md", body="About acmecorp.\n")
+    stamp(m, HOOK.PULL_SECONDS + 5)
+    code, _, err = hook(m, payload)
+    assert (code, err) == (0, b"")
+    assert remote_files(origin) == {"clean.md"}
+    assert git(m.store, "ls-files", "denied.md") == ""
+
+
+@pytest.mark.parametrize("payload", [SYNC, READ, PROMPT, {"hook_event_name": "SessionStart", "source": "resume"}])
+def test_no_event_commits_without_deny_terms(tmp_path, origin, payload):
+    m = started(tmp_path, origin, terms=None)
+    remember(m, "clean.md")
+    stamp(m, HOOK.PULL_SECONDS + 5)
+    code, _, err = hook(m, payload)
+    assert (code, err) == (0, b"")
+    assert remote_files(origin) == set()
+    assert git(m.store, "status", "--porcelain") == "?? clean.md"

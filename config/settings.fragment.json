@@ -21,9 +21,43 @@
         ]
       }
     ],
-    "SessionEnd": [
+    "PostToolUse": [
       {
-        "hooks": [{ "type": "command", "command": "python3 -I {claude_home}/hooks/global_memory.py", "timeout": 120 }]
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I {claude_home}/hooks/global_memory.py",
+            "if": "Edit({memory_dir}/**)",
+            "async": true,
+            "timeout": 120
+          },
+          {
+            "type": "command",
+            "command": "python3 -I {claude_home}/hooks/global_memory.py",
+            "if": "Write({memory_dir}/**)",
+            "async": true,
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I {claude_home}/hooks/global_memory.py",
+            "if": "Read({memory_dir}/**)",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [{ "type": "command", "command": "python3 -I {claude_home}/hooks/global_memory.py", "async": true, "timeout": 120 }]
       }
     ],
     "SubagentStart": [
