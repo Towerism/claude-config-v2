@@ -16,6 +16,11 @@ One entry per term: definition, boundaries, one resolved ambiguity. Write here t
 - Definition: the issue tracker `host_default.py` names at session start for the current repo, with its source: a `jira.project` key in the repo's git history, then its `origin` remote, then the host profile's `defaultTracker` (ADR-0006).
 - Boundary: the repo's own CLAUDE.md overrides it; a top-level `defaultTracker` in `local.json` is ignored.
 
+## Edit pass
+- Definition: the one call a session makes to the `human-prose-editor` agent with a batch of texts people read, the texts leaving the session at the same step (committed, posted, sent, or handed to the user to post), just before they leave (ADR-0016). The agent returns line-range replacements, and the session applies each range only if it keeps every number, name, identifier, link, code span and hedge word.
+- Boundary: the writer owns what the text says and checks it against its sources; the editor owns only wording, shape and register and never sees the sources. The session that sends the text runs the pass, a subagent included; nobody edits text after it left.
+- Avoid: "review" or "check" for it (it changes wording, it does not approve anything).
+
 ## Global memory
 - Definition: the memories and learned skills that `global_memory.py` syncs between machines through a private git repo named by `memory.repo` in `local.json`, kept in the store, a clone at `$XDG_DATA_HOME/claude-memory` where top-level `<name>.md` files are memories and `skills/` holds learned skills (ADR-0015). It syncs during the session: at session start, before and after each read, write or edit of a file in the store, at session end as a backstop and, at most once a minute, on a prompt.
 - Boundary: only a memory that holds in any repo on any machine belongs there; anything naming a project, client or employer stays in project memory, which this never syncs. The hook is off until `memory.repo` is set. The hook never commits a file whose name or text holds a line of `deny-terms`, and nothing that names a term is pushed; without a usable `deny-terms` it commits and pushes nothing.

@@ -1,6 +1,7 @@
 {
   "name": "work",
   "defaultTracker": "jira",
+  "agents": ["human-prose-editor"],
   "hooks": ["host_default.py", "auto_sync.py", "global_memory.py"],
   "skills": [
     "issue-lifecycle",

@@ -79,6 +79,7 @@
     ],
     "SubagentStart": [
       {
+        "matcher": "^(?!human-prose-editor$).*",
         "hooks": [{ "type": "command", "command": "python3 -I {claude_home}/hooks/host_default.py", "timeout": 10 }]
       }
     ]

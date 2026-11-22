@@ -57,7 +57,7 @@ Report contradictions (code does X, README says Y) instead of choosing the tidie
 
 ## 4. Write `docs/architecture.md`
 
-Use the skeleton in `references/templates.md`, written for a cold reader: the point first, then the evidence. Apply `oh-my-claudecode:minimal-prose-discipline` when the host has it. Keep to what a reader needs to change the code safely:
+Use the skeleton in `references/templates.md`, written for a cold reader: the point first, then the evidence. Keep to what a reader needs to change the code safely:
 
 - **Purpose and boundary**: what the system does, and what it does not do. A "does not" is Verified only when a README, issue or doc says it is out of scope; otherwise label it Inferred or Unknown.
 - **Components**: one line each, with its single responsibility and the file that defines its contract.

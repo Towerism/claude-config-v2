@@ -1,68 +1,73 @@
 ---
 name: human-prose
-description: Write and review prose that people will read (PR and issue descriptions, tickets, READMEs, design docs, Confluence pages, commit messages, release notes) so it keeps the reader's attention and every claim holds up. Covers the writing rules with their reasons, and a draft, cold-read, verify and fix loop. Use when asked to write or review such text, to make text more readable, or when a reader would lose the thread. Not for text only agents read (SKILL.md, agent prompts, CLAUDE.md).
+description: Edits a labeled, line-numbered batch of texts people will read (commit messages, PR descriptions and reviews, issues, tickets, ADRs, READMEs, wiki pages, chat messages) for wording, shape and register, and returns line-range replacements. Used by the human-prose-editor agent on each batch just before it leaves the session. Not for writing text from sources, and not for text only agents read (SKILL.md files, prompts, CLAUDE.md).
 ---
 
-# Prose for human readers
+# Edit text a person reads
 
-Use this for any text a person reads to understand or decide something. Skip it for text only agents read (SKILL.md, agent prompts, CLAUDE.md), which follows agent-doc-discipline instead.
-
-The premise behind every rule: **readers drop text that reads like noise.** In the AI era they are quick to spot it. Once a reader decides a text is noise, they skim the rest, including the parts that matter.
+You get a batch of finished texts. Change only the lines that get in the reader's way, and only as much as fixing them needs. Why: readers already trust the author's own words, and every rewritten line is a chance to lose a fact, a name or a hedge.
 
 ## Steps
 
-1. **Name the reader and what they care about.** Write down who reads this, what they already know, and the one thing they need from it (to approve, to try it, to understand why). Done when you can say it in one sentence. Why: a text that doesn't surface what the reader cares about won't get its purpose across, however accurate it is.
+1. Read each text as its reader, picked from its label: the kind of text and where it goes.
+2. Note the lines that match a target under "What to change". Leave every other line exactly as written, including the author's voice, formatting and harmless quirks.
+3. Write the replacement lines. Keep every number, name, identifier, link, code span, hedge word and stated reason of the lines you replace, and add nothing the old lines don't say. Why: you cannot see the sources, and the session that sent the batch skips any range that loses one of these.
+4. Reply in the output format, one section per text, in the batch's order. Done when every text has a section and nothing else is in the reply.
 
-2. **Draft by the rules below.** Lead with what the reader cares about. When the reader can't yet picture what the thing can do, show one or two real, verified examples. Done when a first draft exists.
+## Input
 
-3. **Run the mechanical checks.** Fix every hit, or confirm it is fine:
-   ```bash
-   grep -nE ', not |not just|not only|but (not|never)|instead of|rather than|but (aren|isn)'"'"'t|(never|not|wasn'"'"'t|isn'"'"'t) (simply|just|merely|only)' FILE
-   grep -noE '(^|[^/A-Za-z0-9_-])#[0-9]+' FILE
-   grep -noE '\]\((\.|[a-z][^:)]*)\)' FILE
-   ```
-   The first finds juxtapositions, the second bare `#N` references, and the third relative links (wrong in PR and issue bodies). Grep can't reliably find the rest, so read once for each of these: inline lists of exactly three, three-bullet lists, a juxtaposition split across two sentences, and a short closing line that restates the paragraph as a punchline. Done when every hit is fixed or judged fine.
+```
+=== 1: commit message | github owner/repo | Conventional Commits ===
+1| feat(cfg): deploy agents
+2|
+3| Adds an agents root to ...
+```
 
-4. **Get a cold read from a specialist.** Launch `oh-my-claudecode:critic` (opus), or the closest reviewer agent if OMC isn't installed. Give it the reader from step 1, the text, the sources the facts come from, and the rules below pasted word for word. Leave out your own reasoning about the draft. Ask for each violation with the rule, the quoted text and a rewrite that itself follows every rule. Done when the report is in. Why: the writer can't see their own gaps, and a reviewer handed the writer's reasoning tends to agree with it.
+Each header gives the text's number, its kind, where it goes, and any format the project fixes, such as the repo's commit style.
 
-5. **Check each finding before acting on it.** A reviewer can be wrong too. In one case a reviewer called a built-in command missing, suggested a wrong meaning for a term, and flagged a quote as unsourced when it was the user's own. Keep what holds up. Where you reject a finding, say why. Done when every finding is either applied or rejected with a reason.
+## Output
 
-6. **Re-read until nothing new turns up.** Send the revised text back to the same reviewer and ask only for problems that remain or that the rewrite introduced. Done when a re-read reports nothing new. Why: rewrites bring in new problems, such as a term that was explained in one file but not in another.
+```
+=== 1 ===
+UNCHANGED
+=== 2 ===
+@@ 3-4
+replacement line
+replacement line
+```
 
-7. **Check how it renders.** For GitHub text, look at what the published page does. A PR body should link to the files on the branch. File links on a private repo can be checked with `gh api repos/<o>/<r>/contents/<path>?ref=<branch> -q .html_url`. Done when every link goes where it should.
+- `@@ a-b` replaces lines a to b with the lines under it; `@@ a` replaces one line.
+- A line no range names stays as it is. Ranges don't overlap. An empty replacement deletes the range.
+- `UNCHANGED` when nothing in the text gets in the reader's way.
 
-## The rules
+## What to change
 
-Each rule comes with the reason the user gave for it.
+These make text read as machine-written. Why: readers who sense machine-written text start skimming and miss what matters.
 
-**Lead with what the reader cares about, and keep it short.** Readers are sensitive to noise, and an explanation that doesn't surface what they care about leaves them unsure what the text is for.
+- A sentence that previews what follows, or a summary line, closing question or offer to help at the end. Start on the first real point; end on the last one.
+- A sentence that only bridges or repeats what the reader just read.
+- Phrasing a reader has to stop and decode ("trades tokens for trust" → "spends extra tokens to make sure every comment can be trusted"). Use everyday words and plain verbs: is, has, uses, wrote, moved, tried.
+- List items forced into the same shape. Let them differ as their content does.
+- A "not X" contrast the reader would never have assumed.
+- Headings or bold labels in a text under about 200 words, except `## Security findings` in an issue, ticket or PR description.
+- "Slop" or words built on it; call that work a refactor.
+- A register that doesn't fit where the text goes (table below).
 
-**Show what the thing can do with real examples.** People don't know what AI can do until they see it, and a list of instructions doesn't show much. Use one or two real results. Use only results that are already public to the people involved, and check each fact against the published source. For example, don't cite a review nobody has posted yet.
+## What to leave alone
 
-**Make every piece of evidence say how it supports the claim.** A fact given as evidence, where the reader can't work out how it supports the point, reads as noise. Every step should visibly follow from the one before. For example, "the history turned a disputed finding into a regression" doesn't say what the history was. "The PR added back an auth check the team had removed in 2025 to fix a bug" does.
+- Code blocks, inline code, quoted text, commit trailers (`Co-Authored-By:` and the like), a Conventional Commits `type(scope):` prefix, and `Closes #n` lines.
+- The format the label names: the repo's commit style, a doc template, headings the text already uses.
+- Facts, even ones that look wrong. You can't check them; the sender can.
+- Contractions, first person and uneven sentence lengths. Don't fake informality or errors either.
 
-**Explain new ideas through things the reader already knows.** Readers understand a new idea when it's described with ideas and sentence shapes they've seen thousands of times. Explain each unfamiliar term the first time it appears in each text, not just once across all of them.
+## Register
 
-**Write in everyday language.** Unusual wording makes readers stop and work out exactly what the words mean, and that loses their attention. Rewrite compressed or clever phrasing as plain cause and effect. Avoid idioms used as arguments, slogan headings, headings without a verb, stacked nouns and rare words. Examples the user flagged:
-- "every finding earns its place" became "the skill only keeps a comment if it was tested"
-- "trades tokens for trust" became "spends extra tokens to make sure every comment can be trusted"
-- "Looks like waste, isn't" became "Steps that look unnecessary but are needed"
+Pick it from where the text goes, never from the recipient's style. Why: the user called a PR review drafted in their direct-message voice "too informal", because PR feedback is public.
 
-**Avoid inline lists of exactly three.** "A, b, and c" is a common AI pattern. It's subtle, but people are good at spotting patterns, so it reads close to noise. Rewrite it as separate plain sentences. Lists of four or more real items are fine.
+| Where | Voice |
+|---|---|
+| Direct message from the user | Direct, warm, loose. Mostly lowercase starts, dropped apostrophes ("dont", "thats"), no period on short lines; "yea", "np", "tho", "kinda". Opens with "ah", "yes", "ok" or straight into the fact; no sign-off. |
+| Channel message from the user | Direct and friendly. Capitalized full sentences with periods, one to three sentences, one claim each. No bullets. |
+| Public (PR reviews, issue comments, anything outside team chat) | Formal: full capitalized sentences, no slang ("lmk", "tho", "yea", "lol"), no casual opener or closer. |
 
-**Avoid juxtaposition and cheesy stingers.** A juxtaposition sets up one idea only to swap in another. It can sit inside a sentence ("X, not Y") or span two: "She was never simply a voice behind the screen. She was part of the sound of growing up." A stinger is a short, quotable line that ends a paragraph or section by restating the point as a punchline, and it is one of the worst offenders. People are good at spotting patterns, and these are among the first they tag as AI. The more a text reads like AI, the more the reader hunts for further signs of it, and they stop following the content. A reader who has stopped paying attention gets no value from the text. Fix it by stating only the claim that is true, once, and ending the paragraph when its content ends. For example, "She hosted the station's afternoon show for twenty years." Plain negative sentences that carry a fact are fine ("The hook doesn't run on Windows").
-
-**Leave out things the reader never saw.** For example, an earlier private version of the work, or what was cut from it. A reference to something only the author has seen is noise.
-
-**Keep each idea in one place.** Repeating the same content across documents adds upkeep and doesn't help the reader. A design doc that walks through steps makes the reader wonder why they shouldn't just read the steps. So a design doc explains the thinking, and it points to where the steps and the incidents are written down. A one-clause reason repeated for a different audience is fine.
-
-**Claim only what the source says.** Match the strength of the source ("tends to", "may"). A claim the source doesn't make, even a reasonable one, gets weakened or cut. An overclaim under a confident tone costs more trust than leaving it out.
-
-**Write GitHub references so they can't point at the wrong repo.** Write cross-repo PRs as `owner/repo#n` or as full URLs. GitHub turns a bare `#n` in PR bodies and comments into a link to the current repo's PR with that number, if it exists. Rendered repo files never autolink.
-
-## Pitfalls
-
-- A detector for lists of three flags many ordinary two-part sentences. Treat its hits as candidates and judge each one.
-- Splitting "X, not Y" into two sentences keeps the juxtaposition and often creates a stinger. Drop the rejected half instead.
-- Applying one round of fixes can bring the same pattern back elsewhere. After a rewrite, run step 3 again.
-- curl returns 404 for github.com pages of a private repo even with a token. That doesn't mean the link is broken.
+The two chat rows apply only to text the user sends as themselves; copying their habits there is not faking informality.

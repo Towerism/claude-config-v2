@@ -5,7 +5,7 @@
     cfg.py status                   compare the live config with the last deploy
     cfg.py rollback                 undo the last deploy
 
-A deploy copies the host's skills and hooks into the Claude home, merges the
+A deploy copies the host's skills, hooks and agents into the Claude home, merges the
 hook entries, plugins and marketplaces into settings.json, and keeps the global
 rules in a marked block of CLAUDE.md (OMC keeps its own block in the same file).
 Everything it owns is listed, with hashes, in <home>/claude-config/state.json.
@@ -104,7 +104,7 @@ def safe_rel(home: Path, rel: object) -> str:
     if not isinstance(rel, str) or not rel:
         raise CfgError(f"refusing path {rel!r}")
     path = Path(rel)
-    inside = rel in MANAGED or (path.parts[0] in ("skills", "hooks") and len(path.parts) > 1)
+    inside = rel in MANAGED or (path.parts[0] in ("skills", "hooks", "agents") and len(path.parts) > 1)
     if path.is_absolute() or ".." in path.parts or not inside:
         raise CfgError(f"refusing path outside cfg's files: {rel!r}")
     if not (home / path).resolve().is_relative_to(home.resolve()):
@@ -168,15 +168,18 @@ def load_host(name: str) -> dict:
     host = read_json(path)
     if host.get("name") != name:
         raise CfgError(f"{path}: 'name' must be '{name}'")
-    for item in [*host.get("skills", []), *host.get("hooks", [])]:
+    for item in [*host.get("skills", []), *host.get("hooks", []), *host.get("agents", [])]:
         if not isinstance(item, str) or not NAME.fullmatch(item) or item in (".", ".."):
-            raise CfgError(f"{path}: invalid skill or hook name {item!r}")
+            raise CfgError(f"{path}: invalid skill, hook or agent name {item!r}")
     for skill in host.get("skills", []):
         if not (ROOT / "config" / "skills" / skill / "SKILL.md").is_file():
             raise CfgError(f"{path}: skill '{skill}' has no config/skills/{skill}/SKILL.md")
     for hook in host.get("hooks", []):
         if not (ROOT / "config" / "hooks" / hook).is_file():
             raise CfgError(f"{path}: hook '{hook}' is not in config/hooks/")
+    for agent in host.get("agents", []):
+        if not (ROOT / "config" / "agents" / f"{agent}.md").is_file():
+            raise CfgError(f"{path}: agent '{agent}' has no config/agents/{agent}.md")
     return host
 
 
@@ -193,6 +196,8 @@ def desired_files(host: dict) -> dict[str, bytes]:
             files[f"skills/{skill}/{path.relative_to(base).as_posix()}"] = path.read_bytes()
     for hook in host.get("hooks", []):
         files[f"hooks/{hook}"] = (ROOT / "config" / "hooks" / hook).read_bytes()
+    for agent in host.get("agents", []):
+        files[f"agents/{agent}.md"] = (ROOT / "config" / "agents" / f"{agent}.md").read_bytes()
     return files
 
 

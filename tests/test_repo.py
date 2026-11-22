@@ -110,6 +110,8 @@ def test_host_profile_resolves(host):
         assert (ROOT / "config" / "skills" / skill / "SKILL.md").is_file()
     for hook in data["hooks"]:
         assert (ROOT / "config" / "hooks" / hook).is_file()
+    for agent in data.get("agents", []):
+        assert (ROOT / "config" / "agents" / f"{agent}.md").is_file(), agent
     assert "oh-my-claudecode@omc" in data["plugins"]
 
 
@@ -346,3 +348,72 @@ def test_readme_lists_the_gate_skills_and_their_config():
     rows = (ROOT / "README.md").read_text()
     for needle in ("`spec-test-plan`", "`spec-scope`", "`config/omc.fragment.json`"):
         assert needle in rows, needle
+
+
+@pytest.mark.parametrize("skill", SKILLS, ids=lambda p: p.name)
+def test_skill_routes_to_every_reference_file(skill):
+    """A reference file SKILL.md never names is one no agent is ever told to read."""
+    text = (skill / "SKILL.md").read_text()
+    for ref in skill_files(skill):
+        rel = ref.relative_to(skill)
+        if rel.parts[0] == "references":
+            assert rel.as_posix() in text, rel
+
+
+def test_readme_names_every_skill():
+    """A skill that ships and syncs but has no entry in the README's skills row is one readers can't find."""
+    row = next((line for line in (ROOT / "README.md").read_text().splitlines() if line.startswith("| `config/skills/` |")), "")
+    assert row, "README.md has no `config/skills/` row"
+    for skill in SKILLS:
+        assert f"`{skill.name}`" in row, skill.name
+
+
+def test_skills_the_global_rules_load_exist():
+    """A misspelled name in a load line silently stops that skill from loading."""
+    names = [n for n in re.findall(r"\bload `/?([\w:-]+)`", global_text(), re.IGNORECASE)
+             if not n.startswith("oh-my-claudecode:")]
+    assert names, "no load line names a repo skill"
+    for name in names:
+        assert (ROOT / "config" / "skills" / name / "SKILL.md").is_file(), name
+
+
+AGENTS = sorted((ROOT / "config" / "agents").glob("*.md"))
+
+
+def frontmatter(path):
+    """The `key: value` lines between the first two `---` lines, as a dict of strings."""
+    head = path.read_text().split("---")[1]
+    return dict(line.split(":", 1) for line in head.strip().splitlines() if ":" in line)
+
+
+def test_every_agent_is_on_some_host():
+    on_hosts = {a for h in HOSTS for a in json.loads(h.read_text()).get("agents", [])}
+    assert on_hosts == {p.stem for p in AGENTS}
+
+
+@pytest.mark.parametrize("agent", AGENTS, ids=lambda p: p.stem)
+def test_agent_names_itself_and_preloads_shipped_skills(agent):
+    """A renamed skill would leave the agent running with no skill, and nothing would say so."""
+    meta = {k.strip(): v.strip() for k, v in frontmatter(agent).items()}
+    assert meta["name"] == agent.stem
+    skills = [s.strip() for s in meta["skills"].strip("[]").split(",") if s.strip()]
+    assert skills
+    for skill in skills:
+        assert (ROOT / "config" / "skills" / skill / "SKILL.md").is_file(), skill
+
+
+def test_the_global_rules_call_every_shipped_agent_and_only_those():
+    """The global rules are the only thing that calls a shipped agent, so a typo there disables it."""
+    named = set(re.findall(r"the `([\w-]+)` agent", global_text()))
+    assert named == {p.stem for p in AGENTS}
+
+
+def test_issue_and_ticket_bodies_stay_with_human_prose():
+    assert "Issue and ticket bodies follow `human-prose` only" in global_text()
+
+
+def test_readme_names_every_agent():
+    row = next((line for line in (ROOT / "README.md").read_text().splitlines() if line.startswith("| `config/agents/` |")), "")
+    assert row, "README.md has no `config/agents/` row"
+    for agent in AGENTS:
+        assert f"`{agent.stem}`" in row, agent.stem
