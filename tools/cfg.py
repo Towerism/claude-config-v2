@@ -5,7 +5,7 @@
     cfg.py status                   compare the live config with the last deploy
     cfg.py rollback                 undo the last deploy
 
-A deploy copies the host's skills, hooks and agents into the Claude home, merges the
+A deploy copies the host's skills, hooks and agents, and keybindings.json, into the Claude home, merges the
 hook entries, plugins and marketplaces into settings.json, and keeps the global
 rules in a marked block of CLAUDE.md (OMC keeps its own block in the same file).
 Everything it owns is listed, with hashes, in <home>/claude-config/state.json.
@@ -49,7 +49,7 @@ START = "<!-- CLAUDE-CONFIG:START -->"
 END = "<!-- CLAUDE-CONFIG:END -->"
 KEEP_BACKUPS = 5
 NAME = re.compile(r"[a-z0-9][a-z0-9_.-]{0,63}")
-MANAGED = ("settings.json", "CLAUDE.md", "claude-config/state.json")
+MANAGED = ("settings.json", "CLAUDE.md", "claude-config/state.json", "keybindings.json")
 
 
 class CfgError(Exception):
@@ -189,7 +189,7 @@ SKIP_PARTS = frozenset({"__pycache__", ".omc"})
 
 def desired_files(host: dict) -> dict[str, bytes]:
     """Relative path under the Claude home -> content, for every copied file."""
-    files: dict[str, bytes] = {}
+    files = {"keybindings.json": (ROOT / "config" / "keybindings.json").read_bytes()}
     for skill in host.get("skills", []):
         base = ROOT / "config" / "skills" / skill
         for path in sorted(p for p in base.rglob("*") if p.is_file() and SKIP_PARTS.isdisjoint(p.relative_to(base).parts)):

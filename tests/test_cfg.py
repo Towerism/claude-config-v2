@@ -74,6 +74,15 @@ def test_deploy_installs_everything_the_host_selects(home):
     assert "{claude_home}" not in (home / "settings.json").read_text()
 
 
+def test_keybindings_deploy_on_every_host_and_roll_back(home):
+    """ctrl+t opens a browser tab in a web terminal, so pinning a session also has ctrl+p."""
+    assert run(home, "deploy", "--host", "personal", "--yes") == 0
+    agents = [b for b in json.loads((home / "keybindings.json").read_text())["bindings"] if b["context"] == "Agents"]
+    assert agents[0]["bindings"]["ctrl+p"] == "agents:togglePin"
+    assert run(home, "rollback") == 0
+    assert not (home / "keybindings.json").exists()
+
+
 def test_deployed_blocks_are_identical_across_hosts(tmp_path):
     blocks = []
     for host in ("personal", "work"):
@@ -603,8 +612,10 @@ def test_deploy_skips_omc_state_folders_inside_a_skill(tmp_path, monkeypatch):
     (skill / "scripts" / "run.py").write_text("pass")
     (skill / "scripts" / "__pycache__").mkdir()
     (skill / "scripts" / "__pycache__" / "run.pyc").write_text("x")
+    (tmp_path / "config" / "keybindings.json").write_text("{}")
     monkeypatch.setattr(cfg, "ROOT", tmp_path)
     assert sorted(cfg.desired_files({"skills": ["demo"], "hooks": []})) == [
+        "keybindings.json",
         "skills/demo/SKILL.md",
         "skills/demo/scripts/run.py",
     ]
