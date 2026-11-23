@@ -5,7 +5,6 @@
   "hooks": ["host_default.py", "auto_sync.py", "global_memory.py"],
   "skills": [
     "issue-lifecycle",
-    "fresh-session-handoff",
     "linux-troubleshooting",
     "architecture-backfill",
     "spec-test-plan",

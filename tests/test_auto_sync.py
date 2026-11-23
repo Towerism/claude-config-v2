@@ -26,7 +26,7 @@ GIT_ENV = {
 }
 STARTUP = {"hook_event_name": "SessionStart", "source": "startup"}
 RELOAD = {"hookSpecificOutput": {"hookEventName": "SessionStart", "reloadSkills": True}}
-SKILL = "skills/fresh-session-handoff/SKILL.md"
+SKILL = "skills/linux-troubleshooting/SKILL.md"
 
 # Runs the hook's main() as its __main__ block does, after `patch` (Python source) has run.
 DRIVER = """
@@ -83,7 +83,7 @@ def state(w):
     return json.loads((w.claude / "claude-config" / "state.json").read_text())
 
 
-def merge_to_main(w, rel="config/skills/fresh-session-handoff/SKILL.md", text="\nMerged line.\n", force=False):
+def merge_to_main(w, rel="config/skills/linux-troubleshooting/SKILL.md", text="\nMerged line.\n", force=False):
     """A change lands on origin's main, as after a merged PR (a force-push with `force`)."""
     path = w.seed / rel
     path.write_text(path.read_text() + text)
@@ -376,11 +376,11 @@ def test_a_clone_others_can_write_to_is_not_run(world):
 
 def test_untracked_files_in_the_clone_are_not_deployed(world):
     w = world
-    (w.clone / "config" / "skills" / "fresh-session-handoff" / "planted.md").write_text("planted")
+    (w.clone / "config" / "skills" / "linux-troubleshooting" / "planted.md").write_text("planted")
     merge_to_main(w)
     code, out, _ = hook(w)
     assert code == 0 and json.loads(out) == RELOAD
-    assert not (w.claude / "skills" / "fresh-session-handoff" / "planted.md").exists()
+    assert not (w.claude / "skills" / "linux-troubleshooting" / "planted.md").exists()
 
 
 def test_a_failed_deploy_is_reported(world):

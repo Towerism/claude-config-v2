@@ -173,7 +173,7 @@ def test_deploy_removes_a_hook_the_profile_no_longer_lists(home, tmp_path, monke
 
 def test_locally_edited_file_is_a_conflict(home, capsys):
     run(home, "deploy", "--host", "personal", "--yes")
-    skill = home / "skills" / "fresh-session-handoff" / "SKILL.md"
+    skill = home / "skills" / "linux-troubleshooting" / "SKILL.md"
     skill.write_text("my edit")
     assert run(home, "plan") == 1
     assert "CONFLICT" in capsys.readouterr().out
@@ -189,10 +189,10 @@ def test_status_reports_modified_missing_and_sync(home, capsys):
     run(home, "status")
     assert "in sync" in capsys.readouterr().out
     (home / "hooks" / "host_default.py").write_text("x")
-    (home / "skills" / "fresh-session-handoff" / "SKILL.md").unlink()
+    (home / "skills" / "linux-troubleshooting" / "SKILL.md").unlink()
     run(home, "status")
     out = capsys.readouterr().out
-    assert "modified  hooks/host_default.py" in out and "missing   skills/fresh-session-handoff/SKILL.md" in out
+    assert "modified  hooks/host_default.py" in out and "missing   skills/linux-troubleshooting/SKILL.md" in out
 
 
 def test_deploy_wires_auto_sync_for_new_sessions_only(home):
@@ -280,10 +280,10 @@ def test_rollback_restores_the_previous_state(home):
 def test_rollback_undoes_only_the_last_deploy(home):
     run(home, "deploy", "--host", "personal", "--yes")
     first = (home / "settings.json").read_bytes()
-    (home / "skills" / "fresh-session-handoff" / "SKILL.md").write_text("edit")
+    (home / "skills" / "linux-troubleshooting" / "SKILL.md").write_text("edit")
     run(home, "deploy", "--yes", "--force")
     run(home, "rollback")
-    assert (home / "skills" / "fresh-session-handoff" / "SKILL.md").read_text() == "edit"
+    assert (home / "skills" / "linux-troubleshooting" / "SKILL.md").read_text() == "edit"
     assert (home / "settings.json").read_bytes() == first
 
 
