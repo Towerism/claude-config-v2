@@ -11,6 +11,7 @@
     "spec-test-plan",
     "spec-scope",
     "human-prose",
+    "human-prose-writer",
     "promote-skill-to-config"
   ],
   "marketplaces": {
