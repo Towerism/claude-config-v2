@@ -588,7 +588,7 @@ def test_an_omc_learned_skill_gets_a_shim(tmp_path, origin):
     assert shim.readlink() == source and shim.read_text() == "Learned.\n"
 
 
-@pytest.mark.parametrize("existing", ["dir", "file", "symlink", "dangling"])
+@pytest.mark.parametrize("existing", ["dir", "empty dir", "file", "symlink", "dangling"])
 def test_an_existing_skill_path_is_left_alone(tmp_path, origin, existing):
     m = shimmed(tmp_path, origin)
     (m.store / "skills" / "tip.md").write_text("Store skill.\n")
@@ -598,6 +598,8 @@ def test_an_existing_skill_path_is_left_alone(tmp_path, origin, existing):
     if existing == "dir":
         path.mkdir()
         (path / "SKILL.md").write_text("mine")
+    elif existing == "empty dir":
+        path.mkdir()
     elif existing == "file":
         path.write_text("mine")
     elif existing == "symlink":
@@ -608,6 +610,8 @@ def test_an_existing_skill_path_is_left_alone(tmp_path, origin, existing):
     quiet(m, STARTUP)
     if existing == "dir":
         assert [p.name for p in path.iterdir()] == ["SKILL.md"] and (path / "SKILL.md").read_text() == "mine"
+    elif existing == "empty dir":
+        assert list(path.iterdir()) == []
     elif existing == "file":
         assert path.read_text() == "mine"
     else:
