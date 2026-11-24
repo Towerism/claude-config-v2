@@ -46,7 +46,8 @@ its description on one line, control characters removed, cut at DESCRIPTION char
 stops at BUDGET characters and ends with the count of files not listed. A file kept local for
 naming a deny-term is still listed in this machine's index; the deny-terms file itself and memory
 bodies are never printed. When nothing exists at ~/.omc/skills, it links that path to the store's
-skills/.
+skills/. It also links each learned skill, from the store's skills/ and <claude home>/skills/omc-learned,
+as <claude home>/skills/<name>/SKILL.md, where nothing exists at <claude home>/skills/<name>.
 
 What a session has seen is <claude home>/claude-config/memory-seen/<session_id>, the store's main
 commit when the session was last shown the store; the session id is used only when it matches
@@ -405,6 +406,21 @@ def link_skills(store: Path) -> None:
     link.symlink_to(store / "skills")
 
 
+def shim_skills(store: Path, home: Path) -> None:
+    """Links <home>/skills/<name>/SKILL.md to each learned skill file, where nothing exists at
+    <home>/skills/<name>; Claude Code lists a skill only from there. Never overwrites or deletes."""
+    for source_dir in (store / "skills", home / "skills" / "omc-learned"):
+        if not source_dir.is_dir():
+            continue
+        for source in sorted(source_dir.iterdir()):
+            with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
+                if FILE.fullmatch(source.name) and not source.is_symlink() and source.is_file():
+                    folder = home / "skills" / source.stem
+                    if not os.path.lexists(folder):
+                        folder.mkdir(parents=True)
+                        (folder / "SKILL.md").symlink_to(source.absolute())
+
+
 def log(home: Path, reason: str) -> None:
     path = home / "claude-config" / "memory.log"
     lines = []
@@ -465,6 +481,8 @@ def main() -> None:
         if (store / ".git").is_dir():
             with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
                 link_skills(store)
+            with contextlib.suppress(Exception):  # hook contract: exit 0, fixed code
+                shim_skills(store, home)
             valid = isinstance(session, str) and SESSION.fullmatch(session)
             seen = state / "memory-seen" / session if valid else None
             # main is read once: the record is the commit shown, even if a sync lands meanwhile.

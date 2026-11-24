@@ -554,6 +554,116 @@ def test_the_skills_link_is_made_only_where_nothing_exists(tmp_path, origin, exi
         assert path.readlink() == other
 
 
+# --- the skill shims ---------------------------------------------------------------------
+
+
+def shimmed(tmp_path, origin):
+    """A machine whose store is cloned; its Claude home has no skills yet."""
+    m = machine(tmp_path, origin)
+    quiet(m, STARTUP)
+    return m
+
+
+def learned(m, name, body="Learned.\n"):
+    path = m.claude / "skills" / "omc-learned" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body)
+    return path
+
+
+def test_a_store_skill_gets_an_absolute_shim_that_reads_through(tmp_path, origin):
+    m = shimmed(tmp_path, origin)
+    (m.store / "skills" / "tip.md").write_text("Store skill.\n")
+    quiet(m, STARTUP)
+    shim = m.claude / "skills" / "tip" / "SKILL.md"
+    assert shim.is_symlink() and shim.readlink().is_absolute()
+    assert shim.read_text() == "Store skill.\n"
+
+
+def test_an_omc_learned_skill_gets_a_shim(tmp_path, origin):
+    m = shimmed(tmp_path, origin)
+    source = learned(m, "tip.md")
+    quiet(m, STARTUP)
+    shim = m.claude / "skills" / "tip" / "SKILL.md"
+    assert shim.readlink() == source and shim.read_text() == "Learned.\n"
+
+
+@pytest.mark.parametrize("existing", ["dir", "file", "symlink", "dangling"])
+def test_an_existing_skill_path_is_left_alone(tmp_path, origin, existing):
+    m = shimmed(tmp_path, origin)
+    (m.store / "skills" / "tip.md").write_text("Store skill.\n")
+    path = m.claude / "skills" / "tip"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    other = tmp_path / "elsewhere"
+    if existing == "dir":
+        path.mkdir()
+        (path / "SKILL.md").write_text("mine")
+    elif existing == "file":
+        path.write_text("mine")
+    elif existing == "symlink":
+        other.mkdir()
+        path.symlink_to(other)
+    else:
+        path.symlink_to(other)
+    quiet(m, STARTUP)
+    if existing == "dir":
+        assert [p.name for p in path.iterdir()] == ["SKILL.md"] and (path / "SKILL.md").read_text() == "mine"
+    elif existing == "file":
+        assert path.read_text() == "mine"
+    else:
+        assert path.readlink() == other
+        assert not other.exists() or list(other.iterdir()) == []
+
+
+@pytest.mark.parametrize("bad", ["symlink", "dir", "Upper.md", "a_b.md", "notes.txt", ".hidden.md", "nested"])
+def test_only_regular_skill_files_with_valid_names_are_shimmed(tmp_path, origin, bad):
+    m = shimmed(tmp_path, origin)
+    skills = m.store / "skills"
+    (skills / "good.md").write_text("Good.\n")
+    if bad == "symlink":
+        real = tmp_path / "real.md"
+        real.write_text("x")
+        (skills / "bad.md").symlink_to(real)
+    elif bad == "dir":
+        (skills / "bad.md").mkdir()
+    elif bad == "nested":
+        (skills / "sub").mkdir()
+        (skills / "sub" / "bad.md").write_text("x")
+    else:
+        (skills / bad).write_text("x")
+    quiet(m, STARTUP)
+    assert sorted(p.name for p in (m.claude / "skills").iterdir()) == ["good"]
+
+
+def test_a_second_run_leaves_a_correct_shim_untouched(tmp_path, origin):
+    m = shimmed(tmp_path, origin)
+    (m.store / "skills" / "tip.md").write_text("Store skill.\n")
+    quiet(m, STARTUP)
+    shim = m.claude / "skills" / "tip" / "SKILL.md"
+    before = shim.lstat().st_ino
+    quiet(m, STARTUP)
+    assert shim.lstat().st_ino == before and shim.read_text() == "Store skill.\n"
+
+
+def test_one_blocked_entry_does_not_stop_the_others(tmp_path, origin):
+    m = shimmed(tmp_path, origin)
+    (m.store / "skills" / "bad.md").write_text("x")
+    (m.store / "skills" / "good.md").write_text("Good.\n")
+    (m.claude / "skills").mkdir(parents=True, exist_ok=True)
+    (m.claude / "skills" / "bad").write_text("mine")
+    quiet(m, STARTUP)
+    assert (m.claude / "skills" / "good" / "SKILL.md").read_text() == "Good.\n"
+    assert (m.claude / "skills" / "bad").read_text() == "mine"
+
+
+def test_a_missing_omc_learned_dir_still_shims_store_skills(tmp_path, origin):
+    m = shimmed(tmp_path, origin)
+    (m.store / "skills" / "tip.md").write_text("Store skill.\n")
+    quiet(m, STARTUP)
+    assert not (m.claude / "skills" / "omc-learned").exists()
+    assert (m.claude / "skills" / "tip" / "SKILL.md").read_text() == "Store skill.\n"
+
+
 def test_a_pushed_memory_edited_to_name_a_deny_term_keeps_its_edit_local(tmp_path, origin):
     a = started(tmp_path, origin, "a")
     remember(a, "shared.md", body="Clean text.\n")
