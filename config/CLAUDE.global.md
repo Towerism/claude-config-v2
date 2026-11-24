@@ -18,7 +18,7 @@
 
 ## Rules
 
-In every repo the user holds three decisions: approving the final plan before any code is written when it contains a decision a human would find surprising (otherwise OMC's own `pending approval` stop covers plan approval), marking a PR ready, and merging.
+In every repo the user holds three decisions: approving the final plan before any code is written when it contains a decision a human would find surprising (for other plans, approval is waived), marking a PR ready, and merging.
 
 ### Before you write code
 
@@ -30,11 +30,11 @@ In every repo the user holds three decisions: approving the final plan before an
 ### Dependencies and tests
 - **Least own code wins.** Add as many proven, widely used dependencies as it takes to keep your own code smallest; having few dependencies is not a goal. Why: your code is what we maintain, and a mature library has already handled its edge cases. For code that ships to a browser, also count bundle size.
 - Name each new dependency in the spec with what it replaces (and its size, for browser code); one found mid-build goes into the spec first, and the spec goes back for approval. A dependency named in the approved spec counts as approved.
-- **Say why an edge case goes unhandled.** When you leave an edge case unhandled, say why in the spec. Why: gold plating costs upkeep and protects nothing, and the stated reason lets a reviewer check the call.
-- **Test real logic only.** Don't re-test what a linter in the same pipeline already checks. List each behaviour left untested in a `Not tested, and why` list in the spec's test plan.
+- **Weigh each edge case before handling it.** Add handling only when it is realistic for how the code is actually used and the code to catch it is small next to the risk. Otherwise leave it out and say why in the spec. Why: gold plating costs upkeep and protects nothing.
+- **Test real logic only.** Drop a test that just repeats the code line by line (literal paths, fixed command lists), and don't re-test what a linter in the same pipeline already checks. List each behaviour left untested in a `Not tested, and why` list in the spec's test plan.
 
 ### Review and verify
-- In review and verify, label work outside the approved plan, or under its Non-Goals, `out of scope:` rather than a defect.
+- In review and verify, report work outside the approved plan, or under its Non-Goals, as `out of scope:` findings rather than defects.
 - Ask for an abstraction only when it makes the code easier to read or maintain than the code without it.
 
 ### Git and pull requests

@@ -1,6 +1,6 @@
 # ADR-0017: Trim global rules that OMC already covers, and record the November 12 rewrite
 
-**Status:** Accepted 2026-11-24, issue #90. Amends ADR-0011 (decisions 4 and 5), ADR-0012 (decision 2, the approval anchor), ADR-0013 (decisions 2 and 3) and ADR-0014 (decision 5).
+**Status:** Accepted 2026-11-24, issue #90. Amends ADR-0011 (decisions 4 and 5), ADR-0012 (decision 2, the approval anchor) and ADR-0014 (decision 5).
 
 ## Context
 
@@ -20,17 +20,16 @@ A review of the rules against OMC 5.8.6 found more rules that restate OMC's own 
 
 ## Decision
 
-1. **The 6189b22 removals stand.** Deep-interview-first, the pipeline list, the ralplan hand-off, review-plus-verify and build-exactly-the-spec stay out of the rules. OMC's workflows choose their own stages.
+1. **The 6189b22 removals stand.** Deep-interview-first, the pipeline list, the ralplan hand-off, review-plus-verify and build-exactly-the-spec stay out of the rules. OMC's workflows choose their own stages. Because nothing now makes `review` run, OMC review's text no longer counts as coverage for the rules that lean on it (ADR-0012 decision 3).
 2. **"Least complexity to own" goes again.** The "Least own code wins" rule and the dependency-naming rule under `### Dependencies and tests` already carry it, in ADR-0013's wording.
 3. **"Do not rely on your memory or context alone" merges into the check-at-the-source rule,** which now covers technical decisions and names spikes, experiments and external research as the check.
-4. **Plan approval reads one way.** The user approves the final plan before code is written when it contains a decision a human would find surprising; otherwise OMC's own `pending approval` stop covers plan approval (`skills/plan/SKILL.md:166`). Marking a PR ready and merging stay the user's.
-5. **An AskUserQuestion option counts as approval,** recorded by quoting the option label; typed approval is quoted as typed. OMC's plan skill takes approval through that prompt and says never to ask for it in plain text (`skills/plan/SKILL.md:128,166`).
+4. **Plan approval reads one way.** The user approves the final plan before code is written when it contains a decision a human would find surprising; for other plans, approval is waived. OMC's `pending approval` stop is not a substitute: only `plan`, `ralplan` and `deep-interview` stop for approval, not `execute` or `autopilot`. Marking a PR ready and merging stay the user's.
+5. **An AskUserQuestion option counts as approval,** recorded by quoting the option label; typed approval is quoted as typed. With `--interactive`, OMC's plan skill takes approval through that prompt and says never to ask for it in plain text (`skills/plan/SKILL.md:128,166`).
 6. **The dead "in the pipeline list" reference goes;** a plan that changes no code still marks its test plan `skipped:` with the reason.
-7. **Edge cases:** only "leave an unhandled edge case out and say why in the spec" stays. `skills/minimal-code-discipline/SKILL.md:30,56` already asks whether code needs to exist and rejects speculative generality.
-8. **Tests:** the linter clause and the `Not tested, and why` list stay. "Drop a test that repeats the code line by line" goes: `skills/tdd/SKILL.md:20` calls such a test "a mirror, not a check".
-9. **Off-plan work:** only the `out of scope:` label stays. OMC review's intent axis already reports missing requirements and behaviour nobody asked for (`skills/review/SKILL.md:36`).
-10. **A repo's own CLAUDE.md may say its PRs open ready.** In that repo the line stands for the user's decision to mark them ready.
-11. **Skill listing budget:** `config/settings.fragment.json` sets `SLASH_COMMAND_TOOL_CHAR_BUDGET` to `45000`. The skill listing measured 39,825 characters against the 30,000-character budget Claude Code applied; a headless run with this value showed no "Skill listing over budget" warning, and the margin leaves room for a few new skills.
+7. **Edge cases and tests stay as ADR-0013 decided.** `skills/minimal-code-discipline/SKILL.md:30,56` asks whether code needs to exist but gives no criterion for edge cases, and `skills/tdd/SKILL.md:20` rejects only expected values copied from the implementation, not tests that repeat the code line by line (literal paths, fixed command lists).
+8. **Off-plan work stays an `out of scope:` finding in review and verify.** OMC review's intent axis reports missing requirements and behaviour nobody asked for (`skills/review/SKILL.md:36`), but review is not guaranteed to run (decision 1).
+9. **A repo's own CLAUDE.md may say its PRs open ready.** In that repo the line stands for the user's decision to mark them ready.
+10. **Skill listing budget:** `config/settings.fragment.json` sets `SLASH_COMMAND_TOOL_CHAR_BUDGET` to `45000`. The skill listing measured 39,825 characters against the 30,000-character budget Claude Code applied; a headless run with this value showed no "Skill listing over budget" warning, and the margin leaves room for a few new skills.
 
 ## Consequences
 
