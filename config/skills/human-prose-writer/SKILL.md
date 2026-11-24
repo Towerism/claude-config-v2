@@ -42,7 +42,7 @@ The loop below is self-contained. A cold reader with every rule says what is wro
 
 ## The rules
 
-Each rule comes with the reason the user gave for it. They pull against each other in places, and each rule says where its limit is. Writing is nuanced, so when two rules seem to conflict, the reader from step 1 decides.
+Each rule comes with the reason the user gave for it, and the reason is the part to apply. A list of things to avoid can't name every case, and the reasons are what let you judge the cases it doesn't name. When following a rule's wording would defeat its reason, for example when dodging a banned pattern makes a sentence stranger than the pattern, follow the reason. Why, in the user's words: "the WHY is what's important, because that's how you form an approximation of nuance." The rules pull against each other in places, and each rule says where its limit is. Writing is nuanced, so when two rules seem to conflict, the reader from step 1 decides.
 
 ### What to say
 
@@ -58,7 +58,7 @@ Each rule comes with the reason the user gave for it. They pull against each oth
 
 **Leave out precision the reader can't use.** A tie of 0.1%, which table sets which value, every caveat in full: detail the reader won't act on turns an explanation into a spec, and tells the reader you think they need everything spelled out. Say the gist in plain words and link to the details. When you cut a caveat, keep its strength in the gist ("treat it as a best guess"), so the shorter claim is no stronger than the source.
 
-**Describe each option by the job it's for.** When a text covers tiers, levels or options, frame each one by the case it fits and what it does well. Don't measure the smaller options by what they lack next to the biggest one, as if the biggest were the real thing and the rest were cut-down copies ("what the cheaper levels give up", "a full run"). Watch the opening and the headings, since they set the frame for everything after them. Why, in the user's words: framing the top option as the one that counts pushes readers to believe anything less isn't worth as much. It discourages using the thing at all unless the reader is ready to pay for the top option, which defeats the reason the other options exist.
+**Describe each option by the job it's for.** When a text covers tiers, levels or options, frame each one by the case it fits and what it does well. Don't measure the smaller options by what they lack next to the biggest one, as if the biggest were the real thing and the rest were cut-down copies ("what the cheaper levels give up", "a full run"). Watch the opening and the headings, since they set the frame for everything after them. Describe what each option is good at in loose terms, and leave hard thresholds ("a PR that changes at most one thing") to the rule that picks a default. Thresholds make the options "feel more boxed in than they really are", in the user's words, when the reader can use any option for any case. Why, in the user's words: framing the top option as the one that counts pushes readers to believe anything less isn't worth as much. It discourages using the thing at all unless the reader is ready to pay for the top option, which defeats the reason the other options exist.
 
 **Leave out things the reader never saw.** For example, an earlier private version of the work, or what was cut from it. A reference to something only the author has seen is noise.
 
