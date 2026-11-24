@@ -7,6 +7,12 @@
       "bindings": {
         "ctrl+p": "agents:togglePin"
       }
+    },
+    {
+      "context": "Global",
+      "bindings": {
+        "ctrl+x t": "app:toggleTodos"
+      }
     }
   ]
 }
