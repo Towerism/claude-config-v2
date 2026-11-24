@@ -1,6 +1,6 @@
 # ADR-0014: One issue-lifecycle skill that pairs work to an issue and closes it
 
-**Status:** Accepted by the owner on 2026-11-12 (no issue: the owner waived the lifecycle for this change). Supersedes ADR-0006 decisions 3-5 and its "Sentences left to others" table. Amends ADR-0001, ADR-0003, ADR-0010, ADR-0011, ADR-0012 and ADR-0013.
+**Status:** Accepted by the owner on 2026-11-12 (no issue: the owner waived the lifecycle for this change). Supersedes ADR-0006 decisions 3-5 and its "Sentences left to others" table. Amends ADR-0001, ADR-0003, ADR-0010, ADR-0011, ADR-0012 and ADR-0013. Amended 2026-11-24 by ADR-0017: decision 5's approval may also be an AskUserQuestion option, quoted by its label.
 
 ## Context
 

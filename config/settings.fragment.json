@@ -1,5 +1,5 @@
 {
-  "env": { "OMC_GIT_GUARDRAILS": "0" },
+  "env": { "OMC_GIT_GUARDRAILS": "0", "SLASH_COMMAND_TOOL_CHAR_BUDGET": "45000" },
   "permissions": { "allow": ["Edit({memory_dir}/*.md)", "Edit({memory_dir}/skills/**/*.md)"] },
   "hooks": {
     "SessionStart": [

@@ -1,6 +1,6 @@
 # ADR-0013: Least own code wins, weigh each edge case, and test real logic only
 
-**Status:** Accepted by the owner on 2026-11-10, issue #64. Amends ADR-0011 (decision 4). Amended 2026-11-12 by ADR-0014: `spec-check` is gone; the `Not tested, and why` list stays text only.
+**Status:** Accepted by the owner on 2026-11-10, issue #64. Amends ADR-0011 (decision 4). Amended 2026-11-12 by ADR-0014: `spec-check` is gone; the `Not tested, and why` list stays text only. Amended 2026-11-24 by ADR-0017: decision 2 keeps only "say why in the spec", and decision 3 drops "repeat the code line by line", both covered by OMC's own skills.
 
 ## Context
 
