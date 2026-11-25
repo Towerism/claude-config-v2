@@ -1,15 +1,15 @@
 ---
 name: session-handoff
-description: Hand an OMC workflow off to a fresh session at a checkpoint (spec written, plan approved, execute done) or when a hook reports context past the handoff limit. Writes a handoff note and ends the turn; the handoff_stop hook then types /clear and a prompt naming the note into the session's tmux pane, so the fresh session continues with no keystroke. Use at those checkpoints only. Not for sessions outside tmux, nested claude -p runs, or while ralph or autopilot runs.
+description: Hand an OMC workflow off to a fresh session at a checkpoint (spec written, plan approved, execute done) or when a hook reports context past the handoff limit. Writes a handoff note and ends the turn; the handoff_stop hook then types /clear and a prompt naming the note into the session's tmux pane, or starts a new background job with that prompt when the session is a `claude --bg` job, so the fresh session continues with no keystroke. Use at those checkpoints only. Not for other sessions outside tmux, nested claude -p runs, or while ralph or autopilot runs.
 ---
 
 # Session handoff
 
-A handoff replaces autocompaction with a clean break: this session writes a note, ends its turn, and the `handoff_stop` hook clears the session and types a prompt that tells the fresh session to read the note and run its next skill. Work through the steps in order; stop at the first one that says not to hand off, and carry on with the work.
+A handoff replaces autocompaction with a clean break: this session writes a note, ends its turn, and the `handoff_stop` hook clears the session and types a prompt that tells the fresh session to read the note and run its next skill. In a background job it starts a new background job with that prompt instead. Work through the steps in order; stop at the first one that says not to hand off, and carry on with the work.
 
 ## Steps
 
-1. **Check that a handoff can complete.** Run `echo "pane=${TMUX_PANE-} entrypoint=${CLAUDE_CODE_ENTRYPOINT-}"`. Hand off only when it prints a pane id (like `pane=%3`) and `entrypoint=cli`. Why: the hook types `/clear` into that pane, and only in an interactive session; elsewhere nothing would clear the session and it would just stop. Background jobs also report `cli`, and their empty pane is what rules them out. Done when both values are printed, or you have decided not to hand off and continued the work.
+1. **Check that a handoff can complete.** Run `echo "pane=${TMUX_PANE-} job=${CLAUDE_JOB_DIR:+yes} entrypoint=${CLAUDE_CODE_ENTRYPOINT-}"`. Hand off only when it prints `entrypoint=cli` and either a pane id (like `pane=%3`) or `job=yes`. Why: the hook types `/clear` into that pane, or, in a `claude --bg` job, starts a new background job; anywhere else nothing would start the fresh session and this one would just stop. Done when the values are printed, or you have decided not to hand off and continued the work.
 
 2. **Check that no OMC run in this session would be lost.** Load the deferred tool with `ToolSearch("select:mcp__plugin_oh-my-claudecode_t__state_list_active")`, then call it with `session_id: "${CLAUDE_SESSION_ID}"`. Why the argument: without it the tool lists active modes across every session in the project, so another or a stale session's ralph would silently stop this handoff. If the tool is unavailable, an OMC continuation reminder in this turn is the signal instead.
    - ralph, autopilot, team or ultrapilot active: do not hand off. At a context-limit block, say in one line that the limit was reached inside that run, and continue. Why: OMC binds these runs to the session id, and ralph keeps its stories and feedback baseline per session, so a fresh session would start it over and lose the stories already passed.

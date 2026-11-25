@@ -3,12 +3,15 @@
 When the session has written its handoff note (`.omc/handoffs/<session id>.md`, per the
 session-handoff skill), type `/clear` and then a prompt naming the note into the session's tmux
 pane, once per note. Claude Code has no hook output that clears a session, so the keys are typed;
-a detached sender waits for the turn to end first. Without a note, block one stop per session once
-context use passes the handoff limit, telling the model to load the skill.
+a detached sender waits for the turn to end first. A background job (`claude --bg`: `CLAUDE_JOB_DIR`
+set, no pane) has nothing to type into, so it gets a new background job with that prompt instead.
+Without a note, block one stop per session once context use passes the handoff limit, telling the
+model to load the skill.
 
 Acts only in an interactive session (`CLAUDE_CODE_ENTRYPOINT=cli`; a nested `claude -p` reports
-`sdk-cli`) inside a tmux pane, with tmux on PATH. Knows nothing about OMC stages or modes: the
-skill decides when to hand off. Prints only that block decision and always exits 0.
+`sdk-cli`) inside a tmux pane with tmux on PATH, or in a background job with `claude` on PATH. Knows
+nothing about OMC stages or modes: the skill decides when to hand off. Prints only that block
+decision and always exits 0.
 """
 
 from __future__ import annotations
@@ -72,8 +75,9 @@ def act(payload: dict, env: dict) -> dict | None:
         return None
     session = payload.get("session_id")
     pane = env.get("TMUX_PANE", "")
-    tmux = shutil.which("tmux", path=env.get("PATH"))
-    if env.get("CLAUDE_CODE_ENTRYPOINT") != "cli" or not PANE.fullmatch(pane) or not tmux:
+    tmux = PANE.fullmatch(pane) and shutil.which("tmux", path=env.get("PATH"))
+    claude = not tmux and env.get("CLAUDE_JOB_DIR") and shutil.which("claude", path=env.get("PATH"))
+    if env.get("CLAUDE_CODE_ENTRYPOINT") != "cli" or not (tmux or claude):
         return None
     if not isinstance(session, str) or not SESSION.fullmatch(session):
         return None
@@ -86,9 +90,12 @@ def act(payload: dict, env: dict) -> dict | None:
         # Not gated on stop_hook_active: after our own limit block, the stop that follows the
         # note always carries it.
         open(handoffs / f"{session}.sent", "x").close()  # raises once sent: one send per note
+        prompt = PROMPT.format(note=note)
         subprocess.Popen(
-            ["sh", "-c", SENDER, "sh", tmux, pane, PROMPT.format(note=note), str(CLEAR_DELAY), str(PROMPT_DELAY)],
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
+            ["sh", "-c", SENDER, "sh", tmux, pane, prompt, str(CLEAR_DELAY), str(PROMPT_DELAY)] if tmux
+            else [claude, "--bg", prompt],
+            cwd=project, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True,
         )
         return None
     # A block on a re-entrant stop trips Claude Code's override for repeatedly blocked Stop hooks,

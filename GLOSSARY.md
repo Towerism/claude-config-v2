@@ -33,9 +33,9 @@ One entry per term: definition, boundaries, one resolved ambiguity. Write here t
 - Resolved ambiguity: ADR-0006 amends ADR-0001's gap list; approving the spec, marking a PR ready and merging, each on the user's word, are the only fixed rules (ADR-0008).
 
 ## Handoff note
-- Definition: the file `.omc/handoffs/<session id>.md` a session writes at a stage boundary or past the context limit, following the `session-handoff` skill (ADR-0019). Once it exists, `handoff_stop.py` types `/clear` and a prompt naming it into the session's tmux pane, once per note.
-- Boundary: written only in an interactive session inside tmux, and never while ralph or autopilot runs. The fresh session reads it because the prompt names it; nothing injects it.
-- Avoid: "handoff" alone for the file (a handoff is the whole clear-and-continue step); the stage files OMC's `team` skill writes to `.omc/handoffs/` are a different thing in the same folder.
+- Definition: the file `.omc/handoffs/<session id>.md` a session writes at a stage boundary or past the context limit, following the `session-handoff` skill (ADR-0019). Once it exists, `handoff_stop.py` types `/clear` and a prompt naming it into the session's tmux pane, or in a `claude --bg` job starts a new background job with that prompt, once per note.
+- Boundary: written only in an interactive session inside tmux or in a background job, and never while ralph or autopilot runs. The fresh session reads it because the prompt names it; nothing injects it.
+- Avoid: "handoff" alone for the file (a handoff is the whole step from this session to the fresh one); the stage files OMC's `team` skill writes to `.omc/handoffs/` are a different thing in the same folder.
 
 ## Host profile
 - Definition: `hosts/<name>.json`, naming the skills, hooks, plugins, marketplaces and `defaultTracker` one machine gets (ADR-0002).
