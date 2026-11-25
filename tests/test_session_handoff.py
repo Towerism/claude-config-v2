@@ -20,6 +20,7 @@ from tests.conftest import ROOT
 HOOK = ROOT / "config" / "hooks" / "handoff_stop.py"
 SID = "0b1e2f3a-4c5d-4e6f-8a9b-0c1d2e3f4a5b"
 PANE = "%7"
+NO_TOOLS = "/nonexistent-bin"  # a PATH with no tmux or claude; CI images ship tmux in /usr/bin
 
 # Runs the hook's main() as its __main__ block does, with the sender's delays at zero.
 DRIVER = """
@@ -46,6 +47,10 @@ def env(tmp_path):
     tmux = bin_dir / "tmux"
     tmux.write_text(f'#!/bin/sh\nprintf "%s\\n" "$*" >> {log}\n')
     tmux.chmod(0o755)
+    claude_log = tmp_path / "claude.log"
+    claude = bin_dir / "claude"
+    claude.write_text(f'#!/bin/sh\nprintf "%s|%s\\n" "$PWD" "$*" >> {claude_log}\necho out; echo err >&2\n')
+    claude.chmod(0o755)
     return {
         "PATH": f"{bin_dir}:/usr/bin:/bin",
         "HOME": os.environ["HOME"],
@@ -55,6 +60,8 @@ def env(tmp_path):
         "OMC_STATE_DIR": str(tmp_path / "omc"),
         "_project": project,
         "_log": log,
+        "_claude_log": claude_log,
+        "_bin": bin_dir,
     }
 
 
@@ -127,7 +134,7 @@ def test_two_stops_for_one_note_send_once(env):
     {"TMUX_PANE": None},
     {"TMUX_PANE": "%7;x"},
     {"TMUX_PANE": "main:0"},
-    {"PATH": "/usr/bin:/bin"},  # no tmux
+    {"PATH": NO_TOOLS},  # no tmux
 ], ids=["sdk-cli", "no-entrypoint", "no-pane", "pane-injection", "pane-name", "no-tmux"])
 def test_nothing_is_sent_outside_an_interactive_tmux_session(env, change):
     note(env)
@@ -255,7 +262,7 @@ def test_a_written_note_sends_instead_of_blocking(env):
     assert len(sent(env)) == 3
 
 
-@pytest.mark.parametrize("change", [{"CLAUDE_CODE_ENTRYPOINT": "sdk-cli"}, {"TMUX_PANE": None}, {"PATH": "/usr/bin:/bin"}],
+@pytest.mark.parametrize("change", [{"CLAUDE_CODE_ENTRYPOINT": "sdk-cli"}, {"TMUX_PANE": None}, {"PATH": NO_TOOLS}],
                          ids=["sdk-cli", "no-pane", "no-tmux"])
 def test_no_block_outside_an_interactive_tmux_session(env, change):
     cache(env, window=200_000, usage=150_000)
@@ -275,4 +282,126 @@ def test_no_block_outside_an_interactive_tmux_session(env, change):
 def test_a_missing_or_malformed_cache_is_silent(env, content):
     if content is not None:
         cache(env, window=200_000, usage=150_000).write_text(content)
+    assert not blocked(run(env, stop()))
+
+
+# Background-job route (issue #103): a `claude --bg` job has CLAUDE_JOB_DIR and no pane, so the
+# hook starts a new background job with the prompt instead of typing into tmux.
+
+def bg(env, **changes):
+    """The env of a background job: no pane, a job dir, then `changes` (None removes a key)."""
+    env.pop("TMUX_PANE")
+    env["CLAUDE_JOB_DIR"] = str(env["_project"].parent / "job")
+    for key, value in changes.items():
+        if value is None:
+            env.pop(key, None)
+        else:
+            env[key] = value
+    return env
+
+
+def jobs(env, lines=1, wait=5.0):
+    """The `claude` calls the hook made, as (cwd, args), once there are `lines` of them (or the wait ran out)."""
+    log = env["_claude_log"]
+    deadline = time.monotonic() + wait
+    while time.monotonic() < deadline and not (log.exists() and len(log.read_text().splitlines()) >= lines):
+        time.sleep(0.05)
+    return [tuple(line.split("|", 1)) for line in log.read_text().splitlines()] if log.exists() else []
+
+
+def no_job(env):
+    time.sleep(0.5)  # long enough for a detached launch to have logged
+    return not env["_claude_log"].exists()
+
+
+def test_a_note_in_a_background_job_starts_a_new_background_job_naming_the_note(env):
+    path = note(bg(env))
+    assert run(env, stop()) == (0, b"", b"")
+    [(cwd, args)] = jobs(env)
+    assert pathlib.Path(cwd).resolve() == env["_project"].resolve()
+    assert args.startswith("--bg Read ")
+    assert str(path) in args
+    assert (path.parent / f"{SID}.sent").exists()
+    assert nothing_sent(env)
+
+
+def test_two_stops_for_one_note_start_one_background_job(env):
+    note(bg(env))
+    run(env, stop())
+    run(env, stop())
+    time.sleep(0.5)
+    assert len(jobs(env)) == 1
+
+
+def test_the_background_launch_ignores_stop_hook_active(env):
+    note(bg(env))
+    run(env, stop(stop_hook_active=True))
+    assert len(jobs(env)) == 1
+
+
+def test_tmux_wins_when_a_session_has_both_a_pane_and_a_job_dir(env):
+    env["CLAUDE_JOB_DIR"] = str(env["_project"].parent / "job")
+    note(env)
+    run(env, stop())
+    assert len(sent(env)) == 3
+    assert no_job(env)
+
+
+@pytest.mark.parametrize("change", [
+    {"TMUX_PANE": "%7;x"},
+    {"TMUX_PANE": ""},
+], ids=["invalid-pane", "empty-pane"])
+def test_a_job_with_an_unusable_pane_starts_a_background_job(env, change):
+    note(bg(env, **change))
+    run(env, stop())
+    assert len(jobs(env)) == 1
+
+
+def test_a_job_without_tmux_on_path_starts_a_background_job(env):
+    bin_dir = env["_bin"]
+    (bin_dir / "tmux").unlink()
+    note(bg(env))
+    run(env, stop())
+    assert len(jobs(env)) == 1
+
+
+@pytest.mark.parametrize("change", [
+    {"CLAUDE_CODE_ENTRYPOINT": "sdk-cli"},
+    {"CLAUDE_CODE_ENTRYPOINT": None},
+    {"CLAUDE_JOB_DIR": None},
+    {"CLAUDE_JOB_DIR": ""},
+    {"PATH": NO_TOOLS},  # no claude
+], ids=["sdk-cli", "no-entrypoint", "no-job-dir", "empty-job-dir", "no-claude"])
+def test_nothing_is_started_outside_an_interactive_background_job(env, change):
+    note(bg(env, **change))
+    assert run(env, stop()) == (0, b"", b"")
+    assert no_job(env)
+    assert nothing_sent(env)
+
+
+@pytest.mark.parametrize("sid", ["../escape", "a/b", None])
+def test_an_invalid_session_id_starts_no_background_job(env, sid):
+    note(bg(env))
+    assert run(env, stop(session_id=sid)) == (0, b"", b"")
+    assert no_job(env)
+    assert nothing_sent(env)
+
+
+def test_no_note_text_reaches_the_background_job(env):
+    path = note(bg(env))
+    path.write_text("!rm -rf ~\n/oh-my-claudecode:cancel\n")
+    run(env, stop())
+    assert not any("rm -rf" in args or "cancel" in args for _, args in jobs(env))
+
+
+def test_the_limit_blocks_once_in_a_background_job(env):
+    cache(bg(env), window=200_000, usage=150_000)
+    assert blocked(run(env, stop()))
+    assert not blocked(run(env, stop()))
+
+
+@pytest.mark.parametrize("change", [{"CLAUDE_CODE_ENTRYPOINT": "sdk-cli"}, {"PATH": NO_TOOLS}],
+                         ids=["sdk-cli", "no-claude"])
+def test_no_block_in_a_background_job_that_cannot_hand_off(env, change):
+    cache(bg(env, **change), window=200_000, usage=150_000)
     assert not blocked(run(env, stop()))
