@@ -7,7 +7,7 @@ V1 (`claude-config`) built its own pipeline from 24 skills, overlays and three h
 ## Design philosophies
 
 1. **Two machines are one JSON file apart.** A host profile in `hosts/` selects skills, hooks and plugins. The personal and work profiles differ only in `name` and `defaultTracker` (a test enforces it).
-2. **Skills have zero dependencies.** No third-party packages and nothing to install: a skill is markdown, plus standard-library Python under `scripts/` where determinism matters (no skill ships a script today), so a new machine needs only the tracker's CLI and `python3`. Each skill is self-contained. Plumbing (`tools/`, the hooks) may use whatever it needs to keep the repo lean; today it needs only Python 3.11+. See [ADR-0003](docs/adr/0003-skills-zero-dependency.md).
+2. **Skills have zero dependencies.** No third-party packages and nothing to install: a skill is markdown, plus standard-library Python under `scripts/` where determinism matters (no skill ships a script today), so a new machine needs only the tracker's CLI and `python3`. Each skill is self-contained. Plumbing (`tools/`, the hooks) may use whatever it needs to keep the repo lean; today it needs only Python 3.11+, and the hooks also run under Python 3.9, the `python3` macOS ships, which a non-interactive SSH session finds first. See [ADR-0003](docs/adr/0003-skills-zero-dependency.md).
 
 ## What is here
 

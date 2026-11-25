@@ -34,5 +34,10 @@ A review of the rules against OMC 5.8.6 found more rules that restate OMC's own 
 ## Consequences
 
 - Nothing in the rules asks for review and verify before work is reported done; that rests on the OMC workflow in use.
-- The `spec-test-plan` gate and `GLOSSARY.md` still mention the pipeline list; a follow-up change for #90 handles them.
 - Every session pays for the larger skill listing in context.
+
+## Follow-up (second change for #90)
+
+- `GLOSSARY.md` and the `spec-test-plan` gate no longer mention the pipeline list.
+- `promote-skill-to-config` step 7 still asks for a reviewer agent instead of running `/oh-my-claudecode:review`. OMC 5.8.6 review states "Separate lanes: the reviewer must not be the author's same active context" but also "A small diff stays one pass" without saying who runs that pass, so on a one- or two-file port it may run in the author's own context. A reviewer agent given only the diff and the repo's rules starts without the author's conclusions, and the session stays free to pick which reviewer.
+- **The hooks support Python 3.9.** macOS ships `/usr/bin/python3` as 3.9, and a non-interactive SSH session finds it first. All three hooks failed at import there, with a `TypeError` on an `X | None` annotation, and exited 1, which breaks the hook contract. Each hook now starts with `from __future__ import annotations`, so annotations are not evaluated; that was their only 3.10+ syntax. A test runs each hook under 3.9 where one is installed, as on macOS; CI skips it, because setup-python offers no 3.9 for the Ubuntu 26.04 runner. The rest of the plumbing still needs 3.11+.

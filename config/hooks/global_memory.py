@@ -71,6 +71,8 @@ path from a fixed PATH, with a fixed argv and environment, ssh in BatchMode, and
 run programs overridden. Always exits 0 and writes nothing to stderr.
 """
 
+from __future__ import annotations
+
 import contextlib
 import fcntl
 import json

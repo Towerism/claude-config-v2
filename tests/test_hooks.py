@@ -6,6 +6,7 @@ import ast
 import json
 import os
 import pathlib
+import shutil
 import stat
 import subprocess
 import sys
@@ -567,12 +568,12 @@ HOST_CONTEXT = (
 MALFORMED = [b"{}", b'{"tool_input": {}}', b'{"tool_name": 1}', b"null", b"", b"{", b"\xff\xfe"]
 
 
-def hook_result(name, stdin, machine):
+def hook_result(name, stdin, machine, python=sys.executable):
     """Exit code, stdout and stderr of a hook fed `stdin`; host_default runs as deployed in `machine`."""
     home, env, _ = machine
     script = home / "hooks" / name if name == "host_default.py" else HOOKS / name
     done = subprocess.run(
-        [sys.executable, "-I", str(script)],
+        [python, "-I", str(script)],
         input=stdin, capture_output=True, env={"PATH": "/usr/bin:/bin", **env}, timeout=10, check=False,
     )
     return done.returncode, done.stdout, done.stderr
@@ -592,6 +593,52 @@ def test_host_default_on_a_list_payload_exits_0_with_no_output(machine):
 def test_an_event_without_tool_input_gives_the_usual_output(name, machine):
     expected = HOST_CONTEXT if name == "host_default.py" else b""
     assert hook_result(name, json.dumps(EVENT_ONLY[name]).encode(), machine) == (0, expected, b"")
+
+
+def python_3_9():
+    """A Python 3.9 interpreter, or None. macOS ships /usr/bin/python3 as 3.9, and a non-interactive
+    SSH session finds it first, so the hooks must run under it. CI has none: setup-python offers no 3.9
+    for its Ubuntu 26.04 runner."""
+    for candidate in (shutil.which("python3.9"), shutil.which("/usr/bin/python3")):
+        version = "import sys; sys.exit(sys.version_info[:2] != (3, 9))"
+        if candidate and subprocess.run([candidate, "-c", version], timeout=10, check=False).returncode == 0:
+            return candidate
+    return None
+
+
+@pytest.mark.parametrize("name", HOOK_NAMES)
+def test_the_hooks_run_under_python_3_9(name, machine):
+    """Covers only the early exits (empty stdin, an event-only payload). Most 3.10+ annotation crashes
+    happen when the module loads, so those paths still catch them."""
+    python = python_3_9()
+    if python is None:
+        pytest.skip("no Python 3.9 here")
+    assert hook_result(name, b"", machine, python) == (0, b"", b"")
+    expected = HOST_CONTEXT if name == "host_default.py" else b""
+    assert hook_result(name, json.dumps(EVENT_ONLY[name]).encode(), machine, python) == (0, expected, b"")
+
+
+@pytest.mark.parametrize("path", sorted(HOOKS.glob("*.py")), ids=lambda p: p.name)
+def test_a_hook_with_a_union_annotation_defers_annotations(path):
+    """Python 3.9 evaluates `X | None` in an annotation at import and raises TypeError, unless the
+    module has `from __future__ import annotations`. CI runs 3.11, so this guards it there."""
+    tree = ast.parse(path.read_text())
+    annotations = [
+        node.annotation if isinstance(node, (ast.arg, ast.AnnAssign)) else node.returns
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.arg, ast.AnnAssign, ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    unions = any(
+        isinstance(part, ast.BinOp) and isinstance(part.op, ast.BitOr)
+        for annotation in annotations if annotation is not None
+        for part in ast.walk(annotation)
+    )
+    deferred = any(
+        isinstance(node, ast.ImportFrom) and node.module == "__future__"
+        and any(alias.name == "annotations" for alias in node.names)
+        for node in tree.body
+    )
+    assert deferred or not unions
 
 
 # Runs a hook's main() as its __main__ block does. `patch` is Python source, run after the
