@@ -26,7 +26,7 @@ claude-config-v2 deploys each `config/skills/<name>/` that a host profile lists 
 
 6. **Dry-run the deploy.** Run `python3 -I tools/cfg.py plan --host work --target "$(mktemp -d)"`. Done when a plan line under `add` ends with `skills/<name>/SKILL.md`. Why: it proves `cfg.py` picks up the folder and every file in it, which the tests do not run.
 
-7. **Get an independent review.** Run `/oh-my-claudecode:review` on the diff, with the repo's rules and without your own conclusions; its reviewer runs in a lane separate from yours, the author's. Check each finding before acting on it. Done when every finding is applied or rejected with a reason. Why: a port keeps the source's body, so reject a body rewrite unless it removes something step 1 should have caught.
+7. **Get an independent review.** Give a reviewer agent the diff and the repo's rules, without your own conclusions. Check each finding before acting on it. Done when every finding is applied or rejected with a reason. Why: a port keeps the source's body, so reject a body rewrite unless it removes something step 1 should have caught.
 
 8. **Open the PR.** Commit with a Conventional Commits subject (`feat(skills): …`), push the branch, and open a draft PR (`gh pr create --draft`) whose body carries `Closes #<n>`. Done when the draft PR is open. Why: marking a PR ready and merging it are the user's decisions.
 
