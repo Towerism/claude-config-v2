@@ -26,6 +26,8 @@ seconds and one 5-second deadline covers the hook. Prints only checked names (th
 tracker and its skill) and fixed words, always exits 0 and writes nothing to stderr.
 """
 
+from __future__ import annotations
+
 import contextlib
 import csv
 import json

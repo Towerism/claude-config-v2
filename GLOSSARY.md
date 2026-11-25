@@ -48,5 +48,5 @@ One entry per term: definition, boundaries, one resolved ambiguity. Write here t
 
 ## Seam list
 - Definition: the per-seam test plan `test-engineer` puts in a spec before it is shown, without writing any file; the `spec-test-plan` gate blocks a spec without one at `deep-interview` and `ralplan` (ADR-0011, ADR-0014).
-- Boundary: sized to the risk, not to a ratio. A spec that changes no code has none and marks the test plan `skipped:` in the pipeline list.
+- Boundary: sized to the risk, not to a ratio. A spec that changes no code has none and marks the test plan `skipped:` with the reason.
 - Resolved ambiguity: approving the spec approves its seams, which are the seams OMC's `tdd` agrees with the user before the first test.

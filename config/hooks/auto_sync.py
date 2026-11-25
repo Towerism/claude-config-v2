@@ -32,6 +32,8 @@ that PATH. Filters named by the repo's own .gitattributes are not overridden; cl
 none. Prints only fixed words, always exits 0 and writes nothing to stderr.
 """
 
+from __future__ import annotations
+
 import contextlib
 import fcntl
 import json

@@ -34,5 +34,10 @@ A review of the rules against OMC 5.8.6 found more rules that restate OMC's own 
 ## Consequences
 
 - Nothing in the rules asks for review and verify before work is reported done; that rests on the OMC workflow in use.
-- The `spec-test-plan` gate and `GLOSSARY.md` still mention the pipeline list; a follow-up change for #90 handles them.
 - Every session pays for the larger skill listing in context.
+
+## Follow-up (second change for #90)
+
+- `GLOSSARY.md` and the `spec-test-plan` gate no longer mention the pipeline list.
+- `promote-skill-to-config` step 7 runs `/oh-my-claudecode:review`, whose reviewer is a separate lane from the author (`skills/review/SKILL.md:41`).
+- **The hooks support Python 3.9.** macOS ships `/usr/bin/python3` as 3.9, and a non-interactive SSH session finds it first. All three hooks failed at import there, with a `TypeError` on an `X | None` annotation, and exited 1, which breaks the hook contract. Each hook now starts with `from __future__ import annotations`, so annotations are not evaluated; that was their only 3.10+ syntax. A test runs each hook under 3.9 where one is installed, as on macOS; CI skips it, because setup-python offers no 3.9 for the Ubuntu 26.04 runner. The rest of the plumbing still needs 3.11+.

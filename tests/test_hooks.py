@@ -6,6 +6,7 @@ import ast
 import json
 import os
 import pathlib
+import shutil
 import stat
 import subprocess
 import sys
@@ -567,12 +568,12 @@ HOST_CONTEXT = (
 MALFORMED = [b"{}", b'{"tool_input": {}}', b'{"tool_name": 1}', b"null", b"", b"{", b"\xff\xfe"]
 
 
-def hook_result(name, stdin, machine):
+def hook_result(name, stdin, machine, python=sys.executable):
     """Exit code, stdout and stderr of a hook fed `stdin`; host_default runs as deployed in `machine`."""
     home, env, _ = machine
     script = home / "hooks" / name if name == "host_default.py" else HOOKS / name
     done = subprocess.run(
-        [sys.executable, "-I", str(script)],
+        [python, "-I", str(script)],
         input=stdin, capture_output=True, env={"PATH": "/usr/bin:/bin", **env}, timeout=10, check=False,
     )
     return done.returncode, done.stdout, done.stderr
@@ -592,6 +593,27 @@ def test_host_default_on_a_list_payload_exits_0_with_no_output(machine):
 def test_an_event_without_tool_input_gives_the_usual_output(name, machine):
     expected = HOST_CONTEXT if name == "host_default.py" else b""
     assert hook_result(name, json.dumps(EVENT_ONLY[name]).encode(), machine) == (0, expected, b"")
+
+
+def python_3_9():
+    """A Python 3.9 interpreter, or None. macOS ships /usr/bin/python3 as 3.9, and a non-interactive
+    SSH session finds it first, so the hooks must run under it. CI has none: setup-python offers no 3.9
+    for its Ubuntu 26.04 runner."""
+    for candidate in (shutil.which("python3.9"), shutil.which("/usr/bin/python3")):
+        version = "import sys; sys.exit(sys.version_info[:2] != (3, 9))"
+        if candidate and subprocess.run([candidate, "-c", version], check=False).returncode == 0:
+            return candidate
+    return None
+
+
+@pytest.mark.parametrize("name", HOOK_NAMES)
+def test_the_hooks_run_under_python_3_9(name, machine):
+    python = python_3_9()
+    if python is None:
+        pytest.skip("no Python 3.9 here")
+    assert hook_result(name, b"", machine, python) == (0, b"", b"")
+    expected = HOST_CONTEXT if name == "host_default.py" else b""
+    assert hook_result(name, json.dumps(EVENT_ONLY[name]).encode(), machine, python) == (0, expected, b"")
 
 
 # Runs a hook's main() as its __main__ block does. `patch` is Python source, run after the
