@@ -65,6 +65,10 @@
             "timeout": 30
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [{ "type": "command", "command": "python3 -I {claude_home}/hooks/zsh_guard.py", "timeout": 10 }]
       }
     ],
     "SessionEnd": [

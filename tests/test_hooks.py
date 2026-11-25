@@ -388,7 +388,7 @@ def test_hooks_print_only_checked_values(repo, machine):
 # wiring
 
 FRAGMENT = json.loads((ROOT / "config" / "settings.fragment.json").read_text())
-HOOK_NAMES = ["host_default.py", "auto_sync.py", "global_memory.py"]
+HOOK_NAMES = ["host_default.py", "auto_sync.py", "global_memory.py", "zsh_guard.py"]
 
 
 def entries(event, name):
@@ -423,11 +423,12 @@ def test_the_hooks_are_registered_and_listed():
         ("Read|Write|Edit", hook("global_memory.py", 30, **{"if": f"{tool}({{memory_dir}}/**)"}))
         for tool in ("Read", "Write", "Edit")
     ]
+    assert entries("PreToolUse", "zsh_guard.py") == [("Bash", hook("zsh_guard.py"))]
     assert entries("UserPromptSubmit", "global_memory.py") == [(None, hook("global_memory.py", 120, **{"async": True}))]
     assert sorted(FRAGMENT["hooks"]) == [
         "PostToolUse", "PreToolUse", "SessionEnd", "SessionStart", "SubagentStart", "UserPromptSubmit"
     ]
-    assert sum(len(groups) for groups in FRAGMENT["hooks"].values()) == 8
+    assert sum(len(groups) for groups in FRAGMENT["hooks"].values()) == 9
     for host in ("personal", "work"):
         assert json.loads((ROOT / "hosts" / f"{host}.json").read_text())["hooks"] == HOOK_NAMES
 
@@ -559,6 +560,7 @@ EVENT_ONLY = {
     "host_default.py": {"hook_event_name": "SessionStart"},
     "auto_sync.py": {"hook_event_name": "SessionStart", "source": "startup"},
     "global_memory.py": {"hook_event_name": "SessionStart", "source": "startup"},
+    "zsh_guard.py": {"hook_event_name": "PreToolUse"},
 }
 HOST_CONTEXT = (
     b'{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "Host profile: work. '

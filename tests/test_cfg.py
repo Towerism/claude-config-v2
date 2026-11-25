@@ -165,10 +165,11 @@ def test_deploy_removes_a_hook_the_profile_no_longer_lists(home, tmp_path, monke
     assert not (home / "hooks" / "bash_guard.py").exists()
     settings = json.loads((home / "settings.json").read_text())
     assert "bash_guard.py" not in json.dumps(settings)
-    assert all(g.get("matcher") != "Bash" for g in settings["hooks"]["PreToolUse"])
+    bash_groups = [g for g in settings["hooks"]["PreToolUse"] if g.get("matcher") == "Bash"]
+    assert [h["command"].split("/")[-1] for g in bash_groups for h in g["hooks"]] == ["zsh_guard.py"]
     commands = [h["command"] for groups in settings["hooks"].values() for g in groups for h in g["hooks"]]
     assert sorted(c.split("/")[-1] for c in commands) == [
-        "auto_sync.py", *["global_memory.py"] * 8, "host_default.py", "host_default.py"
+        "auto_sync.py", *["global_memory.py"] * 8, "host_default.py", "host_default.py", "zsh_guard.py"
     ]  # global_memory: session start and end, prompt, two after a write, three before a read or write
 
 
