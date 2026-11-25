@@ -11,7 +11,9 @@
     "spec-scope",
     "human-prose",
     "human-prose-writer",
-    "promote-skill-to-config"
+    "promote-skill-to-config",
+    "memory-store-triage",
+    "skillify-generalized"
   ],
   "marketplaces": {
     "omc": {
