@@ -2,7 +2,7 @@
   "name": "personal",
   "defaultTracker": "github",
   "agents": ["human-prose-editor"],
-  "hooks": ["host_default.py", "auto_sync.py", "global_memory.py", "zsh_guard.py"],
+  "hooks": ["host_default.py", "auto_sync.py", "global_memory.py", "zsh_guard.py", "handoff_stop.py"],
   "skills": [
     "issue-lifecycle",
     "linux-troubleshooting",
@@ -13,7 +13,8 @@
     "human-prose-writer",
     "promote-skill-to-config",
     "memory-store-triage",
-    "skillify-generalized"
+    "skillify-generalized",
+    "session-handoff"
   ],
   "marketplaces": {
     "omc": {

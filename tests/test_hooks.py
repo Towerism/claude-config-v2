@@ -388,7 +388,7 @@ def test_hooks_print_only_checked_values(repo, machine):
 # wiring
 
 FRAGMENT = json.loads((ROOT / "config" / "settings.fragment.json").read_text())
-HOOK_NAMES = ["host_default.py", "auto_sync.py", "global_memory.py", "zsh_guard.py"]
+HOOK_NAMES = ["host_default.py", "auto_sync.py", "global_memory.py", "zsh_guard.py", "handoff_stop.py"]
 
 
 def entries(event, name):
@@ -425,10 +425,12 @@ def test_the_hooks_are_registered_and_listed():
     ]
     assert entries("PreToolUse", "zsh_guard.py") == [("Bash", hook("zsh_guard.py"))]
     assert entries("UserPromptSubmit", "global_memory.py") == [(None, hook("global_memory.py", 120, **{"async": True}))]
+    # Every stop; the hook itself decides whether a handoff is due (ADR-0019).
+    assert entries("Stop", "handoff_stop.py") == [(None, hook("handoff_stop.py"))]
     assert sorted(FRAGMENT["hooks"]) == [
-        "PostToolUse", "PreToolUse", "SessionEnd", "SessionStart", "SubagentStart", "UserPromptSubmit"
+        "PostToolUse", "PreToolUse", "SessionEnd", "SessionStart", "Stop", "SubagentStart", "UserPromptSubmit"
     ]
-    assert sum(len(groups) for groups in FRAGMENT["hooks"].values()) == 9
+    assert sum(len(groups) for groups in FRAGMENT["hooks"].values()) == 10
     for host in ("personal", "work"):
         assert json.loads((ROOT / "hosts" / f"{host}.json").read_text())["hooks"] == HOOK_NAMES
 
@@ -561,6 +563,7 @@ EVENT_ONLY = {
     "auto_sync.py": {"hook_event_name": "SessionStart", "source": "startup"},
     "global_memory.py": {"hook_event_name": "SessionStart", "source": "startup"},
     "zsh_guard.py": {"hook_event_name": "PreToolUse"},
+    "handoff_stop.py": {"hook_event_name": "Stop"},
 }
 HOST_CONTEXT = (
     b'{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "Host profile: work. '
