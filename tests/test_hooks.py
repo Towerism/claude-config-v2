@@ -601,19 +601,44 @@ def python_3_9():
     for its Ubuntu 26.04 runner."""
     for candidate in (shutil.which("python3.9"), shutil.which("/usr/bin/python3")):
         version = "import sys; sys.exit(sys.version_info[:2] != (3, 9))"
-        if candidate and subprocess.run([candidate, "-c", version], check=False).returncode == 0:
+        if candidate and subprocess.run([candidate, "-c", version], timeout=10, check=False).returncode == 0:
             return candidate
     return None
 
 
 @pytest.mark.parametrize("name", HOOK_NAMES)
 def test_the_hooks_run_under_python_3_9(name, machine):
+    """Covers only the early exits (empty stdin, an event-only payload). Most 3.10+ annotation crashes
+    happen when the module loads, so those paths still catch them."""
     python = python_3_9()
     if python is None:
         pytest.skip("no Python 3.9 here")
     assert hook_result(name, b"", machine, python) == (0, b"", b"")
     expected = HOST_CONTEXT if name == "host_default.py" else b""
     assert hook_result(name, json.dumps(EVENT_ONLY[name]).encode(), machine, python) == (0, expected, b"")
+
+
+@pytest.mark.parametrize("path", sorted(HOOKS.glob("*.py")), ids=lambda p: p.name)
+def test_a_hook_with_a_union_annotation_defers_annotations(path):
+    """Python 3.9 evaluates `X | None` in an annotation at import and raises TypeError, unless the
+    module has `from __future__ import annotations`. CI runs 3.11, so this guards it there."""
+    tree = ast.parse(path.read_text())
+    annotations = [
+        node.annotation if isinstance(node, (ast.arg, ast.AnnAssign)) else node.returns
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.arg, ast.AnnAssign, ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    unions = any(
+        isinstance(part, ast.BinOp) and isinstance(part.op, ast.BitOr)
+        for annotation in annotations if annotation is not None
+        for part in ast.walk(annotation)
+    )
+    deferred = any(
+        isinstance(node, ast.ImportFrom) and node.module == "__future__"
+        and any(alias.name == "annotations" for alias in node.names)
+        for node in tree.body
+    )
+    assert deferred or not unions
 
 
 # Runs a hook's main() as its __main__ block does. `patch` is Python source, run after the
