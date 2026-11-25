@@ -76,6 +76,11 @@
         "hooks": [{ "type": "command", "command": "python3 -I {claude_home}/hooks/global_memory.py", "timeout": 60 }]
       }
     ],
+    "Stop": [
+      {
+        "hooks": [{ "type": "command", "command": "python3 -I {claude_home}/hooks/handoff_stop.py", "timeout": 10 }]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [{ "type": "command", "command": "python3 -I {claude_home}/hooks/global_memory.py", "async": true, "timeout": 120 }]
