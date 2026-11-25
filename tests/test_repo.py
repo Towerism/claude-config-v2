@@ -408,8 +408,8 @@ def test_the_global_rules_call_every_shipped_agent_and_only_those():
     assert named == {p.stem for p in AGENTS}
 
 
-def test_issue_and_ticket_bodies_stay_with_human_prose():
-    assert "Issue and ticket bodies follow `human-prose` only" in global_text()
+def test_issue_and_ticket_bodies_are_written_with_human_prose_writer():
+    assert "for issue and ticket bodies it replaces `agent-doc-discipline`" in global_text()
 
 
 def test_readme_names_every_agent():

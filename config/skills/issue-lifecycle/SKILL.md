@@ -18,6 +18,8 @@ The tracker is the one the session-start line "Default issue tracker: …" names
 
 ### 1. Work starts: pair it
 
+A code spike whose only purpose is to move architecture planning forward, and whose code does not need to be tracked anywhere, needs no ticket of its own: skip this event and every later one for it. If the spike's code turns into something that ships, pair it as below. Why, in the user's words (2026-11-05): "a code spike doesn't need its own ticket if the code spike only serves to progress the architecture planning and the code doesn't need to be tracked anywhere".
+
 1. If the request carries a key (`#42`, `GH-42`, `PAY-142`, an issue URL), read that issue. Otherwise search open issues for the request's key words, then all issues, and take a clear title match. With no clear match, create one: an imperative title, and the request as the description.
 2. If it is assigned to someone else, ask the user before going on. Otherwise assign it to yourself.
 3. Jira only: move it to `states.inProgress`, and add it to the active sprint when `addToActiveSprint` is true.

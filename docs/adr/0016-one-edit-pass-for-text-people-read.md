@@ -1,6 +1,6 @@
 # ADR-0016: One edit pass for every text a person reads
 
-**Status:** Accepted 2026-11-22, issue #76. Shipped in PR #77 and being tried in use, although several of its evaluation bars were missed (see Results).
+**Status:** Accepted 2026-11-22, issue #76. Shipped in PR #77 and being tried in use, although several of its evaluation bars were missed (see Results). Amended 2026-11-25 by ADR-0018: `human-prose-writer` now loads before any text people read is written (decision 1), and issue and ticket bodies are written with it (decision 7).
 
 ## Context
 
