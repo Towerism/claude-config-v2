@@ -52,7 +52,7 @@ In every repo the user holds these decisions: approving the final plan before an
 
 ## Reference files
 
-Reading a file is mandatory when a row's moment comes, in this table or a project's, before the action the row covers, and a running skill does not replace the read: the skill's steps and the file's rules both apply. After reading, state in one line which of its rules bear on the next step. Before each new kind of action, scan this table and any project one for matching rows. Why: the files hold lessons whose neglect has caused expensive, hard-to-fix mistakes. Each file holds the rules and their reasons for that moment. They live in `${XDG_DATA_HOME:-~/.local/share}/claude-memory/refs/`, which the global-memory hook syncs when `memory.repo` is set. If a row's file is missing, say so once in your reply and ask before any multi-agent or heavy run.
+Reading a file is mandatory when a row's moment comes, in this table or a project's, before the action the row covers, and a running skill does not replace the read: the skill's steps and the file's rules both apply. After reading, state in one line which of its rules bear on the next step. Before each new kind of action, scan this table and any project one for matching rows. Why: a file's rules reach a task only if the file is read before the action, and a skill's steps were written without them, so a skipped read leaves the mistakes those rules prevent open. Each file holds the rules and their reasons for that moment. They live in `${XDG_DATA_HOME:-~/.local/share}/claude-memory/refs/`, which the global-memory hook syncs when `memory.repo` is set. If a row's file is missing, say so once in your reply and ask before any multi-agent or heavy run.
 
 | When | Read |
 |---|---|
