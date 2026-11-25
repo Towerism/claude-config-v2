@@ -20,6 +20,7 @@ from tests.conftest import ROOT
 HOOK = ROOT / "config" / "hooks" / "handoff_stop.py"
 SID = "0b1e2f3a-4c5d-4e6f-8a9b-0c1d2e3f4a5b"
 PANE = "%7"
+NO_TOOLS = "/nonexistent-bin"  # a PATH with no tmux or claude; CI images ship tmux in /usr/bin
 
 # Runs the hook's main() as its __main__ block does, with the sender's delays at zero.
 DRIVER = """
@@ -133,7 +134,7 @@ def test_two_stops_for_one_note_send_once(env):
     {"TMUX_PANE": None},
     {"TMUX_PANE": "%7;x"},
     {"TMUX_PANE": "main:0"},
-    {"PATH": "/usr/bin:/bin"},  # no tmux
+    {"PATH": NO_TOOLS},  # no tmux
 ], ids=["sdk-cli", "no-entrypoint", "no-pane", "pane-injection", "pane-name", "no-tmux"])
 def test_nothing_is_sent_outside_an_interactive_tmux_session(env, change):
     note(env)
@@ -261,7 +262,7 @@ def test_a_written_note_sends_instead_of_blocking(env):
     assert len(sent(env)) == 3
 
 
-@pytest.mark.parametrize("change", [{"CLAUDE_CODE_ENTRYPOINT": "sdk-cli"}, {"TMUX_PANE": None}, {"PATH": "/usr/bin:/bin"}],
+@pytest.mark.parametrize("change", [{"CLAUDE_CODE_ENTRYPOINT": "sdk-cli"}, {"TMUX_PANE": None}, {"PATH": NO_TOOLS}],
                          ids=["sdk-cli", "no-pane", "no-tmux"])
 def test_no_block_outside_an_interactive_tmux_session(env, change):
     cache(env, window=200_000, usage=150_000)
@@ -369,7 +370,7 @@ def test_a_job_without_tmux_on_path_starts_a_background_job(env):
     {"CLAUDE_CODE_ENTRYPOINT": None},
     {"CLAUDE_JOB_DIR": None},
     {"CLAUDE_JOB_DIR": ""},
-    {"PATH": "/usr/bin:/bin"},  # no claude
+    {"PATH": NO_TOOLS},  # no claude
 ], ids=["sdk-cli", "no-entrypoint", "no-job-dir", "empty-job-dir", "no-claude"])
 def test_nothing_is_started_outside_an_interactive_background_job(env, change):
     note(bg(env, **change))
@@ -399,7 +400,7 @@ def test_the_limit_blocks_once_in_a_background_job(env):
     assert not blocked(run(env, stop()))
 
 
-@pytest.mark.parametrize("change", [{"CLAUDE_CODE_ENTRYPOINT": "sdk-cli"}, {"PATH": "/usr/bin:/bin"}],
+@pytest.mark.parametrize("change", [{"CLAUDE_CODE_ENTRYPOINT": "sdk-cli"}, {"PATH": NO_TOOLS}],
                          ids=["sdk-cli", "no-claude"])
 def test_no_block_in_a_background_job_that_cannot_hand_off(env, change):
     cache(bg(env, **change), window=200_000, usage=150_000)
