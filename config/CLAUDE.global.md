@@ -14,7 +14,7 @@
   - Send each text under `=== n: <kind> | <destination> | <fixed format or none> ===`, its lines numbered `1| `.
   - Apply the returned `@@` ranges bottom-up, each only if its new lines keep every number, name (ignoring case), identifier, link, code span and hedge word (might, may, should, seems, roughly, about, likely, probably, presumably) of the lines it replaces; skip any other range.
   - If the agent is missing, errors, replies `NO-SKILL` or replies out of format, send the texts unedited and report "edit pass skipped: <reason>".
-  - When delegating such text, or any task to `oh-my-claudecode:executor`, `oh-my-claudecode:git-master` or `oh-my-claudecode:writer`, say in the prompt that the subagent loads `human-prose-writer` with the Skill tool before drafting such text and runs the edit pass on text it sends. Why: git-master loaded the edit-pass skill 0 of 2 times without such a line and 2 of 2 with it; executors briefed only for the edit pass loaded `human-prose-writer` 0 of 25 times (2026-11-23 to 2026-11-25).
+  - When delegating such text, or any task to `oh-my-claudecode:executor`, `oh-my-claudecode:git-master` or `oh-my-claudecode:writer`, say in the prompt that the subagent loads `human-prose-writer` with the Skill tool before drafting such text and runs the edit pass on text it sends. Why: a subagent sees only its brief and its own defaults, so a step the brief doesn't name doesn't happen; and the edit pass only polishes finished wording, while the writer's loop is what checks the claims and the shape.
 - `plan` and `spec` are interchangeable unless a workflow specifically requires both. That goes for every instance of the word plan in this block.
 
 ## Rules
