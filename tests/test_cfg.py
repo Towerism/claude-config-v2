@@ -10,6 +10,7 @@ from tests.conftest import ROOT, load
 
 cfg = load(ROOT / "tools" / "cfg.py", "cfg")
 REAL_ORIGIN_URL = cfg.origin_url
+FRAGMENT_ENV = {"OMC_GIT_GUARDRAILS": "0", "SLASH_COMMAND_TOOL_CHAR_BUDGET": "45000"}
 
 
 @pytest.fixture(scope="session")
@@ -342,8 +343,8 @@ def test_deploy_sets_the_fragment_env_and_keeps_other_keys(home, capsys):
     home.mkdir()
     (home / "settings.json").write_text('{"env": {"KEEP": "1"}}\n')
     run(home, "deploy", "--host", "personal", "--yes")
-    assert json.loads((home / "settings.json").read_text())["env"] == {"KEEP": "1", "OMC_GIT_GUARDRAILS": "0"}
-    assert json.loads((home / "claude-config" / "state.json").read_text())["envKeys"] == ["OMC_GIT_GUARDRAILS"]
+    assert json.loads((home / "settings.json").read_text())["env"] == {"KEEP": "1", **FRAGMENT_ENV}
+    assert json.loads((home / "claude-config" / "state.json").read_text())["envKeys"] == list(FRAGMENT_ENV)
     capsys.readouterr()
     run(home, "deploy", "--yes")
     assert "nothing to change" in capsys.readouterr().out
@@ -353,7 +354,7 @@ def test_deploy_overwrites_a_fragment_env_key(home):
     home.mkdir()
     (home / "settings.json").write_text('{"env": {"OMC_GIT_GUARDRAILS": "1"}}\n')
     run(home, "deploy", "--host", "personal", "--yes")
-    assert json.loads((home / "settings.json").read_text())["env"] == {"OMC_GIT_GUARDRAILS": "0"}
+    assert json.loads((home / "settings.json").read_text())["env"] == FRAGMENT_ENV
 
 
 def test_rollback_removes_only_our_env_keys(home):
@@ -378,7 +379,7 @@ def test_deploy_removes_an_env_key_the_fragment_no_longer_sets(home):
     settings["env"].update({"GONE": "1", "KEEP": "1"})
     (home / "settings.json").write_text(json.dumps(settings))
     run(home, "deploy", "--yes")
-    assert json.loads((home / "settings.json").read_text())["env"] == {"KEEP": "1", "OMC_GIT_GUARDRAILS": "0"}
+    assert json.loads((home / "settings.json").read_text())["env"] == {"KEEP": "1", **FRAGMENT_ENV}
 
 
 def test_a_non_object_env_is_reported(home, capsys):

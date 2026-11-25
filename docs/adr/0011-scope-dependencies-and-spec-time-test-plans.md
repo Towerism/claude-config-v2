@@ -1,6 +1,6 @@
 # ADR-0011: Build exactly the spec, keep the complexity to own small, and plan the tests with the spec
 
-**Status:** Accepted by the owner on 2026-11-06, issue #54 (revision 7 of its spec). Amends ADR-0006 (the dropped test-plan rule, and when OMC text counts as coverage) and ADR-0009 (an operating-principles section, a fourth guardrails section, scenarios 14-17 and a context-limit note; those retire with ADR-0009 under ADR-0012). Amended 2026-11-12 by ADR-0014: `spec-check` (decision 3) and `pr-body-check` (decision 5) are gone; the `spec-test-plan` gate is the only test-plan enforcement left.
+**Status:** Accepted by the owner on 2026-11-06, issue #54 (revision 7 of its spec). Amends ADR-0006 (the dropped test-plan rule, and when OMC text counts as coverage) and ADR-0009 (an operating-principles section, a fourth guardrails section, scenarios 14-17 and a context-limit note; those retire with ADR-0009 under ADR-0012). Amended 2026-11-12 by ADR-0014: `spec-check` (decision 3) and `pr-body-check` (decision 5) are gone; the `spec-test-plan` gate is the only test-plan enforcement left. Amended 2026-11-24 by ADR-0017: decision 4's "build every spec item and nothing outside it" and "least complexity to own" are gone, as is decision 5's review-plus-verify rule; decision 5's scope finding stays, labelled `out of scope:`.
 
 ## Context
 
