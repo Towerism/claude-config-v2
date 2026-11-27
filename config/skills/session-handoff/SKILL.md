@@ -31,6 +31,6 @@ A handoff replaces autocompaction with a clean break: this session writes a note
    - the next skill with its arguments;
    - decisions already settled, which the fresh session must not ask about again;
    - decisions still open.
-   Why that path: the hook looks for a note under this session's id and project, and sends once per note. Done when the file exists.
+   Why that path: the hook looks for a note under this session's id and project, and sends once per note. If the session is isolated in a worktree it entered with EnterWorktree, the shared checkout refuses the write: call `ExitWorktree` with `action: "keep"` first, without asking, then write the note at that path. Tell the fresh session in the note to re-enter the worktree with `EnterWorktree(path: ...)`. Why: the user's instruction to hand off covers leaving the worktree, and stopping to ask breaks the handoff's flow (user, 2026-11-27). Done when the file exists.
 
 5. **End the turn right after writing the note**, with one line saying a handoff is under way. Why: the hook acts when the turn ends; more work in this turn delays the clear. Done when the turn has ended.
